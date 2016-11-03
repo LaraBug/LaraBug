@@ -39,3 +39,17 @@ public function report(Exception $e)
     return parent::report($e);
 }
 ```
+
+## Usage
+
+All that is left to do is to define 2 ENV configuration variables.
+
+```
+LB_KEY=
+LB_PROJECT_KEY=
+```
+
+`LB_KEY` is your profile key which authorises your account to the API.
+`LB_PROJECT_KEY` is your project API key which you receive when creating a project.
+
+Get these variables at http://www.larabug.com
