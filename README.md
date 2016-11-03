@@ -8,13 +8,13 @@ You can install the package through Composer.
 ```bash
 composer require larabug/larabug
 ```
-You must install this service provider. Make this the very first provider in list.
+You must install this service provider. Make this the very *first* provider in list.
 ```php
 // config/app.php
 'providers' => [
-    // make this very first provider
-    // so fatal exceptions can be catchable by envelope
+    // Make this very first provider
     LaraBug\ServiceProvider::class,
+    
     //...
     //...
 ];
@@ -25,8 +25,10 @@ Then publish the config and migration file of the package using artisan.
 php artisan vendor:publish --provider="LaraBug\ServiceProvider"
 ```
 
-Add to your Exception Handler's (```/app/Exceptions/Handler.php``` by default) ```report``` method these line:
-```php
+Add to your Exception Handler's (```/app/Exceptions/Handler.php``` by default) ```report``` method these line and add the use line:
+```
+use LaraBug\LaraBug;
+...
 
 public function report(Exception $e)
 {
