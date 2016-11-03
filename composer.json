@@ -1,0 +1,28 @@
+{
+  "name": "larabug/larabug",
+  "description": "Laravel 5 bug notifier",
+  "keywords": [
+    "laravel",
+    "log",
+    "error"
+  ],
+  "require": {
+    "php": ">=7.0.0",
+    "guzzlehttp/guzzle": "~6.0",
+    "predis/predis": "~1.0"
+  },
+  "autoload": {
+    "psr-4": {
+      "LaraBug\\": "src/"
+    }
+  },
+  "license": "MIT",
+  "authors": [
+    {
+      "name": "Dennis Smink",
+      "email": "dennissmink@gmail.com",
+      "homepage": "http://www.dennissmink.nl",
+      "role": "Owner"
+    }
+  ]
+}
