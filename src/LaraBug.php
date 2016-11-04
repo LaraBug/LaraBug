@@ -214,7 +214,8 @@ class LaraBug
             ],
             'form_params' => [
                 'project' => $this->config['project_key'],
-                'exception' => $data
+                'exception' => $data,
+                'user' => auth()->check() ? auth()->user()->toArray() : null
             ]
         ]);
     }
