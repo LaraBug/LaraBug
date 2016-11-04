@@ -208,7 +208,7 @@ class LaraBug
      */
     private function logError(array $data)
     {
-        $this->client->request('POST', base64_decode('aHR0cDovL3d3dy5sYXJhYnVnLmNvbS9hcGkvbG9n'), [
+        $this->client->request('POST', base64_decode('aHR0cHM6Ly93d3cubGFyYWJ1Zy5jb20vYXBpL2xvZw=='), [
             'headers' => [
                 'Authorization'      => 'Bearer ' . $this->config['login_key']
             ],
