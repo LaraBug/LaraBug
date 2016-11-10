@@ -1,35 +1,29 @@
 <?php namespace LaraBug;
 
 use Exception;
-use GuzzleHttp\Client;
+
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Request;
 use Illuminate\Support\Facades\Session;
+use LaraBug\Helpers\Logger;
 
 class LaraBug
 {
     private $config = [];
-
-    private $client;
 
     /**
      * LaraBug constructor.
      */
     public function __construct()
     {
-        $this->client = new Client;
-
-        $this->config['login_key'] = config('larabug.login_key', []);
-        $this->config['project_key'] = config('larabug.project_key', []);
-
         $this->config['except'] = config('larabug.except', []);
         $this->config['count'] = config('larabug.lines_count', 12);
         $this->config['environments'] = config('larabug.environments', []);
         $this->config['sleep'] = config('larabug.sleep', 0);
     }
 
-    public function handle($exception)
+    public function handle($exception, array $additionalData = [])
     {
         try {
             $data = $this->getExceptionData($exception);
@@ -59,8 +53,7 @@ class LaraBug
             /*
              * Send to error
              */
-            return $this->logError($data);
-
+            $this->logError($data, $additionalData);
 
             /*
              * If sleep has been enabled, add the new exception
@@ -94,6 +87,7 @@ class LaraBug
     {
         $data = [];
 
+        $data['enviroment'] = env('APP_ENV');
         $data['host'] = Request::server('SERVER_NAME');
         $data['method'] = Request::method();
         $data['fullUrl'] = Request::fullUrl();
@@ -102,7 +96,7 @@ class LaraBug
         $data['line'] = $exception->getLine();
         $data['file'] = $exception->getFile();
         $data['class'] = get_class($exception);
-        $data['storage'] = array(
+        $data['storage'] = [
             'SERVER' => Request::server(),
             'GET' => Request::query(),
             'POST' => $_POST,
@@ -111,7 +105,7 @@ class LaraBug
             'COOKIE' => Request::cookie(),
             'SESSION' => Request::hasSession() ? Session::all() : [],
             'HEADERS' => Request::header(),
-        );
+        ];
 
         $data['storage'] = array_filter($data['storage']);
 
@@ -200,24 +194,19 @@ class LaraBug
     }
 
     /**
+     * @param array $exception
+     * @param array $additionalData
      *
-     *
-     * @param $data
-     *
-     * @return bool
      */
-    private function logError(array $data)
+    private function logError($exception, array $additionalData = [])
     {
-        $this->client->request('POST', base64_decode('aHR0cHM6Ly93d3cubGFyYWJ1Zy5jb20vYXBpL2xvZw=='), [
-            'headers' => [
-                'Authorization'      => 'Bearer ' . $this->config['login_key']
-            ],
-            'form_params' => [
-                'project' => $this->config['project_key'],
-                'exception' => $data,
-                'user' => auth()->check() ? auth()->user()->toArray() : null
-            ]
-        ]);
+        $logger = (new Logger($exception));
+
+        if(count($additionalData)){
+            $logger->addAdditionalData($additionalData);
+        }
+
+        $logger->send();
     }
 
 
