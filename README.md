@@ -1,3 +1,7 @@
+<p align="center">
+    <a href="https://www.larabug.com" target="_blank"><img width="130" src="https://www.larabug.com/images/icon128x121.png"></a>
+</p>
+
 # LaraBug
 
 Laravel 5 package for logging errors to larabug.com
@@ -52,4 +56,9 @@ LB_PROJECT_KEY=
 `LB_KEY` is your profile key which authorises your account to the API.
 `LB_PROJECT_KEY` is your project API key which you receive when creating a project.
 
-Get these variables at http://www.larabug.com
+Get these variables at [larabug.com](https://www.larabug.com)
+
+
+## License
+
+The larabug package is open source software licensed under the [license MIT](http://opensource.org/licenses/MIT)
