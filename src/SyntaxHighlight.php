@@ -27,14 +27,14 @@ class SyntaxHighlight
                 \d+|
                 \d+(px|em|cm|mm|rem|s|\%)
             )(?!\w)/ix'
-            => '<span style="color:#8CD0D3;">$1</span>',
+            => '<span class="exception-number">$1</span>', // 8CD0D3
 
             // Make the bold assumption that an
             // all uppercase word has a special meaning
             '/(?<!\w|>|\#)(
                 [A-Z_0-9]{2,}
             )(?!\w)/x'
-            => '<span style="color:#FFFFFF">$1</span>',
+            => '<span class="exception-uppercase">$1</span>', // FFFFFF
 
             // Keywords
             '/(?<!\w|\$|\%|\@|>)(
@@ -45,13 +45,13 @@ class SyntaxHighlight
                 published|extends|switch|true|false|null|void|this|self|struct|
                 char|signed|unsigned|short|long
             )(?!\w|=")/ix'
-            => '<span style="color:#DFC47D">$1</span>',
+            => '<span class="exception-keyword">$1</span>', // DFC47D
 
             // PHP/Perl-Style Vars: $var, %var, @var
             '/(?<!\w)(
                 (\$|\%|\@)(\-&gt;|\w)+
             )(?!\w)/ix'
-            => '<span style="color:#CEDF99">$1</span>',
+            => '<span class="exception-var">$1</span>', // CEDF99
         );
 
         // Comments/Strings
@@ -89,9 +89,9 @@ class SyntaxHighlight
 
         // String or Comment?
         if (substr($match, 0, 2) == '//' || substr($match, 0, 2) == '/*' || substr($match, 0, 2) == '##' || substr($match, 0, 7) == '&lt;!--') {
-            $this->tokens[$id] = '<span style="color:#7F9F7F">' . $match . '</span>';
+            $this->tokens[$id] = '<span class="exception-comment">' . $match . '</span>'; // #7F9F7F
         } else {
-            $this->tokens[$id] = '<span style="color:#CC9385">' . $match . '</span>';
+            $this->tokens[$id] = '<span class="exception-string">' . $match . '</span>'; // #CC9385
         }
         return $id;
     } // end replaceId
