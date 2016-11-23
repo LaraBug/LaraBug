@@ -12,7 +12,7 @@ return [
      * This is your project key which you receive when creating a project
      * @ http://www.larabug.com/projects
      */
-    'project_key' => ENV('LB_PROJECT_KEY'),
+    'project_key' => env('LB_PROJECT_KEY'),
 
     /*
      * Environments where LaraBug should report

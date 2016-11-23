@@ -28,6 +28,7 @@ Then publish the config and migration file of the package using artisan.
 ```bash
 php artisan vendor:publish --provider="LaraBug\ServiceProvider"
 ```
+And adjust config file (`config/larabug.php`) with your desired settings.
 
 Add to your Exception Handler's (```/app/Exceptions/Handler.php``` by default) ```report``` method these line and add the use line:
 ```
