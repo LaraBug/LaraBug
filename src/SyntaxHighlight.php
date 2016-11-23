@@ -2,8 +2,7 @@
 
 class SyntaxHighlight
 {
-
-    private $tokens = array();
+    private $tokens = [];
 
     public static function process($s)
     {
@@ -20,7 +19,7 @@ class SyntaxHighlight
         // Workaround for escaped backslashes
         $s = str_replace('\\\\', '\\\\<e>', $s);
 
-        $regexp = array(
+        $regexp = [
             // Numbers (also look for Hex)
             '/(?<!\w)(
                 (0x|\#)[\da-f]+|
@@ -52,7 +51,7 @@ class SyntaxHighlight
                 (\$|\%|\@)(\-&gt;|\w)+
             )(?!\w)/ix'
             => '<span class="exception-var">$1</span>', // CEDF99
-        );
+        ];
 
         // Comments/Strings
         $s = preg_replace_callback('/(
@@ -71,7 +70,7 @@ class SyntaxHighlight
 
         // Delete the "Escaped Backslash Workaround Token" (TM)
         // and replace tabs with four spaces.
-        $s = str_replace(array('<e>', "\t"), array('', '    '), $s);
+        $s = str_replace(['<e>', "\t"], ['', '    '], $s);
 
         return $s;
     } // end highlight
