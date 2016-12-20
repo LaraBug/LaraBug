@@ -63,3 +63,7 @@ Get these variables at [larabug.com](https://www.larabug.com)
 ## License
 
 The larabug package is open source software licensed under the [license MIT](http://opensource.org/licenses/MIT)
+
+## Contributors
+
+[Michael Mand](https://github.com/mikemand) - https://github.com/Cannonb4ll/LaraBug/pull/2
