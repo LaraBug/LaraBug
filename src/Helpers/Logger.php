@@ -1,6 +1,7 @@
 <?php
 namespace LaraBug\Helpers;
 
+use Cartalyst\Sentinel\Laravel\Facades\Sentinel;
 use GuzzleHttp\Client;
 
 class Logger
@@ -44,8 +45,28 @@ class Logger
                 'project' => $this->config['project_key'],
                 'exception' => $this->exception,
                 'additional' => $this->additionalData,
-                'user' => auth()->check() ? auth()->user()->toArray() : null
+                'user' => $this->getUser(),
             ]
         ]);
+    }
+
+    /**
+     * Get the authenticated user.
+     *
+     * Supported authentication systems: Laravel, Sentinel
+     *
+     * @return array|null
+     */
+    private function getUser()
+    {
+        if (auth()->check()) {
+            return auth()->user()->toArray();
+        }
+
+        if (class_exists(\Cartalyst\Sentinel\Sentinel::class) && $user = Sentinel::check()) {
+            return $user->toArray();
+        }
+
+        return null;
     }
 }
