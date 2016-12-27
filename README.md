@@ -30,7 +30,7 @@ php artisan vendor:publish --provider="LaraBug\ServiceProvider"
 ```
 And adjust config file (`config/larabug.php`) with your desired settings.
 
-Add to your Exception Handler's (```/app/Exceptions/Handler.php``` by default) ```report``` method these line and add the use line:
+Add to your Exception Handler's (`/app/Exceptions/Handler.php` by default) `report` method these line and add the use line:
 ```php
 use LaraBug\LaraBug;
 ...
@@ -63,13 +63,13 @@ Get these variables at [larabug.com](https://www.larabug.com)
 
 You can also return a specific view if an error has been generated. This eliminates the ugly 'Whoops something went wrong' page.
 
-Al you have to do is create a view (`500.blade.php`) that you return for your user, recommended in the `views/errors` directory.  
+All you have to do is create a view (`500.blade.php`) that you return for your user, recommended in the `views/errors` directory.
 
 Then in your `App\Exceptions\Handler.php` add the following code inside the `render` method:
 
 ```php
-if((new LaraBug)->errorView()){
-    return (new LaraBug)->errorView();
+if (($errorView = (new LaraBug)->errorView()) !== false) {
+    return $errorView;
 }
 ```
 
@@ -87,8 +87,10 @@ Example:
  */
 public function render($request, Exception $exception)
 {
-    if((new LaraBug)->errorView()){
-        return (new LaraBug)->errorView();
+    ...
+
+    if (($errorView = (new LaraBug)->errorView()) !== false) {
+        return $errorView;
     }
 
     return parent::render($request, $exception);
@@ -101,4 +103,4 @@ The larabug package is open source software licensed under the [license MIT](htt
 
 ## Contributors
 
-[Michael Mand](https://github.com/mikemand) - https://github.com/Cannonb4ll/LaraBug/pull/2
+[Micheal Mand](https://github.com/mikemand) - https://github.com/Cannonb4ll/LaraBug/pull/2
