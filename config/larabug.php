@@ -32,6 +32,11 @@ return [
     'sleep' => 0,
 
     /*
+     * Define your path for your 500 errors.
+     */
+    'errorView' => 'errors.500', // Refers to views/errors/500.blade.php
+
+    /*
      * List of exceptions to skip sending.
      */
     'except' => [

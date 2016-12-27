@@ -2,11 +2,11 @@
 
 use Exception;
 
-use Illuminate\Support\Facades\Cache;
+use LaraBug\Helpers\Logger;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Request;
 use Illuminate\Support\Facades\Session;
-use LaraBug\Helpers\Logger;
 
 class LaraBug
 {
@@ -21,6 +21,7 @@ class LaraBug
         $this->config['count'] = config('larabug.lines_count', 12);
         $this->config['environments'] = config('larabug.environments', []);
         $this->config['sleep'] = config('larabug.sleep', 0);
+        $this->config['errorView'] = config('larabug.errorView', 'errors.500');
     }
 
     public function handle($exception, array $additionalData = [])
@@ -66,6 +67,15 @@ class LaraBug
         } catch (Exception $e) {
             Log::error($e);
         }
+    }
+
+    public function errorView()
+    {
+        if(\Illuminate\Support\Facades\View::exists($this->config['errorView'])){
+            return view($this->config['errorView']);
+        }
+
+        return false;
     }
 
     /**
