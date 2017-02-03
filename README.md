@@ -6,6 +6,8 @@
 
 Laravel 5 package for logging errors to larabug.com
 
+[![Software License](https://img.shields.io/badge/license-MIT-brightgreen.svg?style=flat-square)](LICENSE.md)
+
 ## Installation 
 
 You can install the package through Composer.

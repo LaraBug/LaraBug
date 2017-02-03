@@ -29,7 +29,7 @@ return [
     /*
      * Set the sleep time between duplicate exceptions.
      */
-    'sleep' => 0,
+    'sleep' => 5,
 
     /*
      * Define your path for your 500 errors.

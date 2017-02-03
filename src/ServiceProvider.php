@@ -1,8 +1,17 @@
-<?php namespace LaraBug;
+<?php
 
-class ServiceProvider extends \Illuminate\Support\ServiceProvider
+namespace LaraBug;
+
+use Illuminate\Support\ServiceProvider as BaseServiceProvider;
+
+class ServiceProvider extends BaseServiceProvider
 {
 
+    /**
+     * Indicates if loading of the provider is deferred.
+     *
+     * @var bool
+     */
     protected $defer = false;
 
     /**
@@ -28,12 +37,10 @@ class ServiceProvider extends \Illuminate\Support\ServiceProvider
      */
     public function register()
     {
-        config([
-            'config/larabug.php',
-        ]);
+        $this->mergeConfigFrom(__DIR__ . '/../config/larabug.php', 'larabug');
 
-        $this->app['larabug'] = $this->app->share(function ($app) {
-            return new LaraBug();
+        $this->app->singleton(LaraBug::SERVICE, function ($app) {
+            return new LaraBug;
         });
     }
 }

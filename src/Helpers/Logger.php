@@ -1,8 +1,8 @@
 <?php
 namespace LaraBug\Helpers;
 
-use Cartalyst\Sentinel\Laravel\Facades\Sentinel;
 use GuzzleHttp\Client;
+use Cartalyst\Sentinel\Laravel\Facades\Sentinel;
 
 class Logger
 {

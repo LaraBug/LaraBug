@@ -10,6 +10,8 @@ use Illuminate\Support\Facades\Session;
 
 class LaraBug
 {
+    const SERVICE = 'larabug';
+
     private $config = [];
 
     /**

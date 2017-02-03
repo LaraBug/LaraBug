@@ -1,4 +1,6 @@
-<?php namespace LaraBug;
+<?php
+
+namespace LaraBug;
 
 class Facade extends \Illuminate\Support\Facades\Facade
 {
