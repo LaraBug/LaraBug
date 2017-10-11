@@ -14,6 +14,8 @@ You can install the package through Composer.
 ```bash
 composer require larabug/larabug
 ```
+*In case of Laravel 5.5, you still need to manually register this as the service provider has to be the first provider that needs to be registered.*
+
 You must install this service provider. Make this the very *first* provider in list.
 ```php
 // config/app.php
