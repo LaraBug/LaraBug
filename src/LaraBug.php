@@ -148,6 +148,16 @@ class LaraBug
      */
     public function checkEnvironments()
     {
+        /*
+         * If we did not fill in any environment, log every environment.
+         */
+        if(!count($this->config['environments'])){
+            return true;
+        }
+
+        /*
+         * If we did fill in environments, check the array.
+         */
         if (in_array(env('APP_ENV'), $this->config['environments'])) {
             return true;
         }
