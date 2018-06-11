@@ -59,7 +59,7 @@ class Logger
      */
     private function getUser()
     {
-        if (auth()->check()) {
+        if (function_exists('auth') && auth()->check()) {
             return auth()->user()->toArray();
         }
 
