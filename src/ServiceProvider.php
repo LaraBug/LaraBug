@@ -19,17 +19,21 @@ class ServiceProvider extends BaseServiceProvider
      */
     public function boot()
     {
-        /*
-         * Publish configuration file
-         */
-        $this->publishes([
-            __DIR__ . '/../config/larabug.php' => config_path('larabug.php'),
-        ]);
+        if(function_exists('config_path')) {
+            /*
+             * Publish configuration file
+             */
+            $this->publishes( [
+                __DIR__ . '/../config/larabug.php' => config_path( 'larabug.php' ),
+            ] );
+        }
 
         $this->app['view']->addNamespace('larabug', __DIR__ . '/../resources/views');
 
-        $loader = \Illuminate\Foundation\AliasLoader::getInstance();
-        $loader->alias('LaraBug', 'LaraBug\Facade');
+        if(class_exists(\Illuminate\Foundation\AliasLoader::class)) {
+            $loader = \Illuminate\Foundation\AliasLoader::getInstance();
+            $loader->alias( 'LaraBug', 'LaraBug\Facade' );
+        }
     }
 
     /**
