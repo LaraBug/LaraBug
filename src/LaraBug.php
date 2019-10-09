@@ -3,6 +3,7 @@
 use Exception;
 
 use LaraBug\Helpers\Logger;
+use Illuminate\Support\Facades\App;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Request;
@@ -99,7 +100,7 @@ class LaraBug
     {
         $data = [];
 
-        $data['enviroment'] = env('APP_ENV');
+        $data['enviroment'] = App::environment();
         $data['host'] = Request::server('SERVER_NAME');
         $data['method'] = Request::method();
         $data['fullUrl'] = Request::fullUrl();
@@ -158,7 +159,7 @@ class LaraBug
         /*
          * If we did fill in environments, check the array.
          */
-        if (in_array(env('APP_ENV'), $this->config['environments'])) {
+        if (in_array(App::environment(), $this->config['environments'])) {
             return true;
         }
 
