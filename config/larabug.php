@@ -18,8 +18,7 @@ return [
      * Environments where LaraBug should report
      */
     'environments' => [
-        'production',
-        'local'
+        'production'
     ],
 
     /*
