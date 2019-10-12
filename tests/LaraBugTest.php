@@ -44,19 +44,15 @@ class LaraBugTest extends TestCase
     {
         $this->app['config']['larabug.environments'] = [];
 
-        $this->assertFalse($this->larabug->isSkipEnvironment());
+        $this->assertTrue($this->larabug->isSkipEnvironment());
 
-        $this->app['config']['larabug.environments'] = [
-            'production'
-        ];
-
-        $this->assertFalse($this->larabug->isSkipEnvironment());
-
-        $this->app['config']['larabug.environments'] = [
-            'testing'
-        ];
+        $this->app['config']['larabug.environments'] = ['production'];
 
         $this->assertTrue($this->larabug->isSkipEnvironment());
+
+        $this->app['config']['larabug.environments'] = ['testing'];
+
+        $this->assertFalse($this->larabug->isSkipEnvironment());
     }
 
     /** @test */
@@ -108,6 +104,8 @@ class LaraBugTest extends TestCase
     /** @test */
     public function it_can_report_an_exception_to_larabug()
     {
+        $this->app['config']['larabug.environments'] = ['testing'];
+
         $this->larabug->handle(new Exception('it_can_report_an_exception_to_larabug'));
 
         $this->client->assertRequestsSent(1);
