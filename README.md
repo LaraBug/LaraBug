@@ -3,19 +3,19 @@
 </p>
 
 # LaraBug
-
-Laravel 5.8/6.x package for logging errors to larabug.com
+Laravel 5.8/6.x package for logging errors to [larabug.com](https://www.larabug.com)
 
 [![Software License](https://img.shields.io/badge/license-MIT-brightgreen.svg?style=flat-square)](LICENSE.md)
+[![Latest Version on Packagist](https://img.shields.io/packagist/v/larabug/larabug.svg?style=flat-square)](https://packagist.org/packages/larabug/larabug)
+[![Build Status](https://img.shields.io/travis/larabug/larabug/master.svg?style=flat-square)](https://travis-ci.org/larabug/larabug)
+[![Total Downloads](https://img.shields.io/packagist/dt/larabug/larabug.svg?style=flat-square)](https://packagist.org/packages/larabug/larabug)
 
 ## Installation 
-
 You can install the package through Composer.
 ```bash
 composer require larabug/larabug
 ```
-
-You must install this service provider. Make this the very *first* provider in list.
+After that, add our provider as the very *first* in list
 ```php
 // config/app.php
 'providers' => [
@@ -23,87 +23,47 @@ You must install this service provider. Make this the very *first* provider in l
     LaraBug\ServiceProvider::class,
     
     //...
-    //...
 ];
 ```
-
 Then publish the config and migration file of the package using artisan.
 ```bash
 php artisan vendor:publish --provider="LaraBug\ServiceProvider"
 ```
 And adjust config file (`config/larabug.php`) with your desired settings.
 
-Add to your Exception Handler's (`/app/Exceptions/Handler.php` by default) `report` method these line and add the use line:
-```php
-use LaraBug\LaraBug;
-...
-
-public function report(Exception $e)
-{
-    if ($this->shouldReport($e)) {
-        (new LaraBug)->handle($e);
-    }
-
-    return parent::report($e);
-}
-```
-
-## Usage
-
-All that is left to do is to define 2 ENV configuration variables.
-
+## Configuration variables
+All that is left to do is to define 2 env configuration variables.
 ```
 LB_KEY=
 LB_PROJECT_KEY=
 ```
-
 `LB_KEY` is your profile key which authorises your account to the API.
+
 `LB_PROJECT_KEY` is your project API key which you receive when creating a project.
 
 Get these variables at [larabug.com](https://www.larabug.com)
 
-## Optional
-
-You can also return a specific view if an error has been generated. This eliminates the ugly 'Whoops something went wrong' page.
-
-All you have to do is create a view (`500.blade.php`) that you return for your user, recommended in the `views/errors` directory.
-
-Then in your `App\Exceptions\Handler.php` add the following code inside the `render` method:
-
+## Reporting unhandled exceptions
+You can use LaraBug as a log-channel by adding the following config to the `channels` section in `config/logging.php`:
 ```php
-if (($errorView = (new LaraBug)->errorView()) !== false) {
-    return $errorView;
-}
+'channels' => [
+    // ...
+    'larabug' => [
+        'driver' => 'larabug',
+    ],
+],
 ```
-
-Make sure you add this **before** the `return parent::render($request, $exception);` code.
-
-Example:
-
+After that you have configured the LaraBug channel you can add it to the stack section:
 ```php
-/**
- * Render an exception into an HTTP response.
- *
- * @param  \Illuminate\Http\Request  $request
- * @param  \Exception  $exception
- * @return \Illuminate\Http\Response
- */
-public function render($request, Exception $exception)
-{
-    ...
-
-    if (($errorView = (new LaraBug)->errorView()) !== false) {
-        return $errorView;
-    }
-
-    return parent::render($request, $exception);
-}
+'channels' => [
+    'stack' => [
+        'driver' => 'stack',
+        'channels' => ['single', 'larabug'],
+    ],
+    //...
+],
 ```
-
 ## License
-
 The larabug package is open source software licensed under the [license MIT](http://opensource.org/licenses/MIT)
-
 ## Contributors
-
 [Micheal Mand](https://github.com/mikemand) - https://github.com/Cannonb4ll/LaraBug/pull/2

@@ -3,10 +3,10 @@
 namespace LaraBug;
 
 use Illuminate\Support\ServiceProvider as BaseServiceProvider;
+use Monolog\Logger;
 
 class ServiceProvider extends BaseServiceProvider
 {
-
     /**
      * Indicates if loading of the provider is deferred.
      *
@@ -19,20 +19,20 @@ class ServiceProvider extends BaseServiceProvider
      */
     public function boot()
     {
-        if(function_exists('config_path')) {
+        if (function_exists('config_path')) {
             /*
              * Publish configuration file
              */
-            $this->publishes( [
-                __DIR__ . '/../config/larabug.php' => config_path( 'larabug.php' ),
-            ] );
+            $this->publishes([
+                __DIR__ . '/../config/larabug.php' => config_path('larabug.php'),
+            ]);
         }
 
         $this->app['view']->addNamespace('larabug', __DIR__ . '/../resources/views');
 
-        if(class_exists(\Illuminate\Foundation\AliasLoader::class)) {
+        if (class_exists(\Illuminate\Foundation\AliasLoader::class)) {
             $loader = \Illuminate\Foundation\AliasLoader::getInstance();
-            $loader->alias( 'LaraBug', 'LaraBug\Facade' );
+            $loader->alias('LaraBug', 'LaraBug\Facade');
         }
     }
 
@@ -43,8 +43,21 @@ class ServiceProvider extends BaseServiceProvider
     {
         $this->mergeConfigFrom(__DIR__ . '/../config/larabug.php', 'larabug');
 
-        $this->app->singleton(LaraBug::SERVICE, function ($app) {
-            return new LaraBug;
+        $this->app->singleton('larabug', function ($app) {
+            return new LaraBug(new \LaraBug\Http\Client(
+                config('larabug.login_key'),
+                config('larabug.project_key')
+            ));
         });
+
+        if ($this->app['log'] instanceof \Illuminate\Log\LogManager) {
+            $this->app['log']->extend('larabug', function ($app, $config) {
+                $handler = new \LaraBug\Logger\LaraBugHandler(
+                    $app['larabug']
+                );
+
+                return new Logger('larabug', [$handler]);
+            });
+        }
     }
 }
