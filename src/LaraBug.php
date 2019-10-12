@@ -1,103 +1,89 @@
-<?php namespace LaraBug;
+<?php
 
-use Exception;
+namespace LaraBug;
 
-use LaraBug\Helpers\Logger;
+use Illuminate\Contracts\View\Factory;
 use Illuminate\Support\Facades\App;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Request;
 use Illuminate\Support\Facades\Session;
+use Illuminate\Support\Facades\View;
 use Illuminate\Support\Str;
+use LaraBug\Http\Client;
+use Throwable;
 
 class LaraBug
 {
-    const SERVICE = 'larabug';
-
-    private $config = [];
+    /** @var Client */
+    private $client;
 
     /**
-     * LaraBug constructor.
+     * @param Client $client
      */
-    public function __construct()
+    public function __construct(Client $client)
     {
-        $this->config['except'] = config('larabug.except', []);
-        $this->config['count'] = config('larabug.lines_count', 12);
-        $this->config['environments'] = config('larabug.environments', []);
-        $this->config['sleep'] = config('larabug.sleep', 0);
-        $this->config['errorView'] = config('larabug.errorView', 'errors.500');
+        $this->client = $client;
     }
 
-    public function handle($exception, array $additionalData = [])
-    {
-        try {
-            $data = $this->getExceptionData($exception);
-
-            /**
-             * Check if we should skip this exception
-             */
-            if ($this->isSkipException($data['class'])) {
-                return;
-            }
-
-            /*
-             * Check environments
-             */
-            if (!$this->checkEnvironments()) {
-                return;
-            }
-
-            /*
-             * Check if sleep time has been set and
-             * exception is not a duplicate entry
-             */
-            if ($this->config['sleep'] !== 0 && $this->hasSleepingException($data)) {
-                return;
-            }
-
-            /*
-             * Send to error
-             */
-            $this->logError($data, $additionalData);
-
-            /*
-             * If sleep has been enabled, add the new exception
-             */
-            if ($this->config['sleep'] !== 0) {
-                $this->addExceptionToSleep($data);
-            }
-
-            return;
-        } catch (Exception $e) {
-            Log::error($e);
-        }
-    }
-
+    /**
+     * @return bool|Factory|\Illuminate\View\View
+     */
     public function errorView()
     {
-        if(\Illuminate\Support\Facades\View::exists($this->config['errorView'])){
-            return view($this->config['errorView']);
+        if (View::exists($errorView = config('larabug.errorView'))) {
+            return view($errorView);
         }
 
         return false;
     }
 
     /**
-     * @param $exceptionClass
-     *
-     * @return mixed
+     * @param Throwable $exception
      */
-    public function isSkipException($exceptionClass)
+    public function handle(Throwable $exception)
     {
-        return in_array($exceptionClass, $this->config['except']);
+        if ($this->isSkipEnvironment()) {
+            return;
+        }
+
+        $data = $this->getExceptionData($exception);
+
+        if ($this->isSkipException($data['class'])) {
+            return;
+        }
+
+        if ($this->isSleepingException($data)) {
+            return;
+        }
+
+        $this->logError($data);
+
+        if (config('larabug.sleep') !== 0) {
+            $this->addExceptionToSleep($data);
+        }
     }
 
     /**
-     * @param $exception
-     *
+     * @return bool
+     */
+    public function isSkipEnvironment()
+    {
+        if (count(config('larabug.environments')) == 0) {
+            return false;
+        }
+
+        if (in_array(App::environment(), config('larabug.environments'))) {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * @param Throwable $exception
      * @return array
      */
-    private function getExceptionData($exception)
+    public function getExceptionData(Throwable $exception)
     {
         $data = [];
 
@@ -123,7 +109,7 @@ class LaraBug
 
         $data['storage'] = array_filter($data['storage']);
 
-        $count = $this->config['count'];
+        $count = config('larabug.lines_count');
         $lines = file($data['file']);
         $data['exegutor'] = [];
 
@@ -141,55 +127,6 @@ class LaraBug
         }
 
         return $data;
-    }
-
-    /**
-     * checkEnvironments function.
-     *
-     * @return bool
-     */
-    public function checkEnvironments()
-    {
-        /*
-         * If we did not fill in any environment, log every environment.
-         */
-        if(!count($this->config['environments'])){
-            return true;
-        }
-
-        /*
-         * If we did fill in environments, check the array.
-         */
-        if (in_array(App::environment(), $this->config['environments'])) {
-            return true;
-        }
-
-        return false;
-    }
-
-    /**
-     * hasDuplicateEntry function.
-     *
-     * @param array $data
-     *
-     * @return bool
-     */
-    private function hasSleepingException(array $data)
-    {
-        return Cache::has($this->createExceptionString($data));
-    }
-
-    /**
-     * createExceptionString function.
-     * Generate a string that should be unique for these exceptions.
-     *
-     * @param array $data
-     *
-     * @return string
-     */
-    private function createExceptionString(array $data)
-    {
-        return 'larabug.' . Str::slug($data['host'] . '_' . $data['method'] . '_' . $data['exception'] . '_' . $data['line'] . '_' . $data['file'] . '_' . $data['class']);
     }
 
     /**
@@ -218,34 +155,53 @@ class LaraBug
     }
 
     /**
-     * @param array $exception
-     * @param array $additionalData
-     *
-     */
-    private function logError($exception, array $additionalData = [])
-    {
-        $logger = (new Logger($exception));
-
-        if(count($additionalData)){
-            $logger->addAdditionalData($additionalData);
-        }
-
-        $logger->send();
-    }
-
-
-    /**
-     * addExceptionToSleep function.
-     *
-     * @param array $data
-     *
+     * @param $exceptionClass
      * @return bool
      */
-    private function addExceptionToSleep(array $data)
+    public function isSkipException($exceptionClass)
+    {
+        return in_array($exceptionClass, config('larabug.except'));
+    }
+
+    /**
+     * @param array $data
+     * @return bool
+     */
+    public function isSleepingException(array $data)
+    {
+        if (config('larabug.sleep', 0) == 0) {
+            return false;
+        }
+
+        return Cache::has($this->createExceptionString($data));
+    }
+
+    /**
+     * @param array $data
+     * @return string
+     */
+    private function createExceptionString(array $data)
+    {
+        return 'larabug.' . Str::slug($data['host'] . '_' . $data['method'] . '_' . $data['exception'] . '_' . $data['line'] . '_' . $data['file'] . '_' . $data['class']);
+    }
+
+    /**
+     * @param $exception
+     */
+    private function logError($exception)
+    {
+        $this->client->report($exception);
+    }
+
+    /**
+     * @param array $data
+     * @return bool
+     */
+    public function addExceptionToSleep(array $data)
     {
         $exceptionString = $this->createExceptionString($data);
 
-        return Cache::put($exceptionString, $exceptionString, $this->config['sleep']);
+        return Cache::put($exceptionString, $exceptionString, config('larabug.sleep'));
     }
 }
 
