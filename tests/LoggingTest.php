@@ -27,6 +27,9 @@ class LoggingTest extends TestCase
         $this->app['config']['logging.default'] = 'larabug';
         $this->app['config']['larabug.login_key'] = 'login_key';
         $this->app['config']['larabug.project_key'] = 'project_key';
+        $this->app['config']['larabug.environments'] = [
+            'testing'
+        ];
 
         $this->client = new LaraBugClient('login_key', 'project_key');
 
