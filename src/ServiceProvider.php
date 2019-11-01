@@ -45,8 +45,8 @@ class ServiceProvider extends BaseServiceProvider
 
         $this->app->singleton('larabug', function ($app) {
             return new LaraBug(new \LaraBug\Http\Client(
-                config('larabug.login_key'),
-                config('larabug.project_key')
+                config('larabug.login_key', 'login_key'),
+                config('larabug.project_key', 'project_key')
             ));
         });
 

@@ -6,13 +6,13 @@ return [
      * This is your authorization key which you get from your profile.
      * @ http://www.larabug.com
      */
-    'login_key' => env('LB_KEY'),
+    'login_key' => env('LB_KEY', 'LB_KEY'),
 
     /*
      * This is your project key which you receive when creating a project
      * @ http://www.larabug.com/projects
      */
-    'project_key' => env('LB_PROJECT_KEY'),
+    'project_key' => env('LB_PROJECT_KEY', 'LB_PROJECT_KEY'),
 
     /*
      * Environments where LaraBug should report
