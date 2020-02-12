@@ -4,6 +4,8 @@ namespace LaraBug\Logger;
 
 use LaraBug\LaraBug;
 use Monolog\Handler\AbstractProcessingHandler;
+use Monolog\Logger;
+use Throwable;
 
 class LaraBugHandler extends AbstractProcessingHandler
 {
@@ -15,7 +17,7 @@ class LaraBugHandler extends AbstractProcessingHandler
      * @param int $level
      * @param bool $bubble
      */
-    public function __construct(LaraBug $larabug, $level = \Monolog\Logger::ERROR, bool $bubble = true)
+    public function __construct(LaraBug $larabug, $level = Logger::ERROR, bool $bubble = true)
     {
         $this->larabug = $larabug;
 
@@ -27,7 +29,7 @@ class LaraBugHandler extends AbstractProcessingHandler
      */
     protected function write(array $record): void
     {
-        if (isset($record['context']['exception']) && $record['context']['exception'] instanceof \Throwable) {
+        if (isset($record['context']['exception']) && $record['context']['exception'] instanceof Throwable) {
             $this->larabug->handle(
                 $record['context']['exception']
             );
