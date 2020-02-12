@@ -31,7 +31,7 @@
   "extra": {
     "laravel": {
       "providers": [
-        "LaraBug\\LaraBug\\ServiceProvider::class"
+        "LaraBug\\ServiceProvider::class"
       ]
     }
   },
