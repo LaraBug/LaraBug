@@ -15,21 +15,14 @@ You can install the package through Composer.
 ```bash
 composer require larabug/larabug
 ```
-After that, add our provider as the very *first* in list
-```php
-// config/app.php
-'providers' => [
-    // Make this very first provider
-    LaraBug\ServiceProvider::class,
-    
-    //...
-];
-```
+
 Then publish the config and migration file of the package using artisan.
 ```bash
 php artisan vendor:publish --provider="LaraBug\ServiceProvider"
 ```
 And adjust config file (`config/larabug.php`) with your desired settings.
+
+Note: by default only production environments will report errors. To modify this edit your larabug configuration.
 
 ## Configuration variables
 All that is left to do is to define 2 env configuration variables.
