@@ -17,12 +17,20 @@ class LaraBug
     /** @var Client */
     private $client;
 
+    /** @var array */
+    private $blacklist = [];
+
     /**
      * @param Client $client
      */
     public function __construct(Client $client)
     {
         $this->client = $client;
+
+        $this->blacklist = array_map(function($blacklist) {
+            return strtolower($blacklist);
+        }, config('larabug.blacklist', []));
+
     }
 
     /**
@@ -141,7 +149,7 @@ class LaraBug
                 if(is_array($val)) {
                     $variables[$key] = $this->filterVariables($val);
                 }
-                if(in_array($key, config('larabug.blacklist', []))) {
+                if(in_array(strtolower($key), $this->blacklist)) {
                     unset($variables[$key]);
                 }
             });

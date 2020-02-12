@@ -118,14 +118,15 @@ class LaraBugTest extends TestCase
                 'nah' => [
                     'password' => 'testing'
                 ]
-            ]
+            ],
+            'Password' => 'testing'
         ];
 
         $this->assertArrayNotHasKey('password', $this->larabug->filterVariables($data));
         $this->assertArrayHasKey('not_password', $this->larabug->filterVariables($data));
         $this->assertArrayNotHasKey('password', $this->larabug->filterVariables($data)['not_password2']);
         $this->assertArrayNotHasKey('password', $this->larabug->filterVariables($data)['not_password_3']['nah']);
-
+        $this->assertArrayNotHasKey('Password', $this->larabug->filterVariables($data));
     }
 
     /** @test */
