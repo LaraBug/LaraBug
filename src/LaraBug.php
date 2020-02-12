@@ -96,15 +96,16 @@ class LaraBug
         $data['line'] = $exception->getLine();
         $data['file'] = $exception->getFile();
         $data['class'] = get_class($exception);
+        $data['release'] = config('larabug.release', null);
         $data['storage'] = [
-            'SERVER' => Request::server(),
-            'GET' => Request::query(),
-            'POST' => $_POST,
+            'SERVER' => $this->filterVariables(Request::server()),
+            'GET' => $this->filterVariables(Request::query()),
+            'POST' => $this->filterVariables($_POST),
             'FILE' => Request::file(),
-            'OLD' => Request::hasSession() ? Request::old() : [],
-            'COOKIE' => Request::cookie(),
-            'SESSION' => Request::hasSession() ? Session::all() : [],
-            'HEADERS' => Request::header(),
+            'OLD' => $this->filterVariables(Request::hasSession() ? Request::old() : []),
+            'COOKIE' => $this->filterVariables(Request::cookie()),
+            'SESSION' => $this->filterVariables(Request::hasSession() ? Session::all() : []),
+            'HEADERS' => $this->filterVariables(Request::header()),
         ];
 
         $data['storage'] = array_filter($data['storage']);
@@ -127,6 +128,26 @@ class LaraBug
         }
 
         return $data;
+    }
+
+    /**
+     * @param $variables
+     * @return array
+     */
+    public function filterVariables($variables)
+    {
+        if(is_array($variables)) {
+            array_walk($variables, function($val, $key) use(&$variables) {
+                if(is_array($val)) {
+                    $variables[$key] = $this->filterVariables($val);
+                }
+                if(in_array($key, config('larabug.blacklist', []))) {
+                    unset($variables[$key]);
+                }
+            });
+            return $variables;
+        }
+        return [];
     }
 
     /**

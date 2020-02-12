@@ -43,4 +43,16 @@ return [
         'Symfony\Component\HttpKernel\Exception\NotFoundHttpException',
     ],
 
+    /*
+     * Filter out these variables before sending them to larabug
+     */
+    'blacklist' => [
+        'password',
+        'authorization'
+    ],
+
+    /**
+     * Release git hash
+     */
+    'release' => trim(exec('git --git-dir ' . base_path('.git') . ' log --pretty="%h" -n1 HEAD'))
 ];

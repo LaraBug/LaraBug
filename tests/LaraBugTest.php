@@ -4,6 +4,7 @@ namespace LaraBug\Tests;
 
 use Carbon\Carbon;
 use Exception;
+use Illuminate\Support\Facades\Request;
 use LaraBug\LaraBug;
 use LaraBug\Tests\Mocks\LaraBugClient;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
@@ -98,7 +99,33 @@ class LaraBugTest extends TestCase
         $this->assertSame('http://localhost', $data['fullUrl']);
         $this->assertSame('it_can_get_formatted_exception_data', $data['exception']);
 
-        $this->assertCount(11, $data);
+        $this->assertCount(12, $data);
+    }
+
+    /** @test */
+    public function it_filters_the_data_based_on_the_configuration()
+    {
+
+        $this->assertContains('password', $this->app['config']['larabug.blacklist']);
+
+        $data = [
+            'password' => 'testing',
+            'not_password' => 'testing',
+            'not_password2' => [
+                'password' => 'testing'
+            ],
+            'not_password_3' => [
+                'nah' => [
+                    'password' => 'testing'
+                ]
+            ]
+        ];
+
+        $this->assertArrayNotHasKey('password', $this->larabug->filterVariables($data));
+        $this->assertArrayHasKey('not_password', $this->larabug->filterVariables($data));
+        $this->assertArrayNotHasKey('password', $this->larabug->filterVariables($data)['not_password2']);
+        $this->assertArrayNotHasKey('password', $this->larabug->filterVariables($data)['not_password_3']['nah']);
+
     }
 
     /** @test */
