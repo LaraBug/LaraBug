@@ -4,7 +4,6 @@ namespace LaraBug\Tests;
 
 use Carbon\Carbon;
 use Exception;
-use Illuminate\Support\Facades\Request;
 use LaraBug\LaraBug;
 use LaraBug\Tests\Mocks\LaraBugClient;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
