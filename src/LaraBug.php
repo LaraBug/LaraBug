@@ -20,6 +20,9 @@ class LaraBug
     /** @var array */
     private $blacklist = [];
 
+    /** @var null|string */
+    private $lastExceptionId;
+
     /**
      * @param Client $client
      */
@@ -64,12 +67,19 @@ class LaraBug
             return false;
         }
 
-        $this->logError($data);
+        $rawResponse = $this->logError($data);
+
+        $response = json_encode($rawResponse->getBody()->getContents());
+
+        if(isset($response->id)) {
+            $this->setLastExceptionId($response->id);
+        }
 
         if (config('larabug.sleep') !== 0) {
             $this->addExceptionToSleep($data);
         }
-        return true;
+
+        return $rawResponse;
     }
 
     /**
@@ -86,6 +96,24 @@ class LaraBug
         }
 
         return true;
+    }
+
+
+    /**
+     * @param string|null $id
+     */
+    private function setLastExceptionId(?string $id)
+    {
+        $this->lastExceptionId = $id;
+    }
+
+    /**
+     * Get the last exception id given to us by the larabug API
+     * @return string|null
+     */
+    public function getLastExceptionId()
+    {
+        return $this->lastExceptionId;
     }
 
     /**
@@ -220,7 +248,7 @@ class LaraBug
      */
     private function logError($exception)
     {
-        $this->client->report($exception);
+        return $this->client->report($exception);
     }
 
     /**
