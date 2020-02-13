@@ -10,8 +10,6 @@ use Illuminate\Console\Command;
 
 class TestCommand extends Command
 {
-    protected $name = 'larabug:test';
-
     protected $signature = 'larabug:test';
 
     protected $description = 'Generate a test exception and send it to larabug';
