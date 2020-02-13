@@ -51,17 +51,17 @@ class LaraBug
     public function handle(Throwable $exception)
     {
         if ($this->isSkipEnvironment()) {
-            return;
+            return false;
         }
 
         $data = $this->getExceptionData($exception);
 
         if ($this->isSkipException($data['class'])) {
-            return;
+            return false;
         }
 
         if ($this->isSleepingException($data)) {
-            return;
+            return false;
         }
 
         $this->logError($data);
@@ -69,6 +69,7 @@ class LaraBug
         if (config('larabug.sleep') !== 0) {
             $this->addExceptionToSleep($data);
         }
+        return true;
     }
 
     /**

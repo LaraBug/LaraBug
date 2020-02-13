@@ -34,6 +34,10 @@ class ServiceProvider extends BaseServiceProvider
             $loader = \Illuminate\Foundation\AliasLoader::getInstance();
             $loader->alias('LaraBug', 'LaraBug\Facade');
         }
+
+        $this->commands([
+            TestCommand::class
+        ]);
     }
 
     /**
