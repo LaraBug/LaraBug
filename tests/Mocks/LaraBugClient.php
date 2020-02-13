@@ -2,19 +2,27 @@
 
 namespace LaraBug\Tests\Mocks;
 
+use GuzzleHttp\Client;
+use GuzzleHttp\Handler\MockHandler;
+use GuzzleHttp\HandlerStack;
+use GuzzleHttp\Psr7\Response;
 use PHPUnit\Framework\Assert;
 
 class LaraBugClient extends \LaraBug\Http\Client
 {
+    const RESPONSE_ID = 'test';
+
     /** @var array */
     protected $requests = [];
 
     /**
      * @param array $exception
      */
-    public function report($exception): void
+    public function report($exception)
     {
         $this->requests[] = $exception;
+
+        return new Response(200, [], json_encode(['id' => self::RESPONSE_ID]));
     }
 
     /**

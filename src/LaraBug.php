@@ -69,7 +69,11 @@ class LaraBug
 
         $rawResponse = $this->logError($data);
 
-        $response = json_encode($rawResponse->getBody()->getContents());
+        if(!$rawResponse) {
+            return false;
+        }
+
+        $response = json_decode($rawResponse->getBody()->getContents());
 
         if(isset($response->id)) {
             $this->setLastExceptionId($response->id);
@@ -79,7 +83,7 @@ class LaraBug
             $this->addExceptionToSleep($data);
         }
 
-        return $rawResponse;
+        return $response;
     }
 
     /**

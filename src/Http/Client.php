@@ -21,10 +21,11 @@ class Client
      * @param string $login
      * @param string $project
      */
-    public function __construct(string $login, string $project)
+    public function __construct(string $login, string $project, \GuzzleHttp\Client $client = null)
     {
         $this->login = $login;
         $this->project = $project;
+        $this->client = $client;
     }
 
     /**
