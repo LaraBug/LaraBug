@@ -21,10 +21,11 @@ class Client
      * @param string $login
      * @param string $project
      */
-    public function __construct(string $login, string $project)
+    public function __construct(string $login, string $project, \GuzzleHttp\Client $client = null)
     {
         $this->login = $login;
         $this->project = $project;
+        $this->client = $client;
     }
 
     /**
@@ -32,21 +33,17 @@ class Client
      */
     public function report($exception)
     {
-        try {
-            $this->getGuzzleHttpClient()->request('POST', 'https://www.larabug.com/api/log', [
-                'headers' => [
-                    'Authorization' => 'Bearer ' . $this->login
-                ],
-                'form_params' => [
-                    'project' => $this->project,
-                    'exception' => $exception,
-                    'additional' => [],
-                    'user' => $this->getUser(),
-                ]
-            ]);
-        } catch (GuzzleException $e) {
-            //
-        }
+        return $this->getGuzzleHttpClient()->request('POST', 'https://www.larabug.com/api/log', [
+            'headers' => [
+                'Authorization' => 'Bearer ' . $this->login
+            ],
+            'form_params' => [
+                'project' => $this->project,
+                'exception' => $exception,
+                'additional' => [],
+                'user' => $this->getUser(),
+            ]
+        ]);
     }
 
     /**

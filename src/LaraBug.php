@@ -20,6 +20,9 @@ class LaraBug
     /** @var array */
     private $blacklist = [];
 
+    /** @var null|string */
+    private $lastExceptionId;
+
     /**
      * @param Client $client
      */
@@ -51,24 +54,36 @@ class LaraBug
     public function handle(Throwable $exception)
     {
         if ($this->isSkipEnvironment()) {
-            return;
+            return false;
         }
 
         $data = $this->getExceptionData($exception);
 
         if ($this->isSkipException($data['class'])) {
-            return;
+            return false;
         }
 
         if ($this->isSleepingException($data)) {
-            return;
+            return false;
         }
 
-        $this->logError($data);
+        $rawResponse = $this->logError($data);
+
+        if(!$rawResponse) {
+            return false;
+        }
+
+        $response = json_decode($rawResponse->getBody()->getContents());
+
+        if(isset($response->id)) {
+            $this->setLastExceptionId($response->id);
+        }
 
         if (config('larabug.sleep') !== 0) {
             $this->addExceptionToSleep($data);
         }
+
+        return $response;
     }
 
     /**
@@ -85,6 +100,24 @@ class LaraBug
         }
 
         return true;
+    }
+
+
+    /**
+     * @param string|null $id
+     */
+    private function setLastExceptionId(?string $id)
+    {
+        $this->lastExceptionId = $id;
+    }
+
+    /**
+     * Get the last exception id given to us by the larabug API
+     * @return string|null
+     */
+    public function getLastExceptionId()
+    {
+        return $this->lastExceptionId;
     }
 
     /**
@@ -219,7 +252,7 @@ class LaraBug
      */
     private function logError($exception)
     {
-        $this->client->report($exception);
+        return $this->client->report($exception);
     }
 
     /**
