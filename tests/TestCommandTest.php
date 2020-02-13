@@ -73,5 +73,7 @@ class TestCommandTest extends TestCase
         $this->artisan('larabug:test')
             ->expectsOutput('✓ [LaraBug] Sent exception to LaraBug with ID: ' . LaraBugClient::RESPONSE_ID)
             ->assertExitCode(0);
+
+        $this->assertEquals(LaraBugClient::RESPONSE_ID, $this->app['larabug']->getLastExceptionId());
     }
 }
