@@ -1,12 +1,10 @@
 <?php
 
-
-namespace LaraBug;
-
+namespace LaraBug\Commands;
 
 use Exception;
-use GuzzleHttp\Exception\GuzzleException;
 use Illuminate\Console\Command;
+use GuzzleHttp\Exception\GuzzleException;
 
 class TestCommand extends Command
 {

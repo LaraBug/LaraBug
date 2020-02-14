@@ -2,8 +2,9 @@
 
 namespace LaraBug;
 
-use Illuminate\Support\ServiceProvider as BaseServiceProvider;
 use Monolog\Logger;
+use LaraBug\Commands\TestCommand;
+use Illuminate\Support\ServiceProvider as BaseServiceProvider;
 
 class ServiceProvider extends BaseServiceProvider
 {
