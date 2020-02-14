@@ -3,56 +3,109 @@
 return [
 
     /*
-     * This is your authorization key which you get from your profile.
-     * @ http://www.larabug.com
-     */
+    |--------------------------------------------------------------------------
+    | Login key
+    |--------------------------------------------------------------------------
+    |
+    | This is your authorization key which you get from your profile.
+    | Retrieve your key from https://www.larabug.com
+    |
+    */
+
     'login_key' => env('LB_KEY', 'LB_KEY'),
 
     /*
-     * This is your project key which you receive when creating a project
-     * @ http://www.larabug.com/projects
-     */
+    |--------------------------------------------------------------------------
+    | Project key
+    |--------------------------------------------------------------------------
+    |
+    | This is your project key which you receive when creating a project
+    | Retrieve your key from https://www.larabug.com
+    |
+    */
+
     'project_key' => env('LB_PROJECT_KEY', 'LB_PROJECT_KEY'),
 
     /*
-     * Environments where LaraBug should report
-     */
+    |--------------------------------------------------------------------------
+    | Enviroment setting
+    |--------------------------------------------------------------------------
+    |
+    | This setting determines if the exception should be send over or not.
+    |
+    */
+
     'environments' => [
         'production'
     ],
 
     /*
-     * How many lines to show near exception line.
-     */
+    |--------------------------------------------------------------------------
+    | Lines near exception
+    |--------------------------------------------------------------------------
+    |
+    | How many lines to show near exception line. The more you specify the bigger the displayed code will be.
+    |
+    */
+
     'lines_count' => 12,
 
     /*
-     * Set the sleep time between duplicate exceptions.
-     */
-    'sleep' => 5,
+    |--------------------------------------------------------------------------
+    | Prevent duplicates
+    |--------------------------------------------------------------------------
+    |
+    | Set the sleep time between duplicate exceptions. This value is in seconds, default: 60 seconds (1 minute)
+    |
+    */
+
+    'sleep' => 60,
 
     /*
-     * Define your path for your 500 errors.
-     */
+    |--------------------------------------------------------------------------
+    | 500 error screen
+    |--------------------------------------------------------------------------
+    |
+    | You can set a path here to a custom 500 error page to be displayed once something goes wrong.
+    |
+    */
+
     'errorView' => 'errors.500', // Refers to views/errors/500.blade.php
 
     /*
-     * List of exceptions to skip sending.
-     */
+    |--------------------------------------------------------------------------
+    | Skip exceptions
+    |--------------------------------------------------------------------------
+    |
+    | List of exceptions to skip sending.
+    |
+    */
+
     'except' => [
         'Symfony\Component\HttpKernel\Exception\NotFoundHttpException',
     ],
 
     /*
-     * Filter out these variables before sending them to larabug
-     */
+    |--------------------------------------------------------------------------
+    | Key filtering
+    |--------------------------------------------------------------------------
+    |
+    | Filter out these variables before sending them to LaraBug
+    |
+    */
+
     'blacklist' => [
         'password',
         'authorization'
     ],
 
-    /**
-     * Release git hash
-     */
+    /*
+    |--------------------------------------------------------------------------
+    | Release git hash
+    |--------------------------------------------------------------------------
+    |
+    |
+    */
+    
     // 'release' => trim(exec('git --git-dir ' . base_path('.git') . ' log --pretty="%h" -n1 HEAD'))
 ];
