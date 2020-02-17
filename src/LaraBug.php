@@ -68,7 +68,6 @@ class LaraBug
         }
 
         $rawResponse = $this->logError($data);
-
         if(!$rawResponse) {
             return false;
         }
@@ -153,12 +152,12 @@ class LaraBug
 
         $count = config('larabug.lines_count');
         $lines = file($data['file']);
-        $data['exegutor'] = [];
+        $data['executor'] = [];
 
         for ($i = -1 * abs($count); $i <= abs($count); $i++) {
-            $data['exegutor'][] = $this->getLineInfo($lines, $data['line'], $i);
+            $data['executor'][] = $this->getLineInfo($lines, $data['line'], $i);
         }
-        $data['exegutor'] = array_filter($data['exegutor']);
+        $data['executor'] = array_filter($data['executor']);
 
         // to make symfony exception more readable
         if ($data['class'] == 'Symfony\Component\Debug\Exception\FatalErrorException') {
@@ -210,9 +209,8 @@ class LaraBug
             return;
         }
         return [
-            'line' => '<span class="exception-currentline">' . $currentLine . '.</span> ' . SyntaxHighlight::process($lines[$index]),
-            'wrap_left' => $i ? '' : '<span class="exception-line">', // color: #F5F5F5; background-color: #5A3E3E; width: 100%; display: block;
-            'wrap_right' => $i ? '' : '</span>',
+            'line_number' => $currentLine,
+            'line' => $lines[$index]
         ];
     }
 
