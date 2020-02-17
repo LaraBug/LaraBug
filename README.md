@@ -58,5 +58,3 @@ After that you have configured the LaraBug channel you can add it to the stack s
 ```
 ## License
 The larabug package is open source software licensed under the [license MIT](http://opensource.org/licenses/MIT)
-## Contributors
-[Micheal Mand](https://github.com/mikemand) - https://github.com/Cannonb4ll/LaraBug/pull/2
