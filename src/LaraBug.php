@@ -143,6 +143,7 @@ class LaraBug
                 'HTTP_USER_AGENT' => Request::server('HTTP_USER_AGENT'),
                 'SERVER_PROTOCOL' => Request::server('SERVER_PROTOCOL'),
                 'SERVER_SOFTWARE' => Request::server('SERVER_SOFTWARE'),
+                'PHP_VERSION' => PHP_VERSION
             ],
             'GET' => $this->filterVariables(Request::query()),
             'POST' => $this->filterVariables($_POST),
