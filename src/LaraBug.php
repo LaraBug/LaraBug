@@ -138,7 +138,12 @@ class LaraBug
         $data['class'] = get_class($exception);
         $data['release'] = config('larabug.release', null);
         $data['storage'] = [
-            'SERVER' => $this->filterVariables(Request::server()),
+            'SERVER' => [
+                'USER' => Request::server('USER'),
+                'HTTP_USER_AGENT' => Request::server('HTTP_USER_AGENT'),
+                'SERVER_PROTOCOL' => Request::server('SERVER_PROTOCOL'),
+                'SERVER_SOFTWARE' => Request::server('SERVER_SOFTWARE'),
+            ],
             'GET' => $this->filterVariables(Request::query()),
             'POST' => $this->filterVariables($_POST),
             'FILE' => Request::file(),
