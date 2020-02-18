@@ -44,7 +44,9 @@ return [
     | Lines near exception
     |--------------------------------------------------------------------------
     |
-    | How many lines to show near exception line. The more you specify the bigger the displayed code will be.
+    | How many lines to show near exception line. The more you specify the bigger
+    | the displayed code will be. Max value can be 50, will be defaulted to
+    | 12 if higher than 50 automatically.
     |
     */
 
@@ -106,6 +108,6 @@ return [
     |
     |
     */
-    
+
     // 'release' => trim(exec('git --git-dir ' . base_path('.git') . ' log --pretty="%h" -n1 HEAD'))
 ];

@@ -30,7 +30,7 @@ class LaraBug
     {
         $this->client = $client;
 
-        $this->blacklist = array_map(function($blacklist) {
+        $this->blacklist = array_map(function ($blacklist) {
             return strtolower($blacklist);
         }, config('larabug.blacklist', []));
 
@@ -68,13 +68,13 @@ class LaraBug
         }
 
         $rawResponse = $this->logError($data);
-        if(!$rawResponse) {
+        if (!$rawResponse) {
             return false;
         }
 
         $response = json_decode($rawResponse->getBody()->getContents());
 
-        if(isset($response->id)) {
+        if (isset($response->id)) {
             $this->setLastExceptionId($response->id);
         }
 
@@ -157,6 +157,11 @@ class LaraBug
         $data['storage'] = array_filter($data['storage']);
 
         $count = config('larabug.lines_count');
+
+        if ($count > 50) {
+            $count = 12;
+        }
+
         $lines = file($data['file']);
         $data['executor'] = [];
 
@@ -182,12 +187,12 @@ class LaraBug
      */
     public function filterVariables($variables)
     {
-        if(is_array($variables)) {
-            array_walk($variables, function($val, $key) use(&$variables) {
-                if(is_array($val)) {
+        if (is_array($variables)) {
+            array_walk($variables, function ($val, $key) use (&$variables) {
+                if (is_array($val)) {
                     $variables[$key] = $this->filterVariables($val);
                 }
-                if(in_array(strtolower($key), $this->blacklist)) {
+                if (in_array(strtolower($key), $this->blacklist)) {
                     unset($variables[$key]);
                 }
             });
