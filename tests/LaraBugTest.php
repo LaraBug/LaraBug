@@ -66,21 +66,23 @@ class LaraBugTest extends TestCase
     /** @test */
     public function it_can_check_if_is_a_sleeping_cache_exception()
     {
-        Carbon::setTestNow('2019-10-12 13:30:00');
-
         $data = ['host' => 'localhost', 'method' => 'GET', 'exception' => 'it_can_check_if_is_a_sleeping_cache_exception', 'line' => 2, 'file' => '/tmp/Larabug/tests/LaraBugTest.php', 'class' => 'Exception'];
+
+        Carbon::setTestNow('2019-10-12 13:30:00');
 
         $this->assertFalse($this->larabug->isSleepingException($data));
 
-        Carbon::setTestNow('2019-10-12 13:30:01');
+        Carbon::setTestNow('2019-10-12 13:30:00');
 
         $this->larabug->addExceptionToSleep($data);
 
-        Carbon::setTestNow('2019-10-12 13:30:06');
+        $this->assertTrue($this->larabug->isSleepingException($data));
+
+        Carbon::setTestNow('2019-10-12 13:31:00');
 
         $this->assertTrue($this->larabug->isSleepingException($data));
 
-        Carbon::setTestNow('2019-10-12 13:30:07');
+        Carbon::setTestNow('2019-10-12 13:31:01');
 
         $this->assertFalse($this->larabug->isSleepingException($data));
     }
