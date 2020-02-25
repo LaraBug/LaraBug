@@ -4,6 +4,9 @@ namespace LaraBug\Tests;
 
 use Carbon\Carbon;
 use Exception;
+use GuzzleHttp\Client;
+use GuzzleHttp\Handler\MockHandler;
+use GuzzleHttp\Psr7\Response;
 use LaraBug\LaraBug;
 use LaraBug\Tests\Mocks\LaraBugClient;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
@@ -23,6 +26,44 @@ class LaraBugTest extends TestCase
         $this->larabug = new LaraBug($this->client = new LaraBugClient(
             'login_key', 'project_key'
         ));
+    }
+
+    /** @test */
+    public function is_will_not_crash_if_larabug_returns_error_bad_response_exception()
+    {
+        $this->larabug = new LaraBug($this->client = new \LaraBug\Http\Client(
+            'login_key', 'project_key'
+        ));
+
+        //
+        $this->app['config']['larabug.environments'] = ['testing'];
+
+        $this->client->setGuzzleHttpClient(new Client([
+            'handler' => MockHandler::createWithMiddleware([
+                new Response(500, [], '{}')
+            ]),
+        ]));
+
+        $this->assertInstanceOf(get_class(new \stdClass()), $this->larabug->handle(new Exception('is_will_not_crash_if_larabug_returns_error_bad_response_exception')));
+    }
+
+    /** @test */
+    public function is_will_not_crash_if_larabug_returns_normal_exception()
+    {
+        $this->larabug = new LaraBug($this->client = new \LaraBug\Http\Client(
+            'login_key', 'project_key'
+        ));
+
+        //
+        $this->app['config']['larabug.environments'] = ['testing'];
+
+        $this->client->setGuzzleHttpClient(new Client([
+            'handler' => MockHandler::createWithMiddleware([
+                new \Exception()
+            ]),
+        ]));
+
+        $this->assertFalse($this->larabug->handle(new Exception('is_will_not_crash_if_larabug_returns_normal_exception')));
     }
 
     /** @test */

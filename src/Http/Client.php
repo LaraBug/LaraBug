@@ -30,20 +30,27 @@ class Client
 
     /**
      * @param $exception
+     * @return \GuzzleHttp\Promise\PromiseInterface|\Psr\Http\Message\ResponseInterface|null
      */
     public function report($exception)
     {
-        return $this->getGuzzleHttpClient()->request('POST', 'https://www.larabug.com/api/log', [
-            'headers' => [
-                'Authorization' => 'Bearer ' . $this->login
-            ],
-            'form_params' => [
-                'project' => $this->project,
-                'exception' => $exception,
-                'additional' => [],
-                'user' => $this->getUser(),
-            ]
-        ]);
+        try {
+            return $this->getGuzzleHttpClient()->request('POST', 'https://www.larabug.com/api/log', [
+                'headers' => [
+                    'Authorization' => 'Bearer ' . $this->login
+                ],
+                'form_params' => [
+                    'project' => $this->project,
+                    'exception' => $exception,
+                    'additional' => [],
+                    'user' => $this->getUser(),
+                ]
+            ]);
+        } catch(\GuzzleHttp\Exception\RequestException $e) {
+            return $e->getResponse();
+        } catch(\Exception $e) {
+            return null;
+        }
     }
 
     /**
