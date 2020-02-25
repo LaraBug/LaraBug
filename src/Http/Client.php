@@ -48,6 +48,8 @@ class Client
             ]);
         } catch(\GuzzleHttp\Exception\RequestException $e) {
             return $e->getResponse();
+        } catch(\Exception $e) {
+            return null;
         }
     }
 

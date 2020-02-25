@@ -29,7 +29,7 @@ class LaraBugTest extends TestCase
     }
 
     /** @test */
-    public function is_will_not_crash_if_larabug_returns_error_500()
+    public function is_will_not_crash_if_larabug_returns_error_bad_response_exception()
     {
         $this->larabug = new LaraBug($this->client = new \LaraBug\Http\Client(
             'login_key', 'project_key'
@@ -44,7 +44,26 @@ class LaraBugTest extends TestCase
             ]),
         ]));
 
-        $this->assertInstanceOf(get_class(new \stdClass()), $this->larabug->handle(new Exception('is_will_not_crash_if_larabug_returns_error_500')));
+        $this->assertInstanceOf(get_class(new \stdClass()), $this->larabug->handle(new Exception('is_will_not_crash_if_larabug_returns_error_bad_response_exception')));
+    }
+
+    /** @test */
+    public function is_will_not_crash_if_larabug_returns_normal_exception()
+    {
+        $this->larabug = new LaraBug($this->client = new \LaraBug\Http\Client(
+            'login_key', 'project_key'
+        ));
+
+        //
+        $this->app['config']['larabug.environments'] = ['testing'];
+
+        $this->client->setGuzzleHttpClient(new Client([
+            'handler' => MockHandler::createWithMiddleware([
+                new \Exception()
+            ]),
+        ]));
+
+        $this->assertFalse($this->larabug->handle(new Exception('is_will_not_crash_if_larabug_returns_normal_exception')));
     }
 
     /** @test */
