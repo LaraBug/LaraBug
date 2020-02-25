@@ -3,7 +3,7 @@
 </p>
 
 # LaraBug
-Laravel 5.8/6.x package for logging errors to [larabug.com](https://www.larabug.com)
+Laravel 5.8/6.x/7.x package for logging errors to [larabug.com](https://www.larabug.com)
 
 [![Software License](https://img.shields.io/badge/license-MIT-brightgreen.svg?style=flat-square)](LICENSE.md)
 [![Latest Version on Packagist](https://img.shields.io/packagist/v/larabug/larabug.svg?style=flat-square)](https://packagist.org/packages/larabug/larabug)
