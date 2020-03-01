@@ -5,6 +5,7 @@ namespace LaraBug;
 use Illuminate\Support\Facades\Route;
 use Monolog\Logger;
 use LaraBug\Commands\TestCommand;
+use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\ServiceProvider as BaseServiceProvider;
 
 class ServiceProvider extends BaseServiceProvider
@@ -44,6 +45,9 @@ class ServiceProvider extends BaseServiceProvider
 
         // Map any routes
         $this->mapLaraBugApiRoutes();
+        
+        // Create an alias to the larabug-js-client.blade.php include
+        Blade::include('larabug::larabug-js-client', 'larabugJavaScriptClient');
     }
 
     /**
