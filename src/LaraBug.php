@@ -37,18 +37,6 @@ class LaraBug
     }
 
     /**
-     * @return bool|Factory|\Illuminate\View\View
-     */
-    public function errorView()
-    {
-        if (View::exists($errorView = config('larabug.errorView'))) {
-            return view($errorView);
-        }
-
-        return false;
-    }
-
-    /**
      * @param Throwable $exception
      */
     public function handle(Throwable $exception)
