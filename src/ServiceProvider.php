@@ -44,6 +44,9 @@ class ServiceProvider extends BaseServiceProvider
 
         // Map any routes
         $this->mapLaraBugApiRoutes();
+        
+        // Create an alias to the larabug-js-client.blade.php include
+        Blade::include('larabug::larabug-js-client', 'larabugJavaScriptClient');
     }
 
     /**
