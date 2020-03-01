@@ -46,9 +46,9 @@ class Client
                     'user' => $this->getUser(),
                 ]
             ]);
-        } catch(\GuzzleHttp\Exception\RequestException $e) {
+        } catch (\GuzzleHttp\Exception\RequestException $e) {
             return $e->getResponse();
-        } catch(\Exception $e) {
+        } catch (\Exception $e) {
             return null;
         }
     }

@@ -2,6 +2,7 @@
 
 namespace LaraBug;
 
+use Illuminate\Support\Facades\Route;
 use Monolog\Logger;
 use LaraBug\Commands\TestCommand;
 use Illuminate\Support\ServiceProvider as BaseServiceProvider;
@@ -20,23 +21,29 @@ class ServiceProvider extends BaseServiceProvider
      */
     public function boot()
     {
+        // Publish configuration file
         if (function_exists('config_path')) {
-            /*
-             * Publish configuration file
-             */
             $this->publishes([
                 __DIR__ . '/../config/larabug.php' => config_path('larabug.php'),
             ]);
         }
 
+        // Register views
+        $this->app['view']->addNamespace('larabug', __DIR__ . '/../resources/views');
+
+        // Register facade
         if (class_exists(\Illuminate\Foundation\AliasLoader::class)) {
             $loader = \Illuminate\Foundation\AliasLoader::getInstance();
             $loader->alias('LaraBug', 'LaraBug\Facade');
         }
 
+        // Register commands
         $this->commands([
             TestCommand::class
         ]);
+
+        // Map any routes
+        $this->mapLaraBugApiRoutes();
     }
 
     /**
@@ -62,5 +69,15 @@ class ServiceProvider extends BaseServiceProvider
                 return new Logger('larabug', [$handler]);
             });
         }
+    }
+
+    /**
+     *
+     */
+    protected function mapLaraBugApiRoutes()
+    {
+        Route::namespace('\LaraBug\Http\Controllers')
+            ->prefix('larabug-api')
+            ->group(__DIR__ . '/../routes/api.php');
     }
 }

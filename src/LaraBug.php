@@ -38,8 +38,10 @@ class LaraBug
 
     /**
      * @param Throwable $exception
+     * @param string $fileType
+     * @return bool|mixed
      */
-    public function handle(Throwable $exception)
+    public function handle(Throwable $exception, $fileType = 'php', array $customData = [])
     {
         if ($this->isSkipEnvironment()) {
             return false;
@@ -55,7 +57,45 @@ class LaraBug
             return false;
         }
 
+        if ($fileType == 'javascript') {
+            $data['fullUrl'] = $customData['url'];
+            $data['file'] = $customData['file'];
+            $data['file_type'] = $fileType;
+            $data['error'] = $customData['message'];
+            $data['exception'] = $customData['stack'];
+            $data['line'] = $customData['line'];
+            $data['class'] = null;
+
+            $count = config('larabug.lines_count');
+
+            if ($count > 50) {
+                $count = 12;
+            }
+
+            $lines = file($data['file']);
+            $data['executor'] = [];
+
+
+            for ($i = -1 * abs($count); $i <= abs($count); $i++) {
+                $currentLine = $data['line'] + $i;
+
+                $index = $currentLine - 1;
+
+                if (!array_key_exists($index, $lines)) {
+                    continue;
+                }
+
+                $data['executor'][] = [
+                    'line_number' => $currentLine,
+                    'line' => $lines[$index]
+                ];
+            }
+
+            $data['executor'] = array_filter($data['executor']);
+        }
+
         $rawResponse = $this->logError($data);
+
         if (!$rawResponse) {
             return false;
         }
