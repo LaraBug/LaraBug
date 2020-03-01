@@ -5,6 +5,7 @@ namespace LaraBug;
 use Illuminate\Support\Facades\Route;
 use Monolog\Logger;
 use LaraBug\Commands\TestCommand;
+use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\ServiceProvider as BaseServiceProvider;
 
 class ServiceProvider extends BaseServiceProvider
