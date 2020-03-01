@@ -29,8 +29,6 @@ class ServiceProvider extends BaseServiceProvider
             ]);
         }
 
-        $this->app['view']->addNamespace('larabug', __DIR__ . '/../resources/views');
-
         if (class_exists(\Illuminate\Foundation\AliasLoader::class)) {
             $loader = \Illuminate\Foundation\AliasLoader::getInstance();
             $loader->alias('LaraBug', 'LaraBug\Facade');
