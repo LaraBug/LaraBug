@@ -2,13 +2,11 @@
 
 namespace LaraBug\Http;
 
-use Cartalyst\Sentinel\Laravel\Facades\Sentinel;
 use GuzzleHttp\ClientInterface;
-use GuzzleHttp\Exception\GuzzleException;
 
 class Client
 {
-    /** @var \GuzzleHttp\Client|null */
+    /** @var ClientInterface|null */
     protected $client;
 
     /** @var string */
@@ -20,8 +18,9 @@ class Client
     /**
      * @param string $login
      * @param string $project
+     * @param ClientInterface|null $client
      */
-    public function __construct(string $login, string $project, \GuzzleHttp\Client $client = null)
+    public function __construct(string $login, string $project, ClientInterface $client = null)
     {
         $this->login = $login;
         $this->project = $project;
@@ -29,8 +28,9 @@ class Client
     }
 
     /**
-     * @param $exception
+     * @param array $exception
      * @return \GuzzleHttp\Promise\PromiseInterface|\Psr\Http\Message\ResponseInterface|null
+     * @throws \GuzzleHttp\Exception\GuzzleException
      */
     public function report($exception)
     {
@@ -39,12 +39,10 @@ class Client
                 'headers' => [
                     'Authorization' => 'Bearer ' . $this->login
                 ],
-                'form_params' => [
+                'form_params' => array_merge([
                     'project' => $this->project,
-                    'exception' => $exception,
                     'additional' => [],
-                    'user' => $this->getUser(),
-                ]
+                ], $exception)
             ]);
         } catch (\GuzzleHttp\Exception\RequestException $e) {
             return $e->getResponse();
@@ -63,26 +61,6 @@ class Client
         }
 
         return $this->client;
-    }
-
-    /**
-     * Get the authenticated user.
-     *
-     * Supported authentication systems: Laravel, Sentinel
-     *
-     * @return array|null
-     */
-    private function getUser()
-    {
-        if (function_exists('auth') && auth()->check()) {
-            return auth()->user()->toArray();
-        }
-
-        if (class_exists(\Cartalyst\Sentinel\Sentinel::class) && $user = Sentinel::check()) {
-            return $user->toArray();
-        }
-
-        return null;
     }
 
     /**

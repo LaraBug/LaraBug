@@ -2,12 +2,10 @@
 
 namespace LaraBug;
 
-use Illuminate\Contracts\View\Factory;
 use Illuminate\Support\Facades\App;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Request;
 use Illuminate\Support\Facades\Session;
-use Illuminate\Support\Facades\View;
 use Illuminate\Support\Str;
 use LaraBug\Http\Client;
 use Throwable;
@@ -286,10 +284,34 @@ class LaraBug
 
     /**
      * @param $exception
+     * @return \GuzzleHttp\Promise\PromiseInterface|\Psr\Http\Message\ResponseInterface|null
      */
     private function logError($exception)
     {
-        return $this->client->report($exception);
+        return $this->client->report([
+            'exception' => $exception,
+            'user' => $this->getUser(),
+        ]);
+    }
+
+    /**
+     * @return array|null
+     */
+    public function getUser()
+    {
+        if (function_exists('auth') && auth()->check()) {
+            $user = auth()->user();
+
+            if (method_exists($user, 'toLarabug')) {
+                return $user->toLarabug();
+            }
+
+            if (method_exists($user, 'toArray')) {
+                return $user->toArray();
+            }
+        }
+
+        return null;
     }
 
     /**
