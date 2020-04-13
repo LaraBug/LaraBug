@@ -57,7 +57,9 @@ class Client
     public function getGuzzleHttpClient()
     {
         if (!isset($this->client)) {
-            $this->client = new \GuzzleHttp\Client();
+            $this->client = new \GuzzleHttp\Client([
+                'timeout' => 15
+            ]);
         }
 
         return $this->client;
