@@ -5,10 +5,10 @@
 # LaraBug
 Laravel 5.8/6.x/7.x package for logging errors to [larabug.com](https://www.larabug.com)
 
-[![Software License](https://img.shields.io/badge/license-MIT-brightgreen.svg?style=flat-square)](LICENSE.md)
-[![Latest Version on Packagist](https://img.shields.io/packagist/v/larabug/larabug.svg?style=flat-square)](https://packagist.org/packages/larabug/larabug)
-[![Build Status](https://img.shields.io/travis/LaraBug/LaraBug?style=flat-square)](https://travis-ci.org/LaraBug/LaraBug)
-[![Total Downloads](https://img.shields.io/packagist/dt/larabug/larabug.svg?style=flat-square)](https://packagist.org/packages/larabug/larabug)
+[![Software License](https://poser.pugx.org/larabug/larabug/license.svg)](LICENSE.md)
+[![Latest Version on Packagist](https://poser.pugx.org/larabug/larabug/v/stable.svg)](https://packagist.org/packages/larabug/larabug)
+[![Build Status](https://github.com/larabug/larabug/workflows/tests/badge.svg)](https://github.com/larabug/larabug/actions)
+[![Total Downloads](https://poser.pugx.org/larabug/larabug/d/total.svg)](https://packagist.org/packages/larabug/larabug)
 
 ## Installation 
 You can install the package through Composer.
