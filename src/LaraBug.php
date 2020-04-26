@@ -300,13 +300,14 @@ class LaraBug
     public function getUser()
     {
         if (function_exists('auth') && auth()->check()) {
+            /** @var \Illuminate\Contracts\Auth\Authenticatable $user */
             $user = auth()->user();
 
-            if (method_exists($user, 'toLarabug')) {
+            if ($user instanceof \LaraBug\Concerns\Larabugable) {
                 return $user->toLarabug();
             }
 
-            if (method_exists($user, 'toArray')) {
+            if ($user instanceof \Illuminate\Database\Eloquent\Model) {
                 return $user->toArray();
             }
         }
