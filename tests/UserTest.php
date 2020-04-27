@@ -61,7 +61,7 @@ class CustomerUser extends AuthUser
     protected $guarded = [];
 }
 
-class CustomerUserWithToLarabug extends CustomerUser
+class CustomerUserWithToLarabug extends CustomerUser implements \LaraBug\Concerns\Larabugable
 {
     public function toLarabug()
     {
