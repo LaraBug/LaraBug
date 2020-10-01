@@ -12,13 +12,13 @@ class UserTest extends TestCase
     protected $client;
 
     /** @var LaraBug */
-    protected $larabug;
+    protected $laraBug;
 
     public function setUp(): void
     {
         parent::setUp();
 
-        $this->larabug = new LaraBug($this->client = new LaraBugClient(
+        $this->laraBug = new LaraBug($this->client = new LaraBugClient(
             'login_key',
             'project_key'
         ));
@@ -34,7 +34,7 @@ class UserTest extends TestCase
             'email' => 'email',
         ]));
 
-        $this->assertSame(['id' => 1, 'username' => 'username', 'password' => 'password', 'email' => 'email'], $this->larabug->getUser());
+        $this->assertSame(['id' => 1, 'username' => 'username', 'password' => 'password', 'email' => 'email'], $this->laraBug->getUser());
     }
 
     /** @test */
@@ -47,13 +47,13 @@ class UserTest extends TestCase
             'email' => 'email',
         ]));
 
-        $this->assertSame(['username' => 'username', 'email' => 'email'], $this->larabug->getUser());
+        $this->assertSame(['username' => 'username', 'email' => 'email'], $this->laraBug->getUser());
     }
 
     /** @test */
     public function it_returns_nothing_for_ghost()
     {
-        $this->assertSame(null, $this->larabug->getUser());
+        $this->assertSame(null, $this->laraBug->getUser());
     }
 }
 

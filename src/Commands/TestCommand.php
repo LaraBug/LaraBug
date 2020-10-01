@@ -14,8 +14,8 @@ class TestCommand extends Command
     public function handle()
     {
         try {
-            /** @var LaraBug $larabug */
-            $larabug = app('larabug');
+            /** @var LaraBug $laraBug */
+            $laraBug = app('larabug');
 
             if (config('larabug.login_key')) {
                 $this->info('✓ [Larabug] Found login key');
@@ -27,15 +27,17 @@ class TestCommand extends Command
                 $this->info('✓ [Larabug] Found project key');
             } else {
                 $this->error('✗ [LaraBug] Could not find your project key, set this in your .env');
+                $this->info('More information on setting your project key: https://www.larabug.com/docs/how-to-use/installation');
             }
 
             if (in_array(config('app.env'), config('larabug.environments'))) {
                 $this->info('✓ [Larabug] Correct environment found');
             } else {
                 $this->error('✗ [LaraBug] Environment not allowed to send errors to LaraBug, set this in your config');
+                $this->info('More information about environment configuration: https://www.larabug.com/docs/how-to-use/installation');
             }
 
-            $response = $larabug->handle(
+            $response = $laraBug->handle(
                 $this->generateException()
             );
 

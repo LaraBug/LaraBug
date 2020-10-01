@@ -10,16 +10,16 @@ use Monolog\Handler\AbstractProcessingHandler;
 class LaraBugHandler extends AbstractProcessingHandler
 {
     /** @var LaraBug */
-    protected $larabug;
+    protected $laraBug;
 
     /**
-     * @param LaraBug $larabug
+     * @param LaraBug $laraBug
      * @param int $level
      * @param bool $bubble
      */
-    public function __construct(LaraBug $larabug, $level = Logger::ERROR, bool $bubble = true)
+    public function __construct(LaraBug $laraBug, $level = Logger::ERROR, bool $bubble = true)
     {
-        $this->larabug = $larabug;
+        $this->laraBug = $laraBug;
 
         parent::__construct($level, $bubble);
     }
@@ -30,7 +30,7 @@ class LaraBugHandler extends AbstractProcessingHandler
     protected function write(array $record): void
     {
         if (isset($record['context']['exception']) && $record['context']['exception'] instanceof Throwable) {
-            $this->larabug->handle(
+            $this->laraBug->handle(
                 $record['context']['exception']
             );
 
