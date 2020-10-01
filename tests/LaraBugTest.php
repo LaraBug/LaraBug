@@ -14,7 +14,7 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 class LaraBugTest extends TestCase
 {
     /** @var LaraBug */
-    protected $larabug;
+    protected $laraBug;
 
     /** @var Mocks\LaraBugClient */
     protected $client;
@@ -23,7 +23,7 @@ class LaraBugTest extends TestCase
     {
         parent::setUp();
 
-        $this->larabug = new LaraBug($this->client = new LaraBugClient(
+        $this->laraBug = new LaraBug($this->client = new LaraBugClient(
             'login_key',
             'project_key'
         ));
@@ -32,7 +32,7 @@ class LaraBugTest extends TestCase
     /** @test */
     public function is_will_not_crash_if_larabug_returns_error_bad_response_exception()
     {
-        $this->larabug = new LaraBug($this->client = new \LaraBug\Http\Client(
+        $this->laraBug = new LaraBug($this->client = new \LaraBug\Http\Client(
             'login_key',
             'project_key'
         ));
@@ -46,13 +46,13 @@ class LaraBugTest extends TestCase
             ]),
         ]));
 
-        $this->assertInstanceOf(get_class(new \stdClass()), $this->larabug->handle(new Exception('is_will_not_crash_if_larabug_returns_error_bad_response_exception')));
+        $this->assertInstanceOf(get_class(new \stdClass()), $this->laraBug->handle(new Exception('is_will_not_crash_if_larabug_returns_error_bad_response_exception')));
     }
 
     /** @test */
     public function is_will_not_crash_if_larabug_returns_normal_exception()
     {
-        $this->larabug = new LaraBug($this->client = new \LaraBug\Http\Client(
+        $this->laraBug = new LaraBug($this->client = new \LaraBug\Http\Client(
             'login_key',
             'project_key'
         ));
@@ -66,7 +66,7 @@ class LaraBugTest extends TestCase
             ]),
         ]));
 
-        $this->assertFalse($this->larabug->handle(new Exception('is_will_not_crash_if_larabug_returns_normal_exception')));
+        $this->assertFalse($this->laraBug->handle(new Exception('is_will_not_crash_if_larabug_returns_normal_exception')));
     }
 
     /** @test */
@@ -74,13 +74,13 @@ class LaraBugTest extends TestCase
     {
         $this->app['config']['larabug.except'] = [];
 
-        $this->assertFalse($this->larabug->isSkipException(NotFoundHttpException::class));
+        $this->assertFalse($this->laraBug->isSkipException(NotFoundHttpException::class));
 
         $this->app['config']['larabug.except'] = [
             NotFoundHttpException::class,
         ];
 
-        $this->assertTrue($this->larabug->isSkipException(NotFoundHttpException::class));
+        $this->assertTrue($this->laraBug->isSkipException(NotFoundHttpException::class));
     }
 
     /** @test */
@@ -88,15 +88,15 @@ class LaraBugTest extends TestCase
     {
         $this->app['config']['larabug.environments'] = [];
 
-        $this->assertTrue($this->larabug->isSkipEnvironment());
+        $this->assertTrue($this->laraBug->isSkipEnvironment());
 
         $this->app['config']['larabug.environments'] = ['production'];
 
-        $this->assertTrue($this->larabug->isSkipEnvironment());
+        $this->assertTrue($this->laraBug->isSkipEnvironment());
 
         $this->app['config']['larabug.environments'] = ['testing'];
 
-        $this->assertFalse($this->larabug->isSkipEnvironment());
+        $this->assertFalse($this->laraBug->isSkipEnvironment());
     }
 
     /** @test */
@@ -104,7 +104,7 @@ class LaraBugTest extends TestCase
     {
         $this->app['config']['larabug.sleep'] = 0;
 
-        $this->assertFalse($this->larabug->isSleepingException([]));
+        $this->assertFalse($this->laraBug->isSleepingException([]));
     }
 
     /** @test */
@@ -114,27 +114,27 @@ class LaraBugTest extends TestCase
 
         Carbon::setTestNow('2019-10-12 13:30:00');
 
-        $this->assertFalse($this->larabug->isSleepingException($data));
+        $this->assertFalse($this->laraBug->isSleepingException($data));
 
         Carbon::setTestNow('2019-10-12 13:30:00');
 
-        $this->larabug->addExceptionToSleep($data);
+        $this->laraBug->addExceptionToSleep($data);
 
-        $this->assertTrue($this->larabug->isSleepingException($data));
+        $this->assertTrue($this->laraBug->isSleepingException($data));
 
         Carbon::setTestNow('2019-10-12 13:31:00');
 
-        $this->assertTrue($this->larabug->isSleepingException($data));
+        $this->assertTrue($this->laraBug->isSleepingException($data));
 
         Carbon::setTestNow('2019-10-12 13:31:01');
 
-        $this->assertFalse($this->larabug->isSleepingException($data));
+        $this->assertFalse($this->laraBug->isSleepingException($data));
     }
 
     /** @test */
     public function it_can_get_formatted_exception_data()
     {
-        $data = $this->larabug->getExceptionData(new Exception(
+        $data = $this->laraBug->getExceptionData(new Exception(
             'it_can_get_formatted_exception_data'
         ));
 
@@ -166,11 +166,11 @@ class LaraBugTest extends TestCase
             'Password' => 'testing',
         ];
 
-        $this->assertArrayNotHasKey('password', $this->larabug->filterVariables($data));
-        $this->assertArrayHasKey('not_password', $this->larabug->filterVariables($data));
-        $this->assertArrayNotHasKey('password', $this->larabug->filterVariables($data)['not_password2']);
-        $this->assertArrayNotHasKey('password', $this->larabug->filterVariables($data)['not_password_3']['nah']);
-        $this->assertArrayNotHasKey('Password', $this->larabug->filterVariables($data));
+        $this->assertArrayNotHasKey('password', $this->laraBug->filterVariables($data));
+        $this->assertArrayHasKey('not_password', $this->laraBug->filterVariables($data));
+        $this->assertArrayNotHasKey('password', $this->laraBug->filterVariables($data)['not_password2']);
+        $this->assertArrayNotHasKey('password', $this->laraBug->filterVariables($data)['not_password_3']['nah']);
+        $this->assertArrayNotHasKey('Password', $this->laraBug->filterVariables($data));
     }
 
     /** @test */
@@ -178,7 +178,7 @@ class LaraBugTest extends TestCase
     {
         $this->app['config']['larabug.environments'] = ['testing'];
 
-        $this->larabug->handle(new Exception('it_can_report_an_exception_to_larabug'));
+        $this->laraBug->handle(new Exception('it_can_report_an_exception_to_larabug'));
 
         $this->client->assertRequestsSent(1);
     }
