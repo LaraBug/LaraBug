@@ -2,12 +2,12 @@
 
 namespace LaraBug\Tests;
 
-use Carbon\Carbon;
 use Exception;
-use GuzzleHttp\Client;
-use GuzzleHttp\Handler\MockHandler;
-use GuzzleHttp\Psr7\Response;
+use Carbon\Carbon;
 use LaraBug\LaraBug;
+use GuzzleHttp\Client;
+use GuzzleHttp\Psr7\Response;
+use GuzzleHttp\Handler\MockHandler;
 use LaraBug\Tests\Mocks\LaraBugClient;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
@@ -24,7 +24,8 @@ class LaraBugTest extends TestCase
         parent::setUp();
 
         $this->larabug = new LaraBug($this->client = new LaraBugClient(
-            'login_key', 'project_key'
+            'login_key',
+            'project_key'
         ));
     }
 
@@ -32,7 +33,8 @@ class LaraBugTest extends TestCase
     public function is_will_not_crash_if_larabug_returns_error_bad_response_exception()
     {
         $this->larabug = new LaraBug($this->client = new \LaraBug\Http\Client(
-            'login_key', 'project_key'
+            'login_key',
+            'project_key'
         ));
 
         //
@@ -40,7 +42,7 @@ class LaraBugTest extends TestCase
 
         $this->client->setGuzzleHttpClient(new Client([
             'handler' => MockHandler::createWithMiddleware([
-                new Response(500, [], '{}')
+                new Response(500, [], '{}'),
             ]),
         ]));
 
@@ -51,7 +53,8 @@ class LaraBugTest extends TestCase
     public function is_will_not_crash_if_larabug_returns_normal_exception()
     {
         $this->larabug = new LaraBug($this->client = new \LaraBug\Http\Client(
-            'login_key', 'project_key'
+            'login_key',
+            'project_key'
         ));
 
         //
@@ -59,7 +62,7 @@ class LaraBugTest extends TestCase
 
         $this->client->setGuzzleHttpClient(new Client([
             'handler' => MockHandler::createWithMiddleware([
-                new \Exception()
+                new \Exception(),
             ]),
         ]));
 
@@ -74,7 +77,7 @@ class LaraBugTest extends TestCase
         $this->assertFalse($this->larabug->isSkipException(NotFoundHttpException::class));
 
         $this->app['config']['larabug.except'] = [
-            NotFoundHttpException::class
+            NotFoundHttpException::class,
         ];
 
         $this->assertTrue($this->larabug->isSkipException(NotFoundHttpException::class));
@@ -147,21 +150,20 @@ class LaraBugTest extends TestCase
     /** @test */
     public function it_filters_the_data_based_on_the_configuration()
     {
-
         $this->assertContains('password', $this->app['config']['larabug.blacklist']);
 
         $data = [
             'password' => 'testing',
             'not_password' => 'testing',
             'not_password2' => [
-                'password' => 'testing'
+                'password' => 'testing',
             ],
             'not_password_3' => [
                 'nah' => [
-                    'password' => 'testing'
-                ]
+                    'password' => 'testing',
+                ],
             ],
-            'Password' => 'testing'
+            'Password' => 'testing',
         ];
 
         $this->assertArrayNotHasKey('password', $this->larabug->filterVariables($data));

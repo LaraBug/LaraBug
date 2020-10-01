@@ -2,8 +2,8 @@
 
 namespace LaraBug\Tests\Fakes;
 
-use LaraBug\Facade as LarabugFacade;
 use LaraBug\Tests\TestCase;
+use LaraBug\Facade as LarabugFacade;
 
 class LaraBugFakeTest extends TestCase
 {

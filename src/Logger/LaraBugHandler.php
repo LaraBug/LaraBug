@@ -2,10 +2,10 @@
 
 namespace LaraBug\Logger;
 
+use Throwable;
+use Monolog\Logger;
 use LaraBug\LaraBug;
 use Monolog\Handler\AbstractProcessingHandler;
-use Monolog\Logger;
-use Throwable;
 
 class LaraBugHandler extends AbstractProcessingHandler
 {

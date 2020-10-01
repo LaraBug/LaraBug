@@ -2,9 +2,9 @@
 
 namespace LaraBug\Tests;
 
-use Illuminate\Foundation\Auth\User as AuthUser;
 use LaraBug\LaraBug;
 use LaraBug\Tests\Mocks\LaraBugClient;
+use Illuminate\Foundation\Auth\User as AuthUser;
 
 class UserTest extends TestCase
 {
@@ -19,7 +19,8 @@ class UserTest extends TestCase
         parent::setUp();
 
         $this->larabug = new LaraBug($this->client = new LaraBugClient(
-            'login_key', 'project_key'
+            'login_key',
+            'project_key'
         ));
     }
 
@@ -30,10 +31,10 @@ class UserTest extends TestCase
             'id' => 1,
             'username' => 'username',
             'password' => 'password',
-            'email' => 'email'
+            'email' => 'email',
         ]));
 
-        $this->assertSame(["id" => 1, "username" => "username", "password" => "password", "email" => "email"], $this->larabug->getUser());
+        $this->assertSame(['id' => 1, 'username' => 'username', 'password' => 'password', 'email' => 'email'], $this->larabug->getUser());
     }
 
     /** @test */
@@ -43,10 +44,10 @@ class UserTest extends TestCase
             'id' => 1,
             'username' => 'username',
             'password' => 'password',
-            'email' => 'email'
+            'email' => 'email',
         ]));
 
-        $this->assertSame(["username" => "username", "email" => "email"], $this->larabug->getUser());
+        $this->assertSame(['username' => 'username', 'email' => 'email'], $this->larabug->getUser());
     }
 
     /** @test */
@@ -67,7 +68,7 @@ class CustomerUserWithToLarabug extends CustomerUser implements \LaraBug\Concern
     {
         return [
             'username' => $this->username,
-            'email' => $this->email
+            'email' => $this->email,
         ];
     }
 }

@@ -64,14 +64,15 @@ class TestCommandTest extends TestCase
             ->assertExitCode(0);
 
         $this->app['config']['larabug.environments'] = [
-            'testing'
+            'testing',
         ];
         $this->app['larabug'] = new LaraBug($this->client = new LaraBugClient(
-            'login_key', 'project_key'
+            'login_key',
+            'project_key'
         ));
 
         $this->artisan('larabug:test')
-            ->expectsOutput('✓ [LaraBug] Sent exception to LaraBug with ID: ' . LaraBugClient::RESPONSE_ID)
+            ->expectsOutput('✓ [LaraBug] Sent exception to LaraBug with ID: '.LaraBugClient::RESPONSE_ID)
             ->assertExitCode(0);
 
         $this->assertEquals(LaraBugClient::RESPONSE_ID, $this->app['larabug']->getLastExceptionId());

@@ -2,13 +2,13 @@
 
 namespace LaraBug;
 
+use Throwable;
+use LaraBug\Http\Client;
+use Illuminate\Support\Str;
 use Illuminate\Support\Facades\App;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Request;
 use Illuminate\Support\Facades\Session;
-use Illuminate\Support\Str;
-use LaraBug\Http\Client;
-use Throwable;
 
 class LaraBug
 {
@@ -31,7 +31,6 @@ class LaraBug
         $this->blacklist = array_map(function ($blacklist) {
             return strtolower($blacklist);
         }, config('larabug.blacklist', []));
-
     }
 
     /**
@@ -73,19 +72,18 @@ class LaraBug
             $lines = file($data['file']);
             $data['executor'] = [];
 
-
             for ($i = -1 * abs($count); $i <= abs($count); $i++) {
                 $currentLine = $data['line'] + $i;
 
                 $index = $currentLine - 1;
 
-                if (!array_key_exists($index, $lines)) {
+                if (! array_key_exists($index, $lines)) {
                     continue;
                 }
 
                 $data['executor'][] = [
                     'line_number' => $currentLine,
-                    'line' => $lines[$index]
+                    'line' => $lines[$index],
                 ];
             }
 
@@ -94,7 +92,7 @@ class LaraBug
 
         $rawResponse = $this->logError($data);
 
-        if (!$rawResponse) {
+        if (! $rawResponse) {
             return false;
         }
 
@@ -127,7 +125,6 @@ class LaraBug
         return true;
     }
 
-
     /**
      * @param string|null $id
      */
@@ -137,7 +134,7 @@ class LaraBug
     }
 
     /**
-     * Get the last exception id given to us by the larabug API
+     * Get the last exception id given to us by the larabug API.
      * @return string|null
      */
     public function getLastExceptionId()
@@ -169,7 +166,7 @@ class LaraBug
                 'HTTP_USER_AGENT' => Request::server('HTTP_USER_AGENT'),
                 'SERVER_PROTOCOL' => Request::server('SERVER_PROTOCOL'),
                 'SERVER_SOFTWARE' => Request::server('SERVER_SOFTWARE'),
-                'PHP_VERSION' => PHP_VERSION
+                'PHP_VERSION' => PHP_VERSION,
             ],
             'GET' => $this->filterVariables(Request::query()),
             'POST' => $this->filterVariables($_POST),
@@ -222,13 +219,15 @@ class LaraBug
                     unset($variables[$key]);
                 }
             });
+
             return $variables;
         }
+
         return [];
     }
 
     /**
-     * Gets information from the line
+     * Gets information from the line.
      *
      * @param $lines
      * @param $line
@@ -242,12 +241,13 @@ class LaraBug
 
         $index = $currentLine - 1;
 
-        if (!array_key_exists($index, $lines)) {
+        if (! array_key_exists($index, $lines)) {
             return;
         }
+
         return [
             'line_number' => $currentLine,
-            'line' => $lines[$index]
+            'line' => $lines[$index],
         ];
     }
 
@@ -279,7 +279,7 @@ class LaraBug
      */
     private function createExceptionString(array $data)
     {
-        return 'larabug.' . Str::slug($data['host'] . '_' . $data['method'] . '_' . $data['exception'] . '_' . $data['line'] . '_' . $data['file'] . '_' . $data['class']);
+        return 'larabug.'.Str::slug($data['host'].'_'.$data['method'].'_'.$data['exception'].'_'.$data['line'].'_'.$data['file'].'_'.$data['class']);
     }
 
     /**
@@ -326,4 +326,3 @@ class LaraBug
         return Cache::put($exceptionString, $exceptionString, config('larabug.sleep'));
     }
 }
-
