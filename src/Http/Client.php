@@ -37,12 +37,12 @@ class Client
         try {
             return $this->getGuzzleHttpClient()->request('POST', 'https://www.larabug.com/api/log', [
                 'headers' => [
-                    'Authorization' => 'Bearer ' . $this->login
+                    'Authorization' => 'Bearer '.$this->login,
                 ],
                 'form_params' => array_merge([
                     'project' => $this->project,
                     'additional' => [],
-                ], $exception)
+                ], $exception),
             ]);
         } catch (\GuzzleHttp\Exception\RequestException $e) {
             return $e->getResponse();
@@ -56,9 +56,9 @@ class Client
      */
     public function getGuzzleHttpClient()
     {
-        if (!isset($this->client)) {
+        if (! isset($this->client)) {
             $this->client = new \GuzzleHttp\Client([
-                'timeout' => 15
+                'timeout' => 15,
             ]);
         }
 

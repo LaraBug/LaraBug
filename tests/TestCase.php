@@ -2,8 +2,8 @@
 
 namespace LaraBug\Tests;
 
-use Illuminate\Foundation\Application;
 use LaraBug\ServiceProvider;
+use Illuminate\Foundation\Application;
 
 class TestCase extends \Orchestra\Testbench\TestCase
 {

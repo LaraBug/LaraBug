@@ -2,8 +2,8 @@
 
 namespace LaraBug;
 
-use LaraBug\Fakes\LaraBugFake;
 use LaraBug\Http\Client;
+use LaraBug\Fakes\LaraBugFake;
 
 /**
  * @method static void assertSent($throwable, $callback = null)

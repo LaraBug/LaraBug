@@ -4,7 +4,6 @@ namespace LaraBug\Commands;
 
 use Exception;
 use Illuminate\Console\Command;
-use GuzzleHttp\Exception\GuzzleException;
 
 class TestCommand extends Command
 {
@@ -18,19 +17,19 @@ class TestCommand extends Command
             /** @var LaraBug $larabug */
             $larabug = app('larabug');
 
-            if(config('larabug.login_key')) {
+            if (config('larabug.login_key')) {
                 $this->info('✓ [Larabug] Found login key');
             } else {
                 $this->error('✗ [LaraBug] Could not find your login key, set this in your .env');
             }
 
-            if(config('larabug.project_key')) {
+            if (config('larabug.project_key')) {
                 $this->info('✓ [Larabug] Found project key');
             } else {
                 $this->error('✗ [LaraBug] Could not find your project key, set this in your .env');
             }
 
-            if(in_array(config('app.env'), config('larabug.environments'))) {
+            if (in_array(config('app.env'), config('larabug.environments'))) {
                 $this->info('✓ [Larabug] Correct environment found');
             } else {
                 $this->error('✗ [LaraBug] Environment not allowed to send errors to LaraBug, set this in your config');
@@ -40,14 +39,14 @@ class TestCommand extends Command
                 $this->generateException()
             );
 
-            if(isset($response->id)) {
-                $this->info('✓ [LaraBug] Sent exception to LaraBug with ID: ' . $response->id);
-            } elseif(is_null($response)) {
+            if (isset($response->id)) {
+                $this->info('✓ [LaraBug] Sent exception to LaraBug with ID: '.$response->id);
+            } elseif (is_null($response)) {
                 $this->info('✓ [LaraBug] Sent exception to LaraBug!');
             } else {
                 $this->error('✗ [LaraBug] Failed to send exception to LaraBug');
             }
-        } catch(\Exception $ex) {
+        } catch (\Exception $ex) {
             $this->error("✗ [LaraBug] {$ex->getMessage()}");
         }
     }

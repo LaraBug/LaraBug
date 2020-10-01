@@ -2,10 +2,10 @@
 
 namespace LaraBug;
 
-use Illuminate\Support\Facades\Route;
 use Monolog\Logger;
 use LaraBug\Commands\TestCommand;
 use Illuminate\Support\Facades\Blade;
+use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ServiceProvider as BaseServiceProvider;
 
 class ServiceProvider extends BaseServiceProvider
@@ -18,12 +18,12 @@ class ServiceProvider extends BaseServiceProvider
         // Publish configuration file
         if (function_exists('config_path')) {
             $this->publishes([
-                __DIR__ . '/../config/larabug.php' => config_path('larabug.php'),
+                __DIR__.'/../config/larabug.php' => config_path('larabug.php'),
             ]);
         }
 
         // Register views
-        $this->app['view']->addNamespace('larabug', __DIR__ . '/../resources/views');
+        $this->app['view']->addNamespace('larabug', __DIR__.'/../resources/views');
 
         // Register facade
         if (class_exists(\Illuminate\Foundation\AliasLoader::class)) {
@@ -33,7 +33,7 @@ class ServiceProvider extends BaseServiceProvider
 
         // Register commands
         $this->commands([
-            TestCommand::class
+            TestCommand::class,
         ]);
 
         // Map any routes
@@ -48,7 +48,7 @@ class ServiceProvider extends BaseServiceProvider
      */
     public function register()
     {
-        $this->mergeConfigFrom(__DIR__ . '/../config/larabug.php', 'larabug');
+        $this->mergeConfigFrom(__DIR__.'/../config/larabug.php', 'larabug');
 
         $this->app->singleton('larabug', function ($app) {
             return new LaraBug(new \LaraBug\Http\Client(
@@ -68,13 +68,10 @@ class ServiceProvider extends BaseServiceProvider
         }
     }
 
-    /**
-     *
-     */
     protected function mapLaraBugApiRoutes()
     {
         Route::namespace('\LaraBug\Http\Controllers')
             ->prefix('larabug-api')
-            ->group(__DIR__ . '/../routes/api.php');
+            ->group(__DIR__.'/../routes/api.php');
     }
 }

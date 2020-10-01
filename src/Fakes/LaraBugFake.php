@@ -65,4 +65,3 @@ class LaraBugFake extends \LaraBug\LaraBug
         $this->exceptions[get_class($exception)][] = $exception;
     }
 }
-
