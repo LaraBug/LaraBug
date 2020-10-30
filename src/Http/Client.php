@@ -38,8 +38,10 @@ class Client
             return $this->getGuzzleHttpClient()->request('POST', 'https://www.larabug.com/api/log', [
                 'headers' => [
                     'Authorization' => 'Bearer '.$this->login,
+                    'Content-Type' => 'application/json',
+                    'Accept' => 'application/json'
                 ],
-                'form_params' => array_merge([
+                'json' => array_merge([
                     'project' => $this->project,
                     'additional' => [],
                 ], $exception),
