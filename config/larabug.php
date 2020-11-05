@@ -12,7 +12,7 @@ return [
     |
     */
 
-    'login_key' => env('LB_KEY', 'LB_KEY'),
+    'login_key' => env('LB_KEY', ''),
 
     /*
     |--------------------------------------------------------------------------
@@ -24,7 +24,7 @@ return [
     |
     */
 
-    'project_key' => env('LB_PROJECT_KEY', 'LB_PROJECT_KEY'),
+    'project_key' => env('LB_PROJECT_KEY', ''),
 
     /*
     |--------------------------------------------------------------------------
