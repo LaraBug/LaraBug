@@ -188,6 +188,10 @@ class LaraBug
         $lines = file($data['file']);
         $data['executor'] = [];
 
+        if (count($lines) < $count) {
+            $count = count($lines) - $data['line'];
+        }
+        
         for ($i = -1 * abs($count); $i <= abs($count); $i++) {
             $data['executor'][] = $this->getLineInfo($lines, $data['line'], $i);
         }
