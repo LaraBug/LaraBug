@@ -19,7 +19,7 @@
                     message: e.message,
                     exception: exception,
                     file: e.filename,
-                    url: window.location.href,
+                    url: window.location.origin + window.location.pathname,
                     line: e.lineno,
                     column: e.colno,
                     error: e.message,
