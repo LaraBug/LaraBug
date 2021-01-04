@@ -27,7 +27,7 @@
                 };
 
                 let xhr = new XMLHttpRequest();
-                xhr.open("POST", window.location + '/larabug-api/javascript-report', true);
+                xhr.open("POST", window.location.origin + '/larabug-api/javascript-report', true);
                 xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
                 xhr.onload = function () {
                     if (this.status >= 200 && this.status < 300) {
