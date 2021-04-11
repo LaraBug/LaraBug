@@ -35,7 +35,7 @@ class Client
     public function report($exception)
     {
         try {
-            return $this->getGuzzleHttpClient()->request('POST', 'https://www.larabug.com/api/log', [
+            return $this->getGuzzleHttpClient()->request('POST', config('larabug.server'), [
                 'headers' => [
                     'Authorization' => 'Bearer '.$this->login,
                     'Content-Type' => 'application/json',

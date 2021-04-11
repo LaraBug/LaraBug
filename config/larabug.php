@@ -28,7 +28,7 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | Enviroment setting
+    | Environment setting
     |--------------------------------------------------------------------------
     |
     | This setting determines if the exception should be send over or not.
@@ -99,4 +99,15 @@ return [
     */
 
     // 'release' => trim(exec('git --git-dir ' . base_path('.git') . ' log --pretty="%h" -n1 HEAD'))
+
+    /*
+    |--------------------------------------------------------------------------
+    | Server setting
+    |--------------------------------------------------------------------------
+    |
+    | This setting allows you to change the server.
+    |
+    */
+
+    'server' => env('LB_SERVER', 'https://www.larabug.com/api/log'),
 ];
