@@ -18,12 +18,12 @@ class ServiceProvider extends BaseServiceProvider
         // Publish configuration file
         if (function_exists('config_path')) {
             $this->publishes([
-                __DIR__.'/../config/larabug.php' => config_path('larabug.php'),
+                __DIR__ . '/../config/larabug.php' => config_path('larabug.php'),
             ]);
         }
 
         // Register views
-        $this->app['view']->addNamespace('larabug', __DIR__.'/../resources/views');
+        $this->app['view']->addNamespace('larabug', __DIR__ . '/../resources/views');
 
         // Register facade
         if (class_exists(\Illuminate\Foundation\AliasLoader::class)) {
@@ -48,7 +48,7 @@ class ServiceProvider extends BaseServiceProvider
      */
     public function register()
     {
-        $this->mergeConfigFrom(__DIR__.'/../config/larabug.php', 'larabug');
+        $this->mergeConfigFrom(__DIR__ . '/../config/larabug.php', 'larabug');
 
         $this->app->singleton('larabug', function ($app) {
             return new LaraBug(new \LaraBug\Http\Client(
@@ -70,8 +70,14 @@ class ServiceProvider extends BaseServiceProvider
 
     protected function mapLaraBugApiRoutes()
     {
-        Route::namespace('\LaraBug\Http\Controllers')
-            ->prefix('larabug-api')
-            ->group(__DIR__.'/../routes/api.php');
+        Route::group(
+            [
+                'namespace' => '\LaraBug\Http\Controllers',
+                'prefix' => 'larabug-api'
+            ],
+            function ($router) {
+                require __DIR__ . '/../routes/api.php';
+            }
+        );
     }
 }
