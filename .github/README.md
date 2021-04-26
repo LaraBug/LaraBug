@@ -37,6 +37,10 @@ php -r "file_exists('config/') || mkdir('config/'); copy('vendor/larabug/larabug
 And adjust config file (`config/larabug.php`) with your desired settings.
 
 In `bootstrap/app.php` you will need to:
+- Uncomment this line:
+    ```php
+    $app->withFacades();
+    ```
 - Register the larabug config file:
     ```php
     $app->configure('larabug');
@@ -79,7 +83,8 @@ After that you have configured the LaraBug channel you can add it to the stack s
 ],
 ```
 
-PS: If you are using lumen, maybe you doesn't have the `logging.php` file. So, you can use default logging file from framework core.
+PS: If you are using lumen, maybe you doesn't have the `logging.php` file. So, you can use default logging file from
+framework core and make changes above.
 ```bash
 php -r "file_exists('config/') || mkdir('config/'); copy('vendor/laravel/lumen-framework/config/logging.php', 'config/logging.php');"
 ```
