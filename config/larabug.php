@@ -36,7 +36,7 @@ return [
     */
 
     'environments' => [
-        'production'
+        'production',
     ],
 
     /*
@@ -86,8 +86,10 @@ return [
     */
 
     'blacklist' => [
+        'authorization',
+        'current_password',
         'password',
-        'authorization'
+        'password_confirmation',
     ],
 
     /*
