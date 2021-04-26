@@ -78,5 +78,11 @@ After that you have configured the LaraBug channel you can add it to the stack s
     //...
 ],
 ```
+
+PS: If you are using lumen, maybe you doesn't have the `logging.php` file. So, you can use default logging file from framework core.
+```bash
+php -r "file_exists('config/') || mkdir('config/'); copy('vendor/laravel/lumen-framework/config/logging.php', 'config/logging.php');"
+```
+
 ## License
 The larabug package is open source software licensed under the [license MIT](http://opensource.org/licenses/MIT)
