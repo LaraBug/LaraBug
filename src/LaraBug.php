@@ -191,7 +191,7 @@ class LaraBug
         if (count($lines) < $count) {
             $count = count($lines) - $data['line'];
         }
-        
+
         for ($i = -1 * abs($count); $i <= abs($count); $i++) {
             $data['executor'][] = $this->getLineInfo($lines, $data['line'], $i);
         }
@@ -303,7 +303,7 @@ class LaraBug
      */
     public function getUser()
     {
-        if (function_exists('auth') && auth()->check()) {
+        if (function_exists('auth') && auth()->hasResolvedGuards() && auth()->check()) {
             /** @var \Illuminate\Contracts\Auth\Authenticatable $user */
             $user = auth()->user();
 

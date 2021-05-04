@@ -10,7 +10,7 @@ Laravel 5.8/6.x/7.x/8.x package for logging errors to [larabug.com](https://www.
 [![Build Status](https://github.com/larabug/larabug/workflows/tests/badge.svg)](https://github.com/larabug/larabug/actions)
 [![Total Downloads](https://poser.pugx.org/larabug/larabug/d/total.svg)](https://packagist.org/packages/larabug/larabug)
 
-## Installation 
+## Installation on laravel
 You can install the package through Composer.
 ```bash
 composer require larabug/larabug
@@ -23,6 +23,32 @@ php artisan vendor:publish --provider="LaraBug\ServiceProvider"
 And adjust config file (`config/larabug.php`) with your desired settings.
 
 Note: by default only production environments will report errors. To modify this edit your larabug configuration.
+
+## Installation on lumen
+You can install the package through Composer.
+```bash
+composer require larabug/larabug
+```
+
+Copy the config file (`larabug.php`) to lumen config directory.
+```bash
+php -r "file_exists('config/') || mkdir('config/'); copy('vendor/larabug/larabug/config/larabug.php', 'config/larabug.php');"
+```
+And adjust config file (`config/larabug.php`) with your desired settings.
+
+In `bootstrap/app.php` you will need to:
+- Uncomment this line:
+    ```php
+    $app->withFacades();
+    ```
+- Register the larabug config file:
+    ```php
+    $app->configure('larabug');
+    ```
+- Register larabug service provider:
+    ```php
+    $app->register(LaraBug\ServiceProvider::class);
+    ```
 
 ## Configuration variables
 All that is left to do is to define 2 env configuration variables.
@@ -56,5 +82,12 @@ After that you have configured the LaraBug channel you can add it to the stack s
     //...
 ],
 ```
+
+PS: If you are using lumen, maybe you doesn't have the `logging.php` file. So, you can use default logging file from
+framework core and make changes above.
+```bash
+php -r "file_exists('config/') || mkdir('config/'); copy('vendor/laravel/lumen-framework/config/logging.php', 'config/logging.php');"
+```
+
 ## License
 The larabug package is open source software licensed under the [license MIT](http://opensource.org/licenses/MIT)
