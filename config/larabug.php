@@ -90,6 +90,13 @@ return [
         'current_password',
         'password',
         'password_confirmation',
+        'token',
+        'auth',
+        'verification',
+        'credit_card',
+        'cardToken', // mollie card token
+        'cvv',
+        'iban',
     ],
 
     /*
