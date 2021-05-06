@@ -86,10 +86,17 @@ return [
     */
 
     'blacklist' => [
-        'authorization',
-        'current_password',
-        'password',
-        'password_confirmation',
+        '*authorization*',
+        '*password*',
+        '*token*',
+        '*auth*',
+        '*verification*',
+        '*credit_card*',
+        'cardToken', // mollie card token
+        '*cvv*',
+        '*iban*',
+        '*name*',
+        '*email*'
     ],
 
     /*
