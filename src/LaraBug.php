@@ -218,7 +218,7 @@ class LaraBug
                     $variables[$key] = $this->filterVariables($val);
                 }
                 foreach($this->blacklist as $filter) {
-                    if(Str::is($filter, strtolower($key))) {
+                    if (Str::is($filter, strtolower($key))) {
                         $variables[$key] = '***';
                     }
                 }
