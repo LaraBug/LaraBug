@@ -78,7 +78,7 @@ class LaraBug
 
                 $index = $currentLine - 1;
 
-                if (! array_key_exists($index, $lines)) {
+                if (!array_key_exists($index, $lines)) {
                     continue;
                 }
 
@@ -93,7 +93,7 @@ class LaraBug
 
         $rawResponse = $this->logError($data);
 
-        if (! $rawResponse) {
+        if (!$rawResponse) {
             return false;
         }
 
@@ -206,34 +206,34 @@ class LaraBug
 
         return $data;
     }
-    
+
     /**
      * @param array $parameters
      * @return array
      */
     public function filterParameterValues($parameters)
     {
-        return collect($parameters)->map(function($value) {
-            if($this->shouldParameterValueBeFiltered($value)) {
+        return collect($parameters)->map(function ($value) {
+            if ($this->shouldParameterValueBeFiltered($value))  {
                 return '...';
             }
-            
+
             return $value;
         })->toArray();
     }
-    
+
     /**
      * Determines whether the given parameter value should be filtered.
-     * 
+     *
      * @param mixed $value
      * @return bool
      */
     public function shouldParameterValueBeFiltered($value)
     {
-        if($value instanceof UploadFile) {
+        if ($value instanceof UploadFile) {
             return true;
         }
-        
+
         return false;
     }
 
@@ -248,7 +248,7 @@ class LaraBug
                 if (is_array($val)) {
                     $variables[$key] = $this->filterVariables($val);
                 }
-                foreach($this->blacklist as $filter) {
+                foreach ($this->blacklist as $filter) {
                     if (Str::is($filter, strtolower($key))) {
                         $variables[$key] = '***';
                     }
@@ -276,7 +276,7 @@ class LaraBug
 
         $index = $currentLine - 1;
 
-        if (! array_key_exists($index, $lines)) {
+        if (!array_key_exists($index, $lines)) {
             return;
         }
 
@@ -314,7 +314,7 @@ class LaraBug
      */
     private function createExceptionString(array $data)
     {
-        return 'larabug.'.Str::slug($data['host'].'_'.$data['method'].'_'.$data['exception'].'_'.$data['line'].'_'.$data['file'].'_'.$data['class']);
+        return 'larabug.' . Str::slug($data['host'] . '_' . $data['method'] . '_' . $data['exception'] . '_' . $data['line'] . '_' . $data['file'] . '_' . $data['class']);
     }
 
     /**
