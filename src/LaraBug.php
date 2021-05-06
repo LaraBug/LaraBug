@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\App;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Request;
 use Illuminate\Support\Facades\Session;
+use Illuminate\Http\UploadedFile;
 
 class LaraBug
 {
@@ -172,7 +173,7 @@ class LaraBug
             'COOKIE' => $this->filterVariables(Request::cookie()),
             'SESSION' => $this->filterVariables(Request::hasSession() ? Session::all() : []),
             'HEADERS' => $this->filterVariables(Request::header()),
-            'PARAMETERS' => $this->filterVariables(Request::all())
+            'PARAMETERS' => $this->filterVariables($this->filterParameterValues(Request::all()))
         ];
 
         $data['storage'] = array_filter($data['storage']);
@@ -204,6 +205,36 @@ class LaraBug
         }
 
         return $data;
+    }
+    
+    /**
+     * @param array $parameters
+     * @return array
+     */
+    public function filterParameterValues($parameters)
+    {
+        return collect($parameters)->map(function($value) {
+            if($this->shouldParameterValueBeFiltered($value)) {
+                return '...';
+            }
+            
+            return $value;
+        })->toArray();
+    }
+    
+    /**
+     * Determines whether the given parameter value should be filtered.
+     * 
+     * @param mixed $value
+     * @return bool
+     */
+    public function shouldParameterValueBeFiltered($value)
+    {
+        if($value instanceof UploadFile) {
+            return true;
+        }
+        
+        return false;
     }
 
     /**
