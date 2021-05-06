@@ -95,7 +95,7 @@ return [
         'cardToken', // mollie card token
         '*cvv*',
         '*iban*',
-        '*username*',
+        '*name*',
         '*email*'
     ],
 
