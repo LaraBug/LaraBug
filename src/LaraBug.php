@@ -220,8 +220,10 @@ class LaraBug
                 if (is_array($val)) {
                     $variables[$key] = $this->filterVariables($val);
                 }
-                if (in_array(strtolower($key), $this->blacklist)) {
-                    $variables[$key] = '***';
+                foreach($this->blacklist as $filter) {
+                    if(Str::is($filter, strtolower($key))) {
+                        $variables[$key] = '***';
+                    }
                 }
             });
 
