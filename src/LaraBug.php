@@ -214,7 +214,7 @@ class LaraBug
     public function filterParameterValues($parameters)
     {
         return collect($parameters)->map(function ($value) {
-            if ($this->shouldParameterValueBeFiltered($value))  {
+            if ($this->shouldParameterValueBeFiltered($value)) {
                 return '...';
             }
 
