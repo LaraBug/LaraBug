@@ -175,6 +175,7 @@ class LaraBug
             'COOKIE' => $this->filterVariables(Request::cookie()),
             'SESSION' => $this->filterVariables(Request::hasSession() ? Session::all() : []),
             'HEADERS' => $this->filterVariables(Request::header()),
+            'PARAMETERS' => $this->filterVariables(Request::all())
         ];
 
         $data['storage'] = array_filter($data['storage']);
@@ -220,7 +221,7 @@ class LaraBug
                     $variables[$key] = $this->filterVariables($val);
                 }
                 if (in_array(strtolower($key), $this->blacklist)) {
-                    unset($variables[$key]);
+                    $variables[$key] = '***';
                 }
             });
 
