@@ -334,7 +334,7 @@ class LaraBug
      */
     public function getUser()
     {
-        if (function_exists('auth') && auth()->hasResolvedGuards() && auth()->check()) {
+        if (function_exists('auth') && (app() instanceof \Illuminate\Foundation\Application && auth()->hasResolvedGuards() && auth()->check())) {
             /** @var \Illuminate\Contracts\Auth\Authenticatable $user */
             $user = auth()->user();
 
