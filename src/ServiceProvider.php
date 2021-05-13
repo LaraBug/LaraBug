@@ -2,10 +2,12 @@
 
 namespace LaraBug;
 
+use Exception;
 use Monolog\Logger;
 use LaraBug\Commands\TestCommand;
 use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Log\Events\MessageLogged;
 use Illuminate\Support\ServiceProvider as BaseServiceProvider;
 
 class ServiceProvider extends BaseServiceProvider
@@ -64,6 +66,20 @@ class ServiceProvider extends BaseServiceProvider
                 );
 
                 return new Logger('larabug', [$handler]);
+            });
+        } else {
+            $this->app['log']->listen(function (MessageLogged $messageLogged) {
+                if (config('larabug.login_key')) {
+                    try {
+                        $this->app['Larabug']->log(
+                            $messageLogged->level,
+                            $messageLogged->message,
+                            $messageLogged->context
+                        );
+                    } catch (Exception $exception) {
+                        return;
+                    }
+                }
             });
         }
     }
