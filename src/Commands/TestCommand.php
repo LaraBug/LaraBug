@@ -31,9 +31,9 @@ class TestCommand extends Command
             }
 
             if (in_array(config('app.env'), config('larabug.environments'))) {
-                $this->info('✓ [Larabug] Correct environment found');
+                $this->info('✓ [Larabug] Correct environment found (' . config('app.env') . ')');
             } else {
-                $this->error('✗ [LaraBug] Environment not allowed to send errors to LaraBug, set this in your config');
+                $this->error('✗ [LaraBug] Environment (' . config('app.env') . ') not allowed to send errors to LaraBug, set this in your config');
                 $this->info('More information about environment configuration: https://www.larabug.com/docs/how-to-use/installation');
             }
 
