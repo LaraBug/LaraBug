@@ -138,7 +138,7 @@ class LaraBugTest extends TestCase
             'it_can_get_formatted_exception_data'
         ));
 
-        $this->assertSame('testing', $data['enviroment']);
+        $this->assertSame('testing', $data['environment']);
         $this->assertSame('localhost', $data['host']);
         $this->assertSame('GET', $data['method']);
         $this->assertSame('http://localhost', $data['fullUrl']);
