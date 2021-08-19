@@ -151,7 +151,7 @@ class LaraBug
     {
         $data = [];
 
-        $data['enviroment'] = App::environment();
+        $data['environment'] = App::environment();
         $data['host'] = Request::server('SERVER_NAME');
         $data['method'] = Request::method();
         $data['fullUrl'] = Request::fullUrl();
