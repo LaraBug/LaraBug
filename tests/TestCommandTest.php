@@ -46,13 +46,13 @@ class TestCommandTest extends TestCase
         $this->app['config']['larabug.environments'] = [];
 
         $this->artisan('larabug:test')
-            ->expectsOutput('✗ [LaraBug] Environment not allowed to send errors to LaraBug, set this in your config')
+            ->expectsOutput('✗ [LaraBug] Environment (production) not allowed to send errors to LaraBug, set this in your config')
             ->assertExitCode(0);
 
         $this->app['config']['larabug.environments'] = ['production'];
 
         $this->artisan('larabug:test')
-            ->expectsOutput('✓ [Larabug] Correct environment found')
+            ->expectsOutput('✓ [Larabug] Correct environment found (' . config('app.env') . ')')
             ->assertExitCode(0);
     }
 
