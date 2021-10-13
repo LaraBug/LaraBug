@@ -41,6 +41,19 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Project version
+    |--------------------------------------------------------------------------
+    |
+    | Set the project version.
+    | default: null
+    | 'git' uses the current git commit id
+    | Change to env('APP_VERSION') for example to use a preset version number.
+    |
+    */
+    'project_version' => null,
+
+    /*
+    |--------------------------------------------------------------------------
     | Lines near exception
     |--------------------------------------------------------------------------
     |
