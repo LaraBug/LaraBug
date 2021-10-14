@@ -44,10 +44,8 @@ return [
     | Project version
     |--------------------------------------------------------------------------
     |
-    | Set the project version.
-    | default: null
-    | 'git' uses the current git commit id
-    | Change to env('APP_VERSION') for example to use a preset version number.
+    | Set the project version, default: null.
+    | For git repository: shell_exec("git log -1 --pretty=format:'%h' --abbrev-commit")
     |
     */
     'project_version' => null,
