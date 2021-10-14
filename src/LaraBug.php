@@ -196,6 +196,9 @@ class LaraBug
         }
         $data['executor'] = array_filter($data['executor']);
 
+        // Get project version
+        $data['project_version'] = config('larabug.project_version', null);
+
         // to make symfony exception more readable
         if ($data['class'] == 'Symfony\Component\Debug\Exception\FatalErrorException') {
             preg_match("~^(.+)' in ~", $data['exception'], $matches);
