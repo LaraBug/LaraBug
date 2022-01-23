@@ -16,13 +16,13 @@ You can install the package through Composer.
 composer require larabug/larabug
 ```
 
-Then publish the config and migration file of the package using artisan.
+Then publish the config and migration file of the package using the vendor publish command.
 ```bash
 php artisan vendor:publish --provider="LaraBug\ServiceProvider"
 ```
 And adjust config file (`config/larabug.php`) with your desired settings.
 
-Note: by default only production environments will report errors. To modify this edit your larabug configuration.
+Note: by default only production environments will report errors. To modify this edit your LaraBug configuration.
 
 ## Installation on lumen
 You can install the package through Composer.
@@ -51,16 +51,16 @@ In `bootstrap/app.php` you will need to:
     ```
 
 ## Configuration variables
-All that is left to do is to define 2 env configuration variables.
+All that is left to do is to define two env configuration variables.
 ```
 LB_KEY=
 LB_PROJECT_KEY=
 ```
 `LB_KEY` is your profile key which authorises your account to the API.
 
-`LB_PROJECT_KEY` is your project API key which you receive when creating a project.
+`LB_PROJECT_KEY` is your project API key which you've received when creating a project.
 
-Get these variables at [larabug.com](https://www.larabug.com)
+Get the variables at [larabug.com](https://www.larabug.com)
 
 ## Reporting unhandled exceptions
 You can use LaraBug as a log-channel by adding the following config to the `channels` section in `config/logging.php`:
@@ -72,7 +72,7 @@ You can use LaraBug as a log-channel by adding the following config to the `chan
     ],
 ],
 ```
-After that you have configured the LaraBug channel you can add it to the stack section:
+After that you can add it to the stack section:
 ```php
 'channels' => [
     'stack' => [
@@ -83,11 +83,11 @@ After that you have configured the LaraBug channel you can add it to the stack s
 ],
 ```
 
-PS: If you are using lumen, maybe you doesn't have the `logging.php` file. So, you can use default logging file from
+PS: If you're using lumen, it could be that you don't have the `logging.php` file. So, you can use default logging file from
 framework core and make changes above.
 ```bash
 php -r "file_exists('config/') || mkdir('config/'); copy('vendor/laravel/lumen-framework/config/logging.php', 'config/logging.php');"
 ```
 
 ## License
-The larabug package is open source software licensed under the [license MIT](http://opensource.org/licenses/MIT)
+The LaraBug package is open source software licensed under the [license MIT](http://opensource.org/licenses/MIT)
