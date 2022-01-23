@@ -5,11 +5,11 @@ namespace LaraBug;
 use Throwable;
 use LaraBug\Http\Client;
 use Illuminate\Support\Str;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\App;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Request;
 use Illuminate\Support\Facades\Session;
-use Illuminate\Http\UploadedFile;
 
 class LaraBug
 {
@@ -233,11 +233,7 @@ class LaraBug
      */
     public function shouldParameterValueBeFiltered($value)
     {
-        if ($value instanceof UploadFile) {
-            return true;
-        }
-
-        return false;
+        return $value instanceof UploadedFile;
     }
 
     /**
