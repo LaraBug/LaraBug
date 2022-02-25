@@ -7,7 +7,7 @@ use Illuminate\Console\Command;
 
 class TestCommand extends Command
 {
-    protected $signature = 'larabug:test';
+    protected $signature = 'larabug:test {exception?}';
 
     protected $description = 'Generate a test exception and send it to larabug';
 
@@ -56,7 +56,7 @@ class TestCommand extends Command
     public function generateException(): ?Exception
     {
         try {
-            throw new Exception('This is a test exception from the LaraBug console');
+            throw new Exception($this->argument('exception') ?? 'This is a test exception from the LaraBug console');
         } catch (Exception $ex) {
             return $ex;
         }
