@@ -155,7 +155,7 @@ class LaraBug
         $data['host'] = Request::server('SERVER_NAME');
         $data['method'] = Request::method();
         $data['fullUrl'] = Request::fullUrl();
-        $data['exception'] = $exception->getMessage() ?? 'Exception with no message';
+        $data['exception'] = $exception->getMessage() ?? '-';
         $data['error'] = $exception->getTraceAsString();
         $data['line'] = $exception->getLine();
         $data['file'] = $exception->getFile();
