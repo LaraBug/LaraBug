@@ -1,6 +1,6 @@
 {
     "name": "larabug/larabug",
-    "description": "Laravel 7.x/8.x/9.x bug notifier",
+    "description": "Laravel 8.x/9.x bug notifier",
     "keywords": [
         "laravel",
         "log",
