@@ -6,11 +6,11 @@ use LaraBug\LaraBug;
 
 use function Pest\Laravel\actingAs;
 
-use LaraBug\Tests\Mocks\LaraBugClient;
 use LaraBug\Tests\Support\CustomerUser;
 
 use function PHPUnit\Framework\assertSame;
 
+use LaraBug\Tests\Support\Mocks\LaraBugClient;
 use LaraBug\Tests\Support\CustomerUserWithToLarabug;
 
 beforeEach(function () {

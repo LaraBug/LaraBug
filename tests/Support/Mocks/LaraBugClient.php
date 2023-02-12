@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace LaraBug\Tests\Mocks;
+namespace LaraBug\Tests\Support\Mocks;
 
 use LaraBug\Http\Client;
 use GuzzleHttp\Psr7\Response;

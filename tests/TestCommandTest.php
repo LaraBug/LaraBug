@@ -7,9 +7,9 @@ use LaraBug\Commands\TestCommand;
 
 use function Pest\Laravel\artisan;
 
-use LaraBug\Tests\Mocks\LaraBugClient;
-
 use function PHPUnit\Framework\assertEquals;
+
+use LaraBug\Tests\Support\Mocks\LaraBugClient;
 
 it('detects if the login key is set', function () {
     config(['larabug.login_key' => '']);

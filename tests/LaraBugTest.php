@@ -8,14 +8,16 @@ use LaraBug\LaraBug;
 use GuzzleHttp\Client;
 use GuzzleHttp\Psr7\Response;
 use GuzzleHttp\Handler\MockHandler;
-use LaraBug\Tests\Mocks\LaraBugClient;
 
 use function PHPUnit\Framework\assertSame;
-
 use function PHPUnit\Framework\assertTrue;
+
 use function PHPUnit\Framework\assertCount;
 use function PHPUnit\Framework\assertFalse;
 use function PHPUnit\Framework\assertContains;
+
+use LaraBug\Tests\Support\Mocks\LaraBugClient;
+
 use function PHPUnit\Framework\assertInstanceOf;
 
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
