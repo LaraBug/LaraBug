@@ -10,7 +10,8 @@
         "php": "^8.0",
         "guzzlehttp/guzzle": "^6.0.2 || ^7.0",
         "illuminate/support": "8.83.27 || ^9.51.0",
-        "nesbot/carbon": "^2.66"
+        "nesbot/carbon": "^2.66",
+        "spatie/laravel-package-tools": "^1.12.1"
     },
     "require-dev": {
         "mockery/mockery": "^1.3.3",
@@ -40,7 +41,10 @@
         "laravel": {
             "providers": [
                 "LaraBug\\ServiceProvider"
-            ]
+            ],
+            "aliases": {
+                "LaraBug": "LaraBug\\Facade"
+            }
         }
     },
     "minimum-stability": "dev",

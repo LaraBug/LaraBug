@@ -9,46 +9,30 @@ use LaraBug\Http\Client;
 use Illuminate\Log\LogManager;
 use LaraBug\Commands\TestCommand;
 use Illuminate\Support\Facades\Blade;
-use Illuminate\Support\Facades\Route;
-use Illuminate\Foundation\AliasLoader;
-use Illuminate\Support\ServiceProvider as BaseServiceProvider;
+use Spatie\LaravelPackageTools\Package;
+use Spatie\LaravelPackageTools\PackageServiceProvider;
 
-class ServiceProvider extends BaseServiceProvider
+class ServiceProvider extends PackageServiceProvider
 {
-    public function boot(): void
+    public function configurePackage(Package $package): void
     {
-        // Publish configuration file
-        if (function_exists('config_path')) {
-            $this->publishes([
-                __DIR__ . '/../config/larabug.php' => config_path('larabug.php'),
-            ]);
-        }
+        $package
+            ->name('larabug')
+            ->hasConfigFile()
+            ->hasViews()
+            ->hasCommand(TestCommand::class)
+            ->hasRoute('api')
+        ;
+    }
 
-        // Register views
-        $this->app['view']->addNamespace('larabug', __DIR__ . '/../resources/views');
-
-        // Register facade
-        if (class_exists(AliasLoader::class)) {
-            $loader = AliasLoader::getInstance();
-            $loader->alias('LaraBug', 'LaraBug\Facade');
-        }
-
-        // Register commands
-        $this->commands([
-            TestCommand::class,
-        ]);
-
-        // Map any routes
-        $this->mapLaraBugApiRoutes();
-
+    public function packageBooted(): void
+    {
         // Create an alias to the larabug-js-client.blade.php include
         Blade::include('larabug::larabug-js-client', 'larabugJavaScriptClient');
     }
 
-    public function register(): void
+    public function packageRegistered(): void
     {
-        $this->mergeConfigFrom(__DIR__ . '/../config/larabug.php', 'larabug');
-
         $this->app->singleton('larabug', function ($app) {
             return new LaraBug(new Client(
                 config('larabug.login_key', 'login_key'),
@@ -65,18 +49,5 @@ class ServiceProvider extends BaseServiceProvider
                 return new Logger('larabug', [$handler]);
             });
         }
-    }
-
-    protected function mapLaraBugApiRoutes(): void
-    {
-        Route::group(
-            [
-                'namespace' => '\LaraBug\Http\Controllers',
-                'prefix' => 'larabug-api'
-            ],
-            function ($router) {
-                require __DIR__ . '/../routes/api.php';
-            }
-        );
     }
 }
