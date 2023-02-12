@@ -14,6 +14,7 @@
         "spatie/laravel-package-tools": "^1.12.1"
     },
     "require-dev": {
+        "composer-runtime-api": "^2.0",
         "mockery/mockery": "^1.3.3",
         "orchestra/testbench": "^6.25.1 || ^7.22.0",
         "pestphp/pest": "^1.22.4",
@@ -32,8 +33,8 @@
         }
     },
     "scripts": {
-        "test": "vendor/bin/phpunit",
-        "test-coverage": "vendor/bin/phpunit --coverage-html coverage",
+        "test": "vendor/bin/pest",
+        "test-coverage": "vendor/bin/pest --coverage-html build/coverage",
         "format": "vendor/bin/pint",
         "rector": "vendor/bin/rector process"
     },
