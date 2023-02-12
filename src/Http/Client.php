@@ -32,9 +32,12 @@ class Client
                 ->asJson()
                 ->acceptJson()
                 ->withUserAgent('LaraBug-Package')
-                ->when(!config('larabug.verify_ssl'), function (PendingRequest|\GuzzleHttp\Client $client) {
-                    $client->withoutVerifying();
-                })
+                ->when(
+                    !config('larabug.verify_ssl'),
+                    function (PendingRequest|\GuzzleHttp\Client $client) {
+                        $client->withoutVerifying();
+                    }
+                )
                 ->post(
                     config('larabug.server'),
                     array_merge(
