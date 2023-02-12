@@ -24,9 +24,6 @@ class LaraBugClient extends \LaraBug\Http\Client
         return new Response(200, [], json_encode(['id' => self::RESPONSE_ID]));
     }
 
-    /**
-     * @param int $expectedCount
-     */
     public function assertRequestsSent(int $expectedCount)
     {
         Assert::assertCount($expectedCount, $this->requests);

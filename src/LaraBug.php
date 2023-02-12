@@ -15,22 +15,14 @@ use Illuminate\Support\Facades\Session;
 
 class LaraBug
 {
-    /** @var Client */
-    private $client;
-
     /** @var array */
     private $blacklist = [];
 
     /** @var null|string */
     private $lastExceptionId;
 
-    /**
-     * @param Client $client
-     */
-    public function __construct(Client $client)
+    public function __construct(private Client $client)
     {
-        $this->client = $client;
-
         $this->blacklist = array_map(function ($blacklist) {
             return strtolower($blacklist);
         }, config('larabug.blacklist', []));
@@ -128,9 +120,6 @@ class LaraBug
         return true;
     }
 
-    /**
-     * @param string|null $id
-     */
     private function setLastExceptionId(?string $id)
     {
         $this->lastExceptionId = $id;
@@ -146,7 +135,6 @@ class LaraBug
     }
 
     /**
-     * @param Throwable $exception
      * @return array
      */
     public function getExceptionData(Throwable $exception)
@@ -161,7 +149,7 @@ class LaraBug
         $data['error'] = $exception->getTraceAsString();
         $data['line'] = $exception->getLine();
         $data['file'] = $exception->getFile();
-        $data['class'] = get_class($exception);
+        $data['class'] = $exception::class;
         $data['release'] = config('larabug.release', null);
         $data['storage'] = [
             'SERVER' => [
@@ -230,10 +218,9 @@ class LaraBug
     /**
      * Determines whether the given parameter value should be filtered.
      *
-     * @param mixed $value
      * @return bool
      */
-    public function shouldParameterValueBeFiltered($value)
+    public function shouldParameterValueBeFiltered(mixed $value)
     {
         return $value instanceof UploadedFile;
     }
@@ -297,7 +284,6 @@ class LaraBug
     }
 
     /**
-     * @param array $data
      * @return bool
      */
     public function isSleepingException(array $data)
@@ -310,7 +296,6 @@ class LaraBug
     }
 
     /**
-     * @param array $data
      * @return string
      */
     private function createExceptionString(array $data)
@@ -352,7 +337,6 @@ class LaraBug
     }
 
     /**
-     * @param array $data
      * @return bool
      */
     public function addExceptionToSleep(array $data)

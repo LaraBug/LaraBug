@@ -11,19 +11,15 @@ class LaraBugFake extends \LaraBug\LaraBug
     /** @var array */
     public $exceptions = [];
 
-    /**
-     * @param int $expectedCount
-     */
     public function assertRequestsSent(int $expectedCount)
     {
         PHPUnit::assertCount($expectedCount, $this->exceptions);
     }
 
     /**
-     * @param mixed $throwable
      * @param callable|null $callback
      */
-    public function assertNotSent($throwable, $callback = null)
+    public function assertNotSent(mixed $throwable, $callback = null)
     {
         $collect = collect($this->exceptions[$throwable] ?? []);
 
@@ -44,10 +40,9 @@ class LaraBugFake extends \LaraBug\LaraBug
     }
 
     /**
-     * @param mixed $throwable
      * @param callable|null $callback
      */
-    public function assertSent($throwable, $callback = null)
+    public function assertSent(mixed $throwable, $callback = null)
     {
         $collect = collect($this->exceptions[$throwable] ?? []);
 
@@ -64,6 +59,6 @@ class LaraBugFake extends \LaraBug\LaraBug
 
     public function handle(\Throwable $exception, $fileType = 'php', array $customData = [])
     {
-        $this->exceptions[get_class($exception)][] = $exception;
+        $this->exceptions[$exception::class][] = $exception;
     }
 }

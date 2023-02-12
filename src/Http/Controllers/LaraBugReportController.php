@@ -8,11 +8,7 @@ use Illuminate\Http\Request;
 
 class LaraBugReportController
 {
-    /**
-     * @param Request $request
-     * @return \Illuminate\Http\Response|\Illuminate\Contracts\Routing\ResponseFactory
-     */
-    public function report(Request $request)
+    public function report(Request $request): \Illuminate\Http\Response|\Illuminate\Contracts\Routing\ResponseFactory
     {
         /** @var \LaraBug\LaraBug $laraBug */
         $laraBug = app('larabug');

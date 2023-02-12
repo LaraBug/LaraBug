@@ -5,3 +5,5 @@ coverage
 .idea
 .php-cs-fixer.cache
 .phpunit.result.cache
+pint.json
+rector.php

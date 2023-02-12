@@ -18,8 +18,6 @@ class Client
     protected $project;
 
     /**
-     * @param string $login
-     * @param string $project
      * @param ClientInterface|null $client
      */
     public function __construct(string $login, string $project, ClientInterface $client = null)
@@ -52,7 +50,7 @@ class Client
             ]);
         } catch (\GuzzleHttp\Exception\RequestException $e) {
             return $e->getResponse();
-        } catch (\Exception $e) {
+        } catch (\Exception) {
             return null;
         }
     }
@@ -72,7 +70,6 @@ class Client
     }
 
     /**
-     * @param ClientInterface $client
      * @return $this
      */
     public function setGuzzleHttpClient(ClientInterface $client)

@@ -48,7 +48,7 @@ class LaraBugTest extends TestCase
             ]),
         ]));
 
-        $this->assertInstanceOf(get_class(new \stdClass()), $this->laraBug->handle(new Exception('is_will_not_crash_if_larabug_returns_error_bad_response_exception')));
+        $this->assertInstanceOf((new \stdClass())::class, $this->laraBug->handle(new Exception('is_will_not_crash_if_larabug_returns_error_bad_response_exception')));
     }
 
     /** @test */
