@@ -291,7 +291,7 @@ class LaraBug
     /**
      * @throws \GuzzleHttp\Exception\GuzzleException
      */
-    private function logError($exception): PromiseInterface|ResponseInterface|null
+    private function logError($exception): PromiseInterface|ResponseInterface|\Illuminate\Http\Client\Response |null
     {
         return $this->client->report([
             'exception' => $exception,
