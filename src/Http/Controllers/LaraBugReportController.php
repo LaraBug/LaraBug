@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace LaraBug\Http\Controllers;
 
 use Illuminate\Http\Request;

@@ -7,6 +7,7 @@
         "nova"
     ],
     "rules": {
+        "declare_strict_types": true,
         "array_syntax": true,
         "ordered_imports": {
             "sort_algorithm": "length"
