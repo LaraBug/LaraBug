@@ -5,34 +5,23 @@ declare(strict_types=1);
 namespace LaraBug\Http;
 
 use GuzzleHttp\ClientInterface;
+use Psr\Http\Message\ResponseInterface;
+use GuzzleHttp\Promise\PromiseInterface;
+use GuzzleHttp\Exception\RequestException;
 
 class Client
 {
-    /** @var ClientInterface|null */
-    protected $client;
-
-    /** @var string */
-    protected $login;
-
-    /** @var string */
-    protected $project;
-
-    /**
-     * @param ClientInterface|null $client
-     */
-    public function __construct(string $login, string $project, ClientInterface $client = null)
-    {
-        $this->login = $login;
-        $this->project = $project;
-        $this->client = $client;
+    public function __construct(
+        protected string $login,
+        protected string $project,
+        protected ?ClientInterface $client = null
+    ) {
     }
 
     /**
-     * @param array $exception
-     * @return \GuzzleHttp\Promise\PromiseInterface|\Psr\Http\Message\ResponseInterface|null
      * @throws \GuzzleHttp\Exception\GuzzleException
      */
-    public function report($exception)
+    public function report(array $exception): PromiseInterface|ResponseInterface|null
     {
         try {
             return $this->getGuzzleHttpClient()->request('POST', config('larabug.server'), [
@@ -48,17 +37,14 @@ class Client
                 ], $exception),
                 'verify' => config('larabug.verify_ssl'),
             ]);
-        } catch (\GuzzleHttp\Exception\RequestException $e) {
+        } catch (RequestException $e) {
             return $e->getResponse();
         } catch (\Exception) {
             return null;
         }
     }
 
-    /**
-     * @return \GuzzleHttp\Client
-     */
-    public function getGuzzleHttpClient()
+    public function getGuzzleHttpClient(): \GuzzleHttp\Client|ClientInterface|null
     {
         if (! isset($this->client)) {
             $this->client = new \GuzzleHttp\Client([
@@ -69,10 +55,7 @@ class Client
         return $this->client;
     }
 
-    /**
-     * @return $this
-     */
-    public function setGuzzleHttpClient(ClientInterface $client)
+    public function setGuzzleHttpClient(ClientInterface $client): static
     {
         $this->client = $client;
 

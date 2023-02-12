@@ -10,6 +10,7 @@ use Illuminate\Log\LogManager;
 use LaraBug\Commands\TestCommand;
 use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Foundation\AliasLoader;
 use Illuminate\Support\ServiceProvider as BaseServiceProvider;
 
 class ServiceProvider extends BaseServiceProvider
@@ -27,8 +28,8 @@ class ServiceProvider extends BaseServiceProvider
         $this->app['view']->addNamespace('larabug', __DIR__ . '/../resources/views');
 
         // Register facade
-        if (class_exists(\Illuminate\Foundation\AliasLoader::class)) {
-            $loader = \Illuminate\Foundation\AliasLoader::getInstance();
+        if (class_exists(AliasLoader::class)) {
+            $loader = AliasLoader::getInstance();
             $loader->alias('LaraBug', 'LaraBug\Facade');
         }
 

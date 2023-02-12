@@ -4,22 +4,19 @@ declare(strict_types=1);
 
 namespace LaraBug\Fakes;
 
-use PHPUnit\Framework\Assert as PHPUnit;
+use function PHPUnit\Framework\assertTrue;
+use function PHPUnit\Framework\assertCount;
 
 class LaraBugFake extends \LaraBug\LaraBug
 {
-    /** @var array */
-    public $exceptions = [];
+    public array $exceptions = [];
 
-    public function assertRequestsSent(int $expectedCount)
+    public function assertRequestsSent(int $expectedCount): void
     {
-        PHPUnit::assertCount($expectedCount, $this->exceptions);
+        assertCount($expectedCount, $this->exceptions);
     }
 
-    /**
-     * @param callable|null $callback
-     */
-    public function assertNotSent(mixed $throwable, $callback = null)
+    public function assertNotSent(mixed $throwable, callable $callback = null): void
     {
         $collect = collect($this->exceptions[$throwable] ?? []);
 
@@ -27,37 +24,28 @@ class LaraBugFake extends \LaraBug\LaraBug
             return true;
         };
 
-        $filtered = $collect->filter(function ($arguments) use ($callback) {
-            return $callback($arguments);
-        });
+        $filtered = $collect->filter(fn ($arguments) => $callback($arguments));
 
-        PHPUnit::assertTrue($filtered->count() == 0);
+        assertTrue($filtered->count() == 0);
     }
 
-    public function assertNothingSent()
+    public function assertNothingSent(): void
     {
-        PHPUnit::assertCount(0, $this->exceptions);
+        assertCount(0, $this->exceptions);
     }
 
-    /**
-     * @param callable|null $callback
-     */
-    public function assertSent(mixed $throwable, $callback = null)
+    public function assertSent(mixed $throwable, callable $callback = null): void
     {
         $collect = collect($this->exceptions[$throwable] ?? []);
 
-        $callback = $callback ?: function () {
-            return true;
-        };
+        $callback = $callback ?: fn () => true;
 
-        $filtered = $collect->filter(function ($arguments) use ($callback) {
-            return $callback($arguments);
-        });
+        $filtered = $collect->filter(fn ($arguments) => $callback($arguments));
 
-        PHPUnit::assertTrue($filtered->count() > 0);
+        assertTrue($filtered->count() > 0);
     }
 
-    public function handle(\Throwable $exception, $fileType = 'php', array $customData = [])
+    public function handle(\Throwable $exception, $fileType = 'php', array $customData = []): void
     {
         $this->exceptions[$exception::class][] = $exception;
     }

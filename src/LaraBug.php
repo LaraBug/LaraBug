@@ -8,10 +8,15 @@ use Throwable;
 use LaraBug\Http\Client;
 use Illuminate\Support\Str;
 use Illuminate\Http\UploadedFile;
+use LaraBug\Concerns\Larabugable;
 use Illuminate\Support\Facades\App;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Foundation\Application;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Request;
 use Illuminate\Support\Facades\Session;
+use Psr\Http\Message\ResponseInterface;
+use GuzzleHttp\Promise\PromiseInterface;
 
 class LaraBug
 {
@@ -104,10 +109,7 @@ class LaraBug
         return $response;
     }
 
-    /**
-     * @return bool
-     */
-    public function isSkipEnvironment()
+    public function isSkipEnvironment(): bool
     {
         if (count(config('larabug.environments')) == 0) {
             return true;
@@ -120,24 +122,20 @@ class LaraBug
         return true;
     }
 
-    private function setLastExceptionId(?string $id)
+    private function setLastExceptionId(?string $id): void
     {
         $this->lastExceptionId = $id;
     }
 
     /**
      * Get the last exception id given to us by the larabug API.
-     * @return string|null
      */
-    public function getLastExceptionId()
+    public function getLastExceptionId(): ?string
     {
         return $this->lastExceptionId;
     }
 
-    /**
-     * @return array
-     */
-    public function getExceptionData(Throwable $exception)
+    public function getExceptionData(Throwable $exception): array
     {
         $data = [];
 
@@ -200,11 +198,7 @@ class LaraBug
         return $data;
     }
 
-    /**
-     * @param array $parameters
-     * @return array
-     */
-    public function filterParameterValues($parameters)
+    public function filterParameterValues(array $parameters): array
     {
         return collect($parameters)->map(function ($value) {
             if ($this->shouldParameterValueBeFiltered($value)) {
@@ -217,19 +211,13 @@ class LaraBug
 
     /**
      * Determines whether the given parameter value should be filtered.
-     *
-     * @return bool
      */
-    public function shouldParameterValueBeFiltered(mixed $value)
+    public function shouldParameterValueBeFiltered(mixed $value): bool
     {
         return $value instanceof UploadedFile;
     }
 
-    /**
-     * @param $variables
-     * @return array
-     */
-    public function filterVariables($variables)
+    public function filterVariables($variables): array
     {
         if (is_array($variables)) {
             array_walk($variables, function ($val, $key) use (&$variables) {
@@ -252,10 +240,6 @@ class LaraBug
     /**
      * Gets information from the line.
      *
-     * @param $lines
-     * @param $line
-     * @param $i
-     *
      * @return array|void
      */
     private function getLineInfo($lines, $line, $i)
@@ -276,17 +260,13 @@ class LaraBug
 
     /**
      * @param $exceptionClass
-     * @return bool
      */
-    public function isSkipException($exceptionClass)
+    public function isSkipException($exceptionClass): bool
     {
         return in_array($exceptionClass, config('larabug.except'));
     }
 
-    /**
-     * @return bool
-     */
-    public function isSleepingException(array $data)
+    public function isSleepingException(array $data): bool
     {
         if (config('larabug.sleep', 0) == 0) {
             return false;
@@ -295,19 +275,23 @@ class LaraBug
         return Cache::has($this->createExceptionString($data));
     }
 
-    /**
-     * @return string
-     */
-    private function createExceptionString(array $data)
+    private function createExceptionString(array $data): string
     {
-        return 'larabug.' . Str::slug($data['host'] . '_' . $data['method'] . '_' . $data['exception'] . '_' . $data['line'] . '_' . $data['file'] . '_' . $data['class']);
+        return 'larabug.' .
+            Str::slug(
+                $data['host'] .  '_' .
+                $data['method'] .  '_' .
+                $data['exception'] . '_' .
+                $data['line'] . '_' .
+                $data['file'] . '_' .
+                $data['class']
+            );
     }
 
     /**
-     * @param $exception
-     * @return \GuzzleHttp\Promise\PromiseInterface|\Psr\Http\Message\ResponseInterface|null
+     * @throws \GuzzleHttp\Exception\GuzzleException
      */
-    private function logError($exception)
+    private function logError($exception): PromiseInterface|ResponseInterface|null
     {
         return $this->client->report([
             'exception' => $exception,
@@ -315,20 +299,17 @@ class LaraBug
         ]);
     }
 
-    /**
-     * @return array|null
-     */
-    public function getUser()
+    public function getUser(): ?array
     {
-        if (function_exists('auth') && (app() instanceof \Illuminate\Foundation\Application && auth()->check())) {
+        if (function_exists('auth') && (app() instanceof Application && auth()->check())) {
             /** @var \Illuminate\Contracts\Auth\Authenticatable $user */
             $user = auth()->user();
 
-            if ($user instanceof \LaraBug\Concerns\Larabugable) {
+            if ($user instanceof Larabugable) {
                 return $user->toLarabug();
             }
 
-            if ($user instanceof \Illuminate\Database\Eloquent\Model) {
+            if ($user instanceof Model) {
                 return $user->toArray();
             }
         }
@@ -336,10 +317,7 @@ class LaraBug
         return null;
     }
 
-    /**
-     * @return bool
-     */
-    public function addExceptionToSleep(array $data)
+    public function addExceptionToSleep(array $data): bool
     {
         $exceptionString = $this->createExceptionString($data);
 

@@ -13,7 +13,7 @@ class TestCommand extends Command
 
     protected $description = 'Generate a test exception and send it to larabug';
 
-    public function handle()
+    public function handle(): int
     {
         try {
             /** @var LaraBug $laraBug */
@@ -53,9 +53,11 @@ class TestCommand extends Command
         } catch (\Exception $ex) {
             $this->error("✗ [LaraBug] {$ex->getMessage()}");
         }
+
+        return self::SUCCESS;
     }
 
-    public function generateException(): ?Exception
+    private function generateException(): ?Exception
     {
         try {
             throw new Exception($this->argument('exception') ?? 'This is a test exception from the LaraBug console');

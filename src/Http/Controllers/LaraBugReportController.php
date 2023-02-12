@@ -5,10 +5,12 @@ declare(strict_types=1);
 namespace LaraBug\Http\Controllers;
 
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
+use Illuminate\Contracts\Routing\ResponseFactory;
 
 class LaraBugReportController
 {
-    public function report(Request $request): \Illuminate\Http\Response|\Illuminate\Contracts\Routing\ResponseFactory
+    public function report(Request $request): Response|ResponseFactory
     {
         /** @var \LaraBug\LaraBug $laraBug */
         $laraBug = app('larabug');
