@@ -1,0 +1,17 @@
+{
+    "preset": "psr12",
+    "exclude": [
+        "vendor",
+        "bootstrap",
+        "storage",
+        "nova"
+    ],
+    "rules": {
+        "array_syntax": true,
+        "ordered_imports": {
+            "sort_algorithm": "length"
+        },
+        "no_unused_imports" : true,
+        "single_quote" : true
+    }
+}

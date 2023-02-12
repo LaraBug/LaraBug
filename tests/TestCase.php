@@ -7,7 +7,6 @@ use Illuminate\Foundation\Application;
 
 class TestCase extends \Orchestra\Testbench\TestCase
 {
-
     /**
      * @param Application $app
      * @return array

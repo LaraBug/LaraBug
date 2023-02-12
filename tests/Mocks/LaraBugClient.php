@@ -7,7 +7,7 @@ use PHPUnit\Framework\Assert;
 
 class LaraBugClient extends \LaraBug\Http\Client
 {
-    const RESPONSE_ID = 'test';
+    public const RESPONSE_ID = 'test';
 
     /** @var array */
     protected $requests = [];
