@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace LaraBug;
 
+use LaraBug\Logger\LaraBugHandler;
 use Monolog\Logger;
 use LaraBug\Http\Client;
 use Illuminate\Log\LogManager;
@@ -42,7 +43,7 @@ class ServiceProvider extends PackageServiceProvider
 
         if ($this->app['log'] instanceof LogManager) {
             $this->app['log']->extend('larabug', function ($app, $config) {
-                $handler = new \LaraBug\Logger\LaraBugHandler(
+                $handler = new LaraBugHandler(
                     $app['larabug']
                 );
 
