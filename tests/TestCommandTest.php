@@ -2,81 +2,77 @@
 
 declare(strict_types=1);
 
-namespace LaraBug\Tests;
-
 use LaraBug\LaraBug;
+use LaraBug\Commands\TestCommand;
+
+use function Pest\Laravel\artisan;
+
 use LaraBug\Tests\Mocks\LaraBugClient;
 
-class TestCommandTest extends TestCase
-{
-    /** @test */
-    public function it_detects_if_the_login_key_is_set()
-    {
-        $this->app['config']['larabug.login_key'] = '';
+use function PHPUnit\Framework\assertEquals;
 
-        $this->artisan('larabug:test')
-            ->expectsOutput('✗ [LaraBug] Could not find your login key, set this in your .env')
-            ->assertExitCode(0);
+it('detects if the login key is set', function () {
+    config(['larabug.login_key' => '']);
 
-        $this->app['config']['larabug.login_key'] = 'test';
+    artisan(TestCommand::class)
+        ->expectsOutput('✗ [LaraBug] Could not find your login key, set this in your .env')
+        ->assertSuccessful();
 
-        $this->artisan('larabug:test')
-            ->expectsOutput('✓ [Larabug] Found login key')
-            ->assertExitCode(0);
-    }
+    config(['larabug.login_key' => 'test']);
 
-    /** @test */
-    public function it_detects_if_the_project_key_is_set()
-    {
-        $this->app['config']['larabug.project_key'] = '';
+    artisan(TestCommand::class)
+        ->expectsOutput('✓ [Larabug] Found login key')
+        ->assertSuccessful();
+});
 
-        $this->artisan('larabug:test')
-            ->expectsOutput('✗ [LaraBug] Could not find your project key, set this in your .env')
-            ->assertExitCode(0);
+it('detects if the project key is set', function () {
+    config(['larabug.project_key' => '']);
 
-        $this->app['config']['larabug.project_key'] = 'test';
+    artisan(TestCommand::class)
+        ->expectsOutput('✗ [LaraBug] Could not find your project key, set this in your .env')
+        ->assertSuccessful();
 
-        $this->artisan('larabug:test')
-            ->expectsOutput('✓ [Larabug] Found project key')
-            ->assertExitCode(0);
-    }
+    config(['larabug.project_key' => 'test']);
 
-    /** @test */
-    public function it_detects_that_its_running_in_the_correct_environment()
-    {
-        $this->app['config']['app.env'] = 'production';
-        $this->app['config']['larabug.environments'] = [];
+    artisan(TestCommand::class)
+        ->expectsOutput('✓ [Larabug] Found project key')
+        ->assertSuccessful();
+});
 
-        $this->artisan('larabug:test')
-            ->expectsOutput('✗ [LaraBug] Environment (production) not allowed to send errors to LaraBug, set this in your config')
-            ->assertExitCode(0);
+it('detects that its running in the correct environment', function () {
+    config([
+        'app.env' => 'production',
+        'larabug.environments' =>[]
+    ]);
 
-        $this->app['config']['larabug.environments'] = ['production'];
+    artisan(TestCommand::class)
+        ->expectsOutput('✗ [LaraBug] Environment (production) not allowed to send errors to LaraBug, set this in your config')
+        ->assertSuccessful();
 
-        $this->artisan('larabug:test')
-            ->expectsOutput('✓ [Larabug] Correct environment found (' . config('app.env') . ')')
-            ->assertExitCode(0);
-    }
+    config([
+        'larabug.environments' => ['production'],
+    ]);
 
-    /** @test */
-    public function it_detects_that_it_fails_to_send_to_larabug()
-    {
-        $this->artisan('larabug:test')
-            ->expectsOutput('✗ [LaraBug] Failed to send exception to LaraBug')
-            ->assertExitCode(0);
+    artisan(TestCommand::class)
+        ->expectsOutput('✓ [Larabug] Correct environment found (' . config('app.env') . ')')
+        ->assertSuccessful();
+});
 
-        $this->app['config']['larabug.environments'] = [
-            'testing',
-        ];
-        $this->app['larabug'] = new LaraBug($this->client = new LaraBugClient(
-            'login_key',
-            'project_key'
-        ));
+it('detects that it fails to send to larabug', function () {
+    artisan(TestCommand::class)
+        ->expectsOutput('✗ [LaraBug] Failed to send exception to LaraBug')
+        ->assertSuccessful();
 
-        $this->artisan('larabug:test')
-            ->expectsOutput('✓ [LaraBug] Sent exception to LaraBug with ID: '.LaraBugClient::RESPONSE_ID)
-            ->assertExitCode(0);
+    config(['larabug.environments' => ['testing']]);
 
-        $this->assertEquals(LaraBugClient::RESPONSE_ID, $this->app['larabug']->getLastExceptionId());
-    }
-}
+    $this->app['larabug'] = new LaraBug($this->client = new LaraBugClient(
+        'login_key',
+        'project_key'
+    ));
+
+    artisan(TestCommand::class)
+        ->expectsOutput('✓ [LaraBug] Sent exception to LaraBug with ID: '.LaraBugClient::RESPONSE_ID)
+        ->assertSuccessful();
+
+    assertEquals(LaraBugClient::RESPONSE_ID, $this->app['larabug']->getLastExceptionId());
+});

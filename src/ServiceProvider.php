@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace LaraBug;
 
 use Monolog\Logger;
+use LaraBug\Http\Client;
+use Illuminate\Log\LogManager;
 use LaraBug\Commands\TestCommand;
 use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\Facades\Route;
@@ -12,10 +14,7 @@ use Illuminate\Support\ServiceProvider as BaseServiceProvider;
 
 class ServiceProvider extends BaseServiceProvider
 {
-    /**
-     * Bootstrap the application events.
-     */
-    public function boot()
+    public function boot(): void
     {
         // Publish configuration file
         if (function_exists('config_path')) {
@@ -45,21 +44,18 @@ class ServiceProvider extends BaseServiceProvider
         Blade::include('larabug::larabug-js-client', 'larabugJavaScriptClient');
     }
 
-    /**
-     * Register the service provider.
-     */
-    public function register()
+    public function register(): void
     {
         $this->mergeConfigFrom(__DIR__ . '/../config/larabug.php', 'larabug');
 
         $this->app->singleton('larabug', function ($app) {
-            return new LaraBug(new \LaraBug\Http\Client(
+            return new LaraBug(new Client(
                 config('larabug.login_key', 'login_key'),
                 config('larabug.project_key', 'project_key')
             ));
         });
 
-        if ($this->app['log'] instanceof \Illuminate\Log\LogManager) {
+        if ($this->app['log'] instanceof LogManager) {
             $this->app['log']->extend('larabug', function ($app, $config) {
                 $handler = new \LaraBug\Logger\LaraBugHandler(
                     $app['larabug']
@@ -70,7 +66,7 @@ class ServiceProvider extends BaseServiceProvider
         }
     }
 
-    protected function mapLaraBugApiRoutes()
+    protected function mapLaraBugApiRoutes(): void
     {
         Route::group(
             [

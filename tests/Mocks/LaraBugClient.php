@@ -4,20 +4,20 @@ declare(strict_types=1);
 
 namespace LaraBug\Tests\Mocks;
 
+use LaraBug\Http\Client;
 use GuzzleHttp\Psr7\Response;
 use PHPUnit\Framework\Assert;
 
-class LaraBugClient extends \LaraBug\Http\Client
+class LaraBugClient extends Client
 {
     public const RESPONSE_ID = 'test';
 
-    /** @var array */
-    protected $requests = [];
+    protected array $requests = [];
 
     /**
      * @param array $exception
      */
-    public function report($exception)
+    public function report($exception): Response
     {
         $this->requests[] = $exception;
 

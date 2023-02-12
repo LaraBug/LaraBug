@@ -2,69 +2,67 @@
 
 declare(strict_types=1);
 
-namespace LaraBug\Tests;
-
 use LaraBug\LaraBug;
+use LaraBug\Concerns\Larabugable;
+
+use function Pest\Laravel\actingAs;
+
 use LaraBug\Tests\Mocks\LaraBugClient;
+
+use function PHPUnit\Framework\assertSame;
+
 use Illuminate\Foundation\Auth\User as AuthUser;
 
-class UserTest extends TestCase
-{
-    /** @var Mocks\LaraBugClient */
-    protected $client;
+beforeEach(function () {
+    $this->laraBug = new LaraBug($this->client = new LaraBugClient(
+        'login_key',
+        'project_key'
+    ));
+});
 
-    /** @var LaraBug */
-    protected $laraBug;
+it('return_custom_user', function () {
+    actingAs((new CustomerUser())->forceFill([
+        'id' => 1,
+        'username' => 'username',
+        'password' => 'password',
+        'email' => 'email',
+    ]));
 
-    public function setUp(): void
-    {
-        parent::setUp();
+    assertSame(
+        [
+        'id' => 1,
+        'username' => 'username',
+        'password' => 'password',
+        'email' => 'email'],
+        $this->laraBug->getUser()
+    );
+});
 
-        $this->laraBug = new LaraBug($this->client = new LaraBugClient(
-            'login_key',
-            'project_key'
-        ));
-    }
+it('return_custom_user_with_to_larabug', function () {
+    actingAs((new CustomerUserWithToLarabug())->forceFill([
+        'id' => 1,
+        'username' => 'username',
+        'password' => 'password',
+        'email' => 'email',
+    ]));
 
-    /** @test */
-    public function it_return_custom_user()
-    {
-        $this->actingAs((new CustomerUser())->forceFill([
-            'id' => 1,
-            'username' => 'username',
-            'password' => 'password',
-            'email' => 'email',
-        ]));
+    assertSame(
+        ['username' => 'username',
+            'email' => 'email'],
+        $this->laraBug->getUser()
+    );
+});
 
-        $this->assertSame(['id' => 1, 'username' => 'username', 'password' => 'password', 'email' => 'email'], $this->laraBug->getUser());
-    }
-
-    /** @test */
-    public function it_return_custom_user_with_to_larabug()
-    {
-        $this->actingAs((new CustomerUserWithToLarabug())->forceFill([
-            'id' => 1,
-            'username' => 'username',
-            'password' => 'password',
-            'email' => 'email',
-        ]));
-
-        $this->assertSame(['username' => 'username', 'email' => 'email'], $this->laraBug->getUser());
-    }
-
-    /** @test */
-    public function it_returns_nothing_for_ghost()
-    {
-        $this->assertSame(null, $this->laraBug->getUser());
-    }
-}
+it('returns_nothing_for_ghost', function () {
+    assertSame(null, $this->laraBug->getUser());
+});
 
 class CustomerUser extends AuthUser
 {
     protected $guarded = [];
 }
 
-class CustomerUserWithToLarabug extends CustomerUser implements \LaraBug\Concerns\Larabugable
+class CustomerUserWithToLarabug extends CustomerUser implements Larabugable
 {
     public function toLarabug()
     {

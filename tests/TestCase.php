@@ -5,15 +5,10 @@ declare(strict_types=1);
 namespace LaraBug\Tests;
 
 use LaraBug\ServiceProvider;
-use Illuminate\Foundation\Application;
 
 class TestCase extends \Orchestra\Testbench\TestCase
 {
-    /**
-     * @param Application $app
-     * @return array
-     */
-    protected function getPackageProviders($app)
+    protected function getPackageProviders($app): array
     {
         return [ServiceProvider::class];
     }
