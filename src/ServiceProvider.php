@@ -4,11 +4,11 @@ declare(strict_types=1);
 
 namespace LaraBug;
 
-use LaraBug\Logger\LaraBugHandler;
 use Monolog\Logger;
 use LaraBug\Http\Client;
 use Illuminate\Log\LogManager;
 use LaraBug\Commands\TestCommand;
+use LaraBug\Logger\LaraBugHandler;
 use Illuminate\Support\Facades\Blade;
 use Spatie\LaravelPackageTools\Package;
 use Spatie\LaravelPackageTools\PackageServiceProvider;

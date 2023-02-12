@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace LaraBug\Http;
 
 use GuzzleHttp\ClientInterface;
+use Illuminate\Support\Facades\Http;
 use Psr\Http\Message\ResponseInterface;
 use GuzzleHttp\Promise\PromiseInterface;
 use GuzzleHttp\Exception\RequestException;
@@ -47,9 +48,7 @@ class Client
     public function getGuzzleHttpClient(): \GuzzleHttp\Client|ClientInterface|null
     {
         if (! isset($this->client)) {
-            $this->client = new \GuzzleHttp\Client([
-                'timeout' => 15,
-            ]);
+            $this->client = Http::timeout(15)->buildClient();
         }
 
         return $this->client;
