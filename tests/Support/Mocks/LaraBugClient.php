@@ -14,9 +14,6 @@ class LaraBugClient extends Client
 
     protected array $requests = [];
 
-    /**
-     * @param array $exception
-     */
     public function report(array $exception): Response
     {
         $this->requests[] = $exception;
