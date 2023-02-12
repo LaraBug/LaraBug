@@ -9,5 +9,5 @@ interface Larabugable
     /**
      * @return array
      */
-    public function toLarabug();
+    public function toLarabug(): array;
 }

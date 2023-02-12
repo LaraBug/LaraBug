@@ -20,25 +20,22 @@ use GuzzleHttp\Promise\PromiseInterface;
 
 class LaraBug
 {
-    /** @var array */
-    private $blacklist = [];
+    private array $blacklist = [];
 
-    /** @var null|string */
-    private $lastExceptionId;
+    private ?string $lastExceptionId;
 
     public function __construct(private Client $client)
     {
-        $this->blacklist = array_map(function ($blacklist) {
-            return strtolower($blacklist);
-        }, config('larabug.blacklist', []));
+        $this->blacklist = array_map(
+            fn ($blacklist) => strtolower($blacklist),
+            config('larabug.blacklist', [])
+        );
     }
 
     /**
-     * @param Throwable $exception
-     * @param string $fileType
-     * @return bool|mixed
+     * @throws \GuzzleHttp\Exception\GuzzleException
      */
-    public function handle(Throwable $exception, $fileType = 'php', array $customData = [])
+    public function handle(Throwable $exception, string $fileType = 'php', array $customData = [])
     {
         if ($this->isSkipEnvironment()) {
             return false;

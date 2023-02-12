@@ -64,7 +64,7 @@ class CustomerUser extends AuthUser
 
 class CustomerUserWithToLarabug extends CustomerUser implements Larabugable
 {
-    public function toLarabug()
+    public function toLarabug(): array
     {
         return [
             'username' => $this->username,

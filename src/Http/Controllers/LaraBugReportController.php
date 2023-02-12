@@ -10,6 +10,9 @@ use Illuminate\Contracts\Routing\ResponseFactory;
 
 class LaraBugReportController
 {
+    /**
+     * @throws \GuzzleHttp\Exception\GuzzleException
+     */
     public function report(Request $request): Response|ResponseFactory
     {
         /** @var \LaraBug\LaraBug $laraBug */
