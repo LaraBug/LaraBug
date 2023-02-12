@@ -29,7 +29,6 @@ class Client
         try {
             return $this->getGuzzleHttpClient()
                 ->withToken($this->login)
-                ->withoutVerifying()
                 ->asJson()
                 ->acceptJson()
                 ->withUserAgent('LaraBug-Package')
