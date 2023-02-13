@@ -32,7 +32,7 @@
     },
     "scripts": {
         "test": "vendor/bin/pest",
-        "test-coverage": "vendor/bin/pest --coverage-html build/coverage",
+        "test-coverage": "XDEBUG_MODE=coverage vendor/bin/pest --coverage-html build/coverage",
         "format": "vendor/bin/php-cs-fixer fix"
     },
     "extra": {
