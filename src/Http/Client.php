@@ -22,10 +22,7 @@ class Client
     ) {
     }
 
-    /**
-     * @throws \GuzzleHttp\Exception\GuzzleException
-     */
-    public function report(array $exception): PromiseInterface|ResponseInterface|Response|null
+    public function report(array $exception): PromiseInterface|Response|ResponseInterface|null
     {
         try {
             return $this->getGuzzleHttpClient()
@@ -58,7 +55,7 @@ class Client
         }
     }
 
-    public function getGuzzleHttpClient(): PendingRequest|\GuzzleHttp\Client
+    public function getGuzzleHttpClient(): PendingRequest
     {
         if ($this->client === null) {
             return Http::timeout(15);
