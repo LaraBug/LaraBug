@@ -1,48 +1,48 @@
 <?php
 
-namespace LaraBug\Tests;
+declare(strict_types=1);
 
-class LoggingTest extends TestCase
-{
-    public function setUp(): void
-    {
-        parent::setUp();
+use LaraBug\Facade;
 
-        \LaraBug\Facade::fake();
+use function Pest\Laravel\get;
 
-        $this->app['config']['logging.channels.larabug'] = ['driver' => 'larabug'];
-        $this->app['config']['logging.default'] = 'larabug';
-        $this->app['config']['larabug.environments'] = ['testing'];
-    }
+use Illuminate\Support\Facades\Log;
 
-    /** @test */
-    public function it_will_not_send_log_information_to_larabug()
-    {
-        $this->app['router']->get('/log-information-via-route/{type}', function (string $type) {
-            \Illuminate\Support\Facades\Log::{$type}('log');
-        });
+use Illuminate\Support\Facades\Route;
 
-        $this->get('/log-information-via-route/debug');
-        $this->get('/log-information-via-route/info');
-        $this->get('/log-information-via-route/notice');
-        $this->get('/log-information-via-route/warning');
-        $this->get('/log-information-via-route/error');
-        $this->get('/log-information-via-route/critical');
-        $this->get('/log-information-via-route/alert');
-        $this->get('/log-information-via-route/emergency');
+beforeEach(function () {
+    Facade::fake();
 
-        \LaraBug\Facade::assertRequestsSent(0);
-    }
+    config([
+        'logging.channels.larabug' => ['driver' => 'larabug'],
+        'logging.default' => 'larabug',
+        'larabug.environments' => 'testing',
+    ]);
+});
 
-    /** @test */
-    public function it_will_only_send_throwables_to_larabug()
-    {
-        $this->app['router']->get('/throwables-via-route', function () {
-            throw new \Exception('exception-via-route');
-        });
+it('will not send log information to larabug', function () {
+    Route::get('log-information-via-route/{type}', function (string $type) {
+        Log::{$type}('log');
+    });
 
-        $this->get('/throwables-via-route');
+    get('log-information-via-route/debug');
+    get('log-information-via-route/info');
+    get('log-information-via-route/notice');
+    get('log-information-via-route/warning');
+    get('log-information-via-route/error');
+    get('log-information-via-route/critical');
+    get('log-information-via-route/alert');
+    get('log-information-via-route/emergency');
 
-        \LaraBug\Facade::assertRequestsSent(1);
-    }
-}
+    Facade::assertRequestsSent(0);
+});
+
+it('will only send throwables to larabug', function () {
+    Route::get('throwables-via-route', function () {
+        throw new \Exception('exception-via-route');
+    });
+
+    get('throwables-via-route');
+
+    Facade::assertRequestsSent(1);
+});

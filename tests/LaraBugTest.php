@@ -1,186 +1,173 @@
 <?php
 
-namespace LaraBug\Tests;
+declare(strict_types=1);
 
-use Exception;
+
 use Carbon\Carbon;
 use LaraBug\LaraBug;
 use GuzzleHttp\Client;
 use GuzzleHttp\Psr7\Response;
 use GuzzleHttp\Handler\MockHandler;
-use LaraBug\Tests\Mocks\LaraBugClient;
+
+use function PHPUnit\Framework\assertSame;
+use function PHPUnit\Framework\assertTrue;
+
+use function PHPUnit\Framework\assertCount;
+use function PHPUnit\Framework\assertFalse;
+use function PHPUnit\Framework\assertContains;
+
+use LaraBug\Tests\Support\Mocks\LaraBugClient;
+
+use function PHPUnit\Framework\assertInstanceOf;
+
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
-class LaraBugTest extends TestCase
-{
-    /** @var LaraBug */
-    protected $laraBug;
+beforeEach(function () {
+    $this->laraBug = new LaraBug($this->client = new LaraBugClient(
+        'login_key',
+        'project_key'
+    ));
+});
 
-    /** @var Mocks\LaraBugClient */
-    protected $client;
+it('will not crash if larabug returns error bad response exception', function () {
+    $this->laraBug = new LaraBug($this->client = new \LaraBug\Http\Client(
+        'login_key',
+        'project_key'
+    ));
 
-    public function setUp(): void
-    {
-        parent::setUp();
+    config(['larabug.environments'=>['testing']]);
 
-        $this->laraBug = new LaraBug($this->client = new LaraBugClient(
-            'login_key',
-            'project_key'
-        ));
-    }
+    $this->client->setGuzzleHttpClient(new Client([
+        'handler' => MockHandler::createWithMiddleware([
+            new Response(500, [], '{}'),
+        ]),
+    ]));
 
-    /** @test */
-    public function is_will_not_crash_if_larabug_returns_error_bad_response_exception()
-    {
-        $this->laraBug = new LaraBug($this->client = new \LaraBug\Http\Client(
-            'login_key',
-            'project_key'
-        ));
+    assertInstanceOf(
+        (new \stdClass())::class,
+        $this->laraBug->handle(new Exception('is_will_not_crash_if_larabug_returns_error_bad_response_exception'))
+    );
+});
 
-        //
-        $this->app['config']['larabug.environments'] = ['testing'];
+it('will not crash if larabug returns normal exception', function () {
+    $this->laraBug = new LaraBug($this->client = new \LaraBug\Http\Client(
+        'login_key',
+        'project_key'
+    ));
 
-        $this->client->setGuzzleHttpClient(new Client([
-            'handler' => MockHandler::createWithMiddleware([
-                new Response(500, [], '{}'),
-            ]),
-        ]));
+    config(['larabug.environments'=>['testing']]);
 
-        $this->assertInstanceOf(get_class(new \stdClass()), $this->laraBug->handle(new Exception('is_will_not_crash_if_larabug_returns_error_bad_response_exception')));
-    }
+    $this->client->setGuzzleHttpClient(new Client([
+        'handler' => MockHandler::createWithMiddleware([
+            new \Exception(),
+        ]),
+    ]));
 
-    /** @test */
-    public function is_will_not_crash_if_larabug_returns_normal_exception()
-    {
-        $this->laraBug = new LaraBug($this->client = new \LaraBug\Http\Client(
-            'login_key',
-            'project_key'
-        ));
+    assertFalse($this->laraBug->handle(new Exception('is_will_not_crash_if_larabug_returns_normal_exception')));
+});
 
-        //
-        $this->app['config']['larabug.environments'] = ['testing'];
+it('can skip exceptions based on class', function () {
+    config(['larabug.except'=>['']]);
 
-        $this->client->setGuzzleHttpClient(new Client([
-            'handler' => MockHandler::createWithMiddleware([
-                new \Exception(),
-            ]),
-        ]));
+    assertFalse($this->laraBug->isSkipException(NotFoundHttpException::class));
 
-        $this->assertFalse($this->laraBug->handle(new Exception('is_will_not_crash_if_larabug_returns_normal_exception')));
-    }
+    config(['larabug.except'=>[NotFoundHttpException::class]]);
 
-    /** @test */
-    public function it_can_skip_exceptions_based_on_class()
-    {
-        $this->app['config']['larabug.except'] = [];
+    assertTrue($this->laraBug->isSkipException(NotFoundHttpException::class));
+});
 
-        $this->assertFalse($this->laraBug->isSkipException(NotFoundHttpException::class));
+it('can skip exceptions based on environment', function () {
+    config(['larabug.environments'=>['']]);
 
-        $this->app['config']['larabug.except'] = [
-            NotFoundHttpException::class,
-        ];
+    assertTrue($this->laraBug->isSkipEnvironment());
 
-        $this->assertTrue($this->laraBug->isSkipException(NotFoundHttpException::class));
-    }
+    config(['larabug.environments'=>['production']]);
 
-    /** @test */
-    public function it_can_skip_exceptions_based_on_environment()
-    {
-        $this->app['config']['larabug.environments'] = [];
+    assertTrue($this->laraBug->isSkipEnvironment());
 
-        $this->assertTrue($this->laraBug->isSkipEnvironment());
+    config(['larabug.environments'=>['testing']]);
 
-        $this->app['config']['larabug.environments'] = ['production'];
+    assertFalse($this->laraBug->isSkipEnvironment());
+});
 
-        $this->assertTrue($this->laraBug->isSkipEnvironment());
+it('will return false for sleeping cache exception if disabled', function () {
+    config(['larabug.sleep' => 0]);
 
-        $this->app['config']['larabug.environments'] = ['testing'];
+    assertFalse($this->laraBug->isSleepingException([]));
+});
 
-        $this->assertFalse($this->laraBug->isSkipEnvironment());
-    }
+it('can check if is a sleeping cache exception', function () {
+    $data = [
+        'host' => 'localhost',
+        'method' => 'GET',
+        'exception' => 'it_can_check_if_is_a_sleeping_cache_exception',
+        'line' => 2,
+        'file' => '/tmp/Larabug/tests/LaraBugTest.php',
+        'class' => 'Exception'
+    ];
 
-    /** @test */
-    public function it_will_return_false_for_sleeping_cache_exception_if_disabled()
-    {
-        $this->app['config']['larabug.sleep'] = 0;
+    Carbon::setTestNow('2019-10-12 13:30:00');
 
-        $this->assertFalse($this->laraBug->isSleepingException([]));
-    }
+    assertFalse($this->laraBug->isSleepingException($data));
 
-    /** @test */
-    public function it_can_check_if_is_a_sleeping_cache_exception()
-    {
-        $data = ['host' => 'localhost', 'method' => 'GET', 'exception' => 'it_can_check_if_is_a_sleeping_cache_exception', 'line' => 2, 'file' => '/tmp/Larabug/tests/LaraBugTest.php', 'class' => 'Exception'];
+    Carbon::setTestNow('2019-10-12 13:30:00');
 
-        Carbon::setTestNow('2019-10-12 13:30:00');
+    $this->laraBug->addExceptionToSleep($data);
 
-        $this->assertFalse($this->laraBug->isSleepingException($data));
+    assertTrue($this->laraBug->isSleepingException($data));
 
-        Carbon::setTestNow('2019-10-12 13:30:00');
+    Carbon::setTestNow('2019-10-12 13:31:00');
 
-        $this->laraBug->addExceptionToSleep($data);
+    assertTrue($this->laraBug->isSleepingException($data));
 
-        $this->assertTrue($this->laraBug->isSleepingException($data));
+    Carbon::setTestNow('2019-10-12 13:31:01');
 
-        Carbon::setTestNow('2019-10-12 13:31:00');
+    assertFalse($this->laraBug->isSleepingException($data));
+});
 
-        $this->assertTrue($this->laraBug->isSleepingException($data));
+it('can get formatted exception data', function () {
+    $data = $this->laraBug->getExceptionData(new Exception(
+        'it_can_get_formatted_exception_data'
+    ));
 
-        Carbon::setTestNow('2019-10-12 13:31:01');
+    assertSame('testing', $data['environment']);
+    assertSame('localhost', $data['host']);
+    assertSame('GET', $data['method']);
+    assertSame('http://localhost', $data['fullUrl']);
+    assertSame('it_can_get_formatted_exception_data', $data['exception']);
 
-        $this->assertFalse($this->laraBug->isSleepingException($data));
-    }
+    assertCount(13, $data);
+});
 
-    /** @test */
-    public function it_can_get_formatted_exception_data()
-    {
-        $data = $this->laraBug->getExceptionData(new Exception(
-            'it_can_get_formatted_exception_data'
-        ));
+it('filters the data based on the configuration', function () {
+    assertContains('*password*', config('larabug.blacklist'));
 
-        $this->assertSame('testing', $data['environment']);
-        $this->assertSame('localhost', $data['host']);
-        $this->assertSame('GET', $data['method']);
-        $this->assertSame('http://localhost', $data['fullUrl']);
-        $this->assertSame('it_can_get_formatted_exception_data', $data['exception']);
-
-        $this->assertCount(13, $data);
-    }
-
-    /** @test */
-    public function it_filters_the_data_based_on_the_configuration()
-    {
-        $this->assertContains('*password*', $this->app['config']['larabug.blacklist']);
-
-        $data = [
+    $data = [
+        'password' => 'testing',
+        'not_password' => 'testing',
+        'not_password2' => [
             'password' => 'testing',
-            'not_password' => 'testing',
-            'not_password2' => [
+        ],
+        'not_password_3' => [
+            'nah' => [
                 'password' => 'testing',
             ],
-            'not_password_3' => [
-                'nah' => [
-                    'password' => 'testing',
-                ],
-            ],
-            'Password' => 'testing',
-        ];
+        ],
+        'Password' => 'testing',
+    ];
 
 
-        $this->assertContains('***', $this->laraBug->filterVariables($data));
+    assertContains('***', $this->laraBug->filterVariables($data));
 //        $this->assertArrayHasKey('not_password', $this->laraBug->filterVariables($data));
 //        $this->assertArrayNotHasKey('password', $this->laraBug->filterVariables($data)['not_password2']);
 //        $this->assertArrayNotHasKey('password', $this->laraBug->filterVariables($data)['not_password_3']['nah']);
 //        $this->assertArrayNotHasKey('Password', $this->laraBug->filterVariables($data));
-    }
+});
 
-    /** @test */
-    public function it_can_report_an_exception_to_larabug()
-    {
-        $this->app['config']['larabug.environments'] = ['testing'];
+it('can report an exception to larabug', function () {
+    config(['larabug.environments' => ['testing']]);
 
-        $this->laraBug->handle(new Exception('it_can_report_an_exception_to_larabug'));
+    $this->laraBug->handle(new Exception('it_can_report_an_exception_to_larabug'));
 
-        $this->client->assertRequestsSent(1);
-    }
-}
+    $this->client->assertRequestsSent(1);
+});
