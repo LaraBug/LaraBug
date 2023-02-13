@@ -3,25 +3,10 @@
 namespace LaraBug\Tests;
 
 use LaraBug\ServiceProvider;
-use Illuminate\Foundation\Application;
 
 class TestCase extends \Orchestra\Testbench\TestCase
 {
-    /**
-     * Setup the test environment.
-     *
-     * @return void
-     */
-    public function setUp(): void
-    {
-        parent::setUp();
-    }
-
-    /**
-     * @param Application $app
-     * @return array
-     */
-    protected function getPackageProviders($app)
+    protected function getPackageProviders($app): array
     {
         return [ServiceProvider::class];
     }

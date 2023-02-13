@@ -1,54 +1,53 @@
 <?php
 
-namespace LaraBug\Tests\Fakes;
+declare(strict_types=1);
 
-use LaraBug\Tests\TestCase;
-use LaraBug\Facade as LarabugFacade;
+use LaraBug\Facade;
 
-class LaraBugFakeTest extends TestCase
-{
-    public function setUp(): void
-    {
-        parent::setUp();
+use function Pest\Laravel\get;
 
-        LarabugFacade::fake();
+use Illuminate\Support\Facades\Route;
 
-        $this->app['config']['logging.channels.larabug'] = ['driver' => 'larabug'];
-        $this->app['config']['logging.default'] = 'larabug';
-        $this->app['config']['larabug.environments'] = ['testing'];
-    }
+use function PHPUnit\Framework\assertSame;
 
-    /** @test */
-    public function it_will_sent_exception_to_larabug_if_exception_is_thrown()
-    {
-        $this->app['router']->get('/exception', function () {
-            throw new \Exception('Exception');
-        });
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 
-        $this->get('/exception');
+beforeEach(function () {
+    Facade::fake();
 
-        LarabugFacade::assertSent(\Exception::class);
+    config([
+        'logging.channels.larabug' => ['driver' => 'larabug'],
+        'logging.default' => 'larabug',
+        'larabug.environments' => 'testing',
+    ]);
+});
 
-        LarabugFacade::assertSent(\Exception::class, function (\Throwable $throwable) {
-            $this->assertSame('Exception', $throwable->getMessage());
+it('will sent exception to larabug if exception is thrown', function () {
+    Route::get('exception', function () {
+        throw new \Exception('Exception');
+    });
 
-            return true;
-        });
+    get('exception');
 
-        LarabugFacade::assertNotSent(\Illuminate\Database\Eloquent\ModelNotFoundException::class);
-    }
+    Facade::assertSent(\Exception::class);
 
-    /** @test */
-    public function it_will_sent_nothing_to_larabug_if_no_exceptions_thrown()
-    {
-        LarabugFacade::fake();
+    Facade::assertSent(\Exception::class, function (\Throwable $throwable) {
+        assertSame('Exception', $throwable->getMessage());
 
-        $this->app['router']->get('/nothing', function () {
-            //
-        });
+        return true;
+    });
 
-        $this->get('/nothing');
+    Facade::assertNotSent(ModelNotFoundException::class);
+});
 
-        LarabugFacade::assertNothingSent();
-    }
-}
+it('will sent nothing to larabug if no exceptions thrown', function () {
+    Facade::fake();
+
+    Route::get('nothing', function () {
+        //
+    });
+
+    get('nothing');
+
+    Facade::assertNothingSent();
+});
