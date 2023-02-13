@@ -16,7 +16,7 @@ class TestCommand extends Command
     public function handle(): int
     {
         try {
-            /** @var LaraBug $laraBug */
+            /** @var \LaraBug\LaraBug $laraBug */
             $laraBug = app('larabug');
 
             if (config('larabug.login_key')) {

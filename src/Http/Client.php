@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace LaraBug\Http;
 
+use Exception;
 use GuzzleHttp\ClientInterface;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
@@ -48,9 +49,11 @@ class Client
                         $exception
                     )
                 );
-        } catch (RequestException $e) {
-            return $e->getResponse();
-        } catch (\Exception) {
+        } catch (RequestException $exception) {
+            report($exception);
+            return $exception->getResponse();
+        } catch (Exception $exception) {
+            report($exception);
             return null;
         }
     }
@@ -58,7 +61,7 @@ class Client
     public function getGuzzleHttpClient(): PendingRequest|\GuzzleHttp\Client
     {
         if ($this->client === null) {
-            return Http::timeout(15)->buildClient();
+            return Http::timeout(15);
         }
 
         return Http::timeout(15)->setClient($this->client);
