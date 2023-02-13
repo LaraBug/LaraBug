@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace LaraBug\Fakes;
 
 use PHPUnit\Framework\Assert as PHPUnit;

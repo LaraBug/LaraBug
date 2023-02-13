@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace LaraBug;
 
 use Throwable;
@@ -248,7 +250,7 @@ class LaraBug
                     $variables[$key] = $this->filterVariables($val);
                 }
                 foreach ($this->blacklist as $filter) {
-                    if (Str::is($filter, strtolower($key))) {
+                    if (Str::is($filter, strtolower((string) $key))) {
                         $variables[$key] = '***';
                     }
                 }

@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace LaraBug\Tests\Mocks;
 
 use GuzzleHttp\Psr7\Response;
@@ -7,7 +9,7 @@ use PHPUnit\Framework\Assert;
 
 class LaraBugClient extends \LaraBug\Http\Client
 {
-    const RESPONSE_ID = 'test';
+    public const RESPONSE_ID = 'test';
 
     /** @var array */
     protected $requests = [];
