@@ -27,7 +27,7 @@ class LaraBugHandler extends AbstractProcessingHandler
     /**
      * @param array $record
      */
-    protected function write(array $record): void
+    protected function write($record): void
     {
         if (isset($record['context']['exception']) && $record['context']['exception'] instanceof Throwable) {
             $this->laraBug->handle(
