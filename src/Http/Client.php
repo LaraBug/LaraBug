@@ -2,7 +2,11 @@
 
 namespace LaraBug\Http;
 
+use Exception;
 use GuzzleHttp\ClientInterface;
+use Illuminate\Support\Facades\Http;
+use GuzzleHttp\Exception\RequestException;
+use Illuminate\Http\Client\PendingRequest;
 
 class Client
 {
@@ -29,53 +33,58 @@ class Client
 
     /**
      * @param array $exception
-     * @return \GuzzleHttp\Promise\PromiseInterface|\Psr\Http\Message\ResponseInterface|null
+     * @return \GuzzleHttp\Promise\PromiseInterface|\Illuminate\Http\Client\Response|\Psr\Http\Message\ResponseInterface|null
      * @throws \GuzzleHttp\Exception\GuzzleException
      */
     public function report($exception)
     {
         try {
-            return $this->getGuzzleHttpClient()->request('POST', config('larabug.server'), [
-                'headers' => [
-                    'Authorization' => 'Bearer '.$this->login,
-                    'Content-Type' => 'application/json',
-                    'Accept' => 'application/json',
-                    'User-Agent' => 'LaraBug-Package'
-                ],
-                'json' => array_merge([
-                    'project' => $this->project,
-                    'additional' => [],
-                ], $exception),
-                'verify' => config('larabug.verify_ssl'),
-            ]);
-        } catch (\GuzzleHttp\Exception\RequestException $e) {
-            return $e->getResponse();
-        } catch (\Exception $e) {
+            return $this->getGuzzleHttpClient()
+                ->withToken($this->login)
+                ->asJson()
+                ->acceptJson()
+                ->withUserAgent('LaraBug-Package')
+                ->when(
+                    !config('larabug.verify_ssl'),
+                    function ($client) {
+                        /** @var \Illuminate\Http\Client\PendingRequest|\GuzzleHttp\Client $client */
+                        $client->withoutVerifying();
+                    }
+                )
+                ->post(
+                    config('larabug.server'),
+                    array_merge(
+                        [
+                            'project' => $this->project,
+                            'additional' => [],
+                        ],
+                        $exception
+                    )
+                );
+        } catch (RequestException $exception) {
+            report($exception);
+            return $exception->getResponse();
+        } catch (Exception $exception) {
+            report($exception);
             return null;
         }
     }
 
-    /**
-     * @return \GuzzleHttp\Client
-     */
-    public function getGuzzleHttpClient()
+    public function getGuzzleHttpClient(): PendingRequest
     {
-        if (! isset($this->client)) {
-            $this->client = new \GuzzleHttp\Client([
-                'timeout' => 15,
-            ]);
+        if ($this->client === null) {
+            return Http::timeout(15);
         }
 
-        return $this->client;
+        return Http::timeout(15)->setClient($this->client);
     }
 
     /**
-     * @param ClientInterface $client
-     * @return $this
+     * @return static
      */
-    public function setGuzzleHttpClient(ClientInterface $client)
+    public function setGuzzleHttpClient(ClientInterface $client): self
     {
-        $this->client = $client;
+        $this->client = Http::timeout(15)->setClient($client)->buildClient();
 
         return $this;
     }
