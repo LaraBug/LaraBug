@@ -18,6 +18,8 @@ jobs:
                 dependency-version: [prefer-lowest, prefer-stable]
                 os: [ubuntu-latest]
                 include:
+                    - laravel: 11.*
+                      testbench: 9.*
                     - laravel: 10.*
                       testbench: 8.*
                     - laravel: 9.*
