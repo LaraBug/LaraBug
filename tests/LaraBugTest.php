@@ -122,7 +122,7 @@ class LaraBugTest extends TestCase
 
         $this->assertTrue($this->laraBug->isSleepingException($data));
 
-        Carbon::setTestNow('2019-10-12 13:31:00');
+        Carbon::setTestNow('2019-10-12 13:30:59');
 
         $this->assertTrue($this->laraBug->isSleepingException($data));
 
