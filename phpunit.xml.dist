@@ -6,16 +6,6 @@
          processIsolation="false"
          stopOnFailure="false"
          xsi:noNamespaceSchemaLocation="https://schema.phpunit.de/10.0/phpunit.xsd">
-    <coverage>
-        <include>
-            <directory suffix=".php">src/</directory>
-        </include>
-        <report>
-            <clover outputFile="build/logs/clover.xml"/>
-            <html outputDirectory="build/coverage"/>
-            <text outputFile="build/coverage.txt"/>
-        </report>
-    </coverage>
     <testsuites>
         <testsuite name="LaraBug Test Suite">
             <directory>tests</directory>
