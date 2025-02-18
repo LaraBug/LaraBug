@@ -20,7 +20,7 @@ class Client
      * @param string $project
      * @param ClientInterface|null $client
      */
-    public function __construct(string $login, string $project, ClientInterface $client = null)
+    public function __construct(string $login, string $project, ?ClientInterface $client = null)
     {
         $this->login = $login;
         $this->project = $project;
