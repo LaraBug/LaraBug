@@ -47,6 +47,13 @@ class Client
                     'additional' => [],
                 ], $exception),
                 'verify' => config('larabug.verify_ssl'),
+                'allow_redirects' => [
+                    'max' => 5,
+                    'strict' => true,  // Preserve POST method on redirects
+                    'referer' => true,
+                    'protocols' => ['http', 'https'],
+                    'track_redirects' => false
+                ],
             ]);
         } catch (\GuzzleHttp\Exception\RequestException $e) {
             return $e->getResponse();

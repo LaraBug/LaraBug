@@ -142,4 +142,48 @@ return [
     */
     'verify_ssl' => env('LB_VERIFY_SSL', true),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Job Monitoring Configuration
+    |--------------------------------------------------------------------------
+    |
+    | Configure queue job monitoring behavior.
+    |
+    */
+    'jobs' => [
+        /*
+        | Enable or disable job monitoring
+        */
+        'enabled' => env('LB_JOBS_ENABLED', false),
+
+        /*
+        | Track all jobs (true) or only failed jobs (false)
+        | Default: false (only failures) to minimize API usage
+        */
+        'track_all_jobs' => env('LB_JOBS_TRACK_ALL', false),
+
+        /*
+        | Ignore specific job classes
+        | Example: [\App\Jobs\UnimportantJob::class]
+        */
+        'ignore_jobs' => [],
+
+        /*
+        | Only track jobs on specific queues (empty = all queues)
+        | Example: ['high-priority', 'emails']
+        */
+        'only_queues' => [],
+
+        /*
+        | Ignore jobs on specific queues
+        | Example: ['low-priority']
+        */
+        'ignore_queues' => [],
+
+        /*
+        | Maximum payload size in bytes (payloads larger will be truncated)
+        */
+        'max_payload_size' => env('LB_JOBS_MAX_PAYLOAD_SIZE', 10000),
+    ],
+
 ];

@@ -4,8 +4,8 @@ namespace LaraBug;
 
 use Throwable;
 use LaraBug\Http\Client;
+use LaraBug\Filters\DataFilter;
 use Illuminate\Support\Str;
-use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\App;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Request;
@@ -16,8 +16,8 @@ class LaraBug
     /** @var Client */
     private $client;
 
-    /** @var array */
-    private $blacklist = [];
+    /** @var DataFilter */
+    private $dataFilter;
 
     /** @var null|string */
     private $lastExceptionId;
@@ -28,10 +28,7 @@ class LaraBug
     public function __construct(Client $client)
     {
         $this->client = $client;
-
-        $this->blacklist = array_map(function ($blacklist) {
-            return strtolower($blacklist);
-        }, config('larabug.blacklist', []));
+        $this->dataFilter = new DataFilter(config('larabug.blacklist', []));
     }
 
     /**
@@ -184,17 +181,19 @@ class LaraBug
             $count = 12;
         }
 
-        $lines = file($data['file']);
+        $lines = @file($data['file']);
         $data['executor'] = [];
 
-        if (count($lines) < $count) {
+        if ($lines !== false && count($lines) < $count) {
             $count = count($lines) - $data['line'];
         }
 
-        for ($i = -1 * abs($count); $i <= abs($count); $i++) {
-            $data['executor'][] = $this->getLineInfo($lines, $data['line'], $i);
+        if ($lines !== false) {
+            for ($i = -1 * abs($count); $i <= abs($count); $i++) {
+                $data['executor'][] = $this->getLineInfo($lines, $data['line'], $i);
+            }
+            $data['executor'] = array_filter($data['executor']);
         }
-        $data['executor'] = array_filter($data['executor']);
 
         // Get project version
         $data['project_version'] = config('larabug.project_version', null);
@@ -216,13 +215,7 @@ class LaraBug
      */
     public function filterParameterValues($parameters)
     {
-        return collect($parameters)->map(function ($value) {
-            if ($this->shouldParameterValueBeFiltered($value)) {
-                return '...';
-            }
-
-            return $value;
-        })->toArray();
+        return $this->dataFilter->filterParameterValues($parameters);
     }
 
     /**
@@ -233,7 +226,7 @@ class LaraBug
      */
     public function shouldParameterValueBeFiltered($value)
     {
-        return $value instanceof UploadedFile;
+        return $this->dataFilter->shouldParameterValueBeFiltered($value);
     }
 
     /**
@@ -242,22 +235,7 @@ class LaraBug
      */
     public function filterVariables($variables)
     {
-        if (is_array($variables)) {
-            array_walk($variables, function ($val, $key) use (&$variables) {
-                if (is_array($val)) {
-                    $variables[$key] = $this->filterVariables($val);
-                }
-                foreach ($this->blacklist as $filter) {
-                    if (Str::is($filter, strtolower($key))) {
-                        $variables[$key] = '***';
-                    }
-                }
-            });
-
-            return $variables;
-        }
-
-        return [];
+        return $this->dataFilter->filterVariables($variables);
     }
 
     /**

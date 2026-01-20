@@ -21,7 +21,11 @@
     "autoload": {
         "psr-4": {
             "LaraBug\\": "src/"
-        }
+        },
+        "files": [
+            "_ide_helper.php",
+            "src/helpers.php"
+        ]
     },
     "autoload-dev": {
         "psr-4": {
@@ -38,6 +42,9 @@
             "providers": [
                 "LaraBug\\ServiceProvider"
             ]
+        },
+        "branch-alias": {
+            "dev-feature/queue-monitoring": "3.3.x-dev"
         }
     },
     "minimum-stability": "dev",
