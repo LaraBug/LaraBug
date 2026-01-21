@@ -58,6 +58,22 @@ class ServiceProvider extends BaseServiceProvider
 
         // Register the HTTP Client as a singleton
         $this->app->singleton(\LaraBug\Http\Client::class, function ($app) {
+            // Check if DSN is configured
+            if ($dsn = config('larabug.dsn')) {
+                $parsed = \LaraBug\Support\Dsn::make($dsn);
+
+                // Override config values with DSN values
+                config(['larabug.login_key' => $parsed->getLoginKey()]);
+                config(['larabug.project_key' => $parsed->getProjectKey()]);
+                config(['larabug.server' => $parsed->getServer()]);
+
+                return new \LaraBug\Http\Client(
+                    $parsed->getLoginKey(),
+                    $parsed->getProjectKey()
+                );
+            }
+
+            // Fallback to individual config keys
             return new \LaraBug\Http\Client(
                 config('larabug.login_key', 'login_key'),
                 config('larabug.project_key', 'project_key')

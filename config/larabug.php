@@ -4,6 +4,21 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | DSN (Data Source Name)
+    |--------------------------------------------------------------------------
+    |
+    | You can use a single DSN string to configure LaraBug instead of
+    | individual keys. Format: https://login-key:project-key@host/path
+    | Example: https://abc123:def456@www.larabug.com/api/log
+    |
+    | If DSN is set, it will take precedence over individual keys below.
+    |
+    */
+
+    'dsn' => env('LB_DSN', ''),
+
+    /*
+    |--------------------------------------------------------------------------
     | Login key
     |--------------------------------------------------------------------------
     |
