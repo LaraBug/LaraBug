@@ -6,6 +6,8 @@ use LaraBug\Http\Client;
 use LaraBug\Fakes\LaraBugFake;
 
 /**
+ * @method static \LaraBug\LaraBug context(array $context)
+ * @method static \LaraBug\LaraBug clearContext()
  * @method static void assertSent($throwable, $callback = null)
  * @method static void assertRequestsSent(int $count)
  * @method static void assertNotSent($throwable, $callback = null)
