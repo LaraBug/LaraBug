@@ -34,6 +34,9 @@
         "format": "vendor/bin/php-cs-fixer fix"
     },
     "extra": {
+        "branch-alias": {
+            "dev-master": "3.3.x-dev"
+        },
         "laravel": {
             "providers": [
                 "LaraBug\\ServiceProvider"
