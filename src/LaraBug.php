@@ -22,6 +22,9 @@ class LaraBug
     /** @var null|string */
     private $lastExceptionId;
 
+    /** @var array */
+    private $customContext = [];
+
     /**
      * @param Client $client
      */
@@ -32,6 +35,29 @@ class LaraBug
         $this->blacklist = array_map(function ($blacklist) {
             return strtolower($blacklist);
         }, config('larabug.blacklist', []));
+    }
+
+    /**
+     * Set custom context data that will be sent with the next exception
+     * 
+     * @param array $context
+     * @return self
+     */
+    public function context(array $context)
+    {
+        $this->customContext = array_merge($this->customContext, $context);
+        return $this;
+    }
+
+    /**
+     * Clear custom context data
+     * 
+     * @return self
+     */
+    public function clearContext()
+    {
+        $this->customContext = [];
+        return $this;
     }
 
     /**
@@ -198,6 +224,11 @@ class LaraBug
 
         // Get project version
         $data['project_version'] = config('larabug.project_version', null);
+
+        // Add custom context data
+        if (!empty($this->customContext)) {
+            $data['custom_data'] = $this->customContext;
+        }
 
         // to make symfony exception more readable
         if ($data['class'] == 'Symfony\Component\Debug\Exception\FatalErrorException') {
