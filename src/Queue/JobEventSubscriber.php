@@ -24,8 +24,6 @@ class JobEventSubscriber
 
     public function handleJobProcessing(JobProcessing $event): void
     {
-        file_put_contents('/tmp/larabug-events.log', date('Y-m-d H:i:s') . ' - JobProcessing: ' . $event->job->resolveName() . "\n", FILE_APPEND);
-        
         $jobId = $event->job->getJobId() ?? spl_object_hash($event->job);
 
         $this->timings[$jobId] = [
@@ -51,8 +49,6 @@ class JobEventSubscriber
 
     public function handleJobFailed(JobFailed $event): void
     {
-        file_put_contents('/tmp/larabug-events.log', date('Y-m-d H:i:s') . ' - JobFailed: ' . $event->job->resolveName() . "\n", FILE_APPEND);
-        
         $jobId = $event->job->getJobId() ?? spl_object_hash($event->job);
         $timing = $this->timings[$jobId] ?? null;
 
