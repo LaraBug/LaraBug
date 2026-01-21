@@ -23,7 +23,7 @@ class LaraBug
     private $lastExceptionId;
 
     /** @var array */
-    private $customContext = [];
+    private static $customContext = [];
 
     /**
      * @param Client $client
@@ -41,23 +41,21 @@ class LaraBug
      * Set custom context data that will be sent with the next exception
      * 
      * @param array $context
-     * @return self
+     * @return void
      */
-    public function context(array $context)
+    public static function context(array $context)
     {
-        $this->customContext = array_merge($this->customContext, $context);
-        return $this;
+        self::$customContext = array_merge(self::$customContext, $context);
     }
 
     /**
      * Clear custom context data
      * 
-     * @return self
+     * @return void
      */
-    public function clearContext()
+    public static function clearContext()
     {
-        $this->customContext = [];
-        return $this;
+        self::$customContext = [];
     }
 
     /**
@@ -226,8 +224,10 @@ class LaraBug
         $data['project_version'] = config('larabug.project_version', null);
 
         // Add custom context data
-        if (!empty($this->customContext)) {
-            $data['custom_data'] = $this->customContext;
+        if (!empty(self::$customContext)) {
+            $data['custom_data'] = self::$customContext;
+            // Clear context after adding to exception
+            self::$customContext = [];
         }
 
         // to make symfony exception more readable
