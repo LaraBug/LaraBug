@@ -23,7 +23,6 @@
             "LaraBug\\": "src/"
         },
         "files": [
-            "_ide_helper.php",
             "src/helpers.php"
         ]
     },

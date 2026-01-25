@@ -23,7 +23,7 @@ class JobMonitor
 
     public function trackJobStarted(Job $job, string $connectionName): void
     {
-        if (!$this->shouldTrack($job) || !$this->shouldTrackStatus($job)) {
+        if (!$this->shouldTrack($job)) {
             return;
         }
 
@@ -34,7 +34,7 @@ class JobMonitor
 
     public function trackJobCompleted(Job $job, string $connectionName, ?float $durationMs, ?int $memoryUsed): void
     {
-        if (!$this->shouldTrack($job) || !$this->shouldTrackStatus($job)) {
+        if (!$this->shouldTrack($job)) {
             return;
         }
 
@@ -48,14 +48,21 @@ class JobMonitor
 
     public function trackJobFailed(Job $job, string $connectionName, Throwable $exception, ?float $durationMs): void
     {
-        error_log('LaraBug JobMonitor::trackJobFailed() called for: ' . $job->resolveName());
-        
         if (!$this->shouldTrack($job)) {
-            error_log('LaraBug shouldTrack() returned false');
             return;
         }
-
-        error_log('LaraBug tracking job failure...');
+        
+        // Build storage data similar to regular exceptions
+        $storage = [
+            'SERVER' => [
+                'USER' => $_SERVER['USER'] ?? null,
+                'HTTP_USER_AGENT' => $_SERVER['HTTP_USER_AGENT'] ?? 'CLI',
+                'SERVER_PROTOCOL' => $_SERVER['SERVER_PROTOCOL'] ?? null,
+                'SERVER_SOFTWARE' => $_SERVER['SERVER_SOFTWARE'] ?? null,
+                'PHP_VERSION' => PHP_VERSION,
+            ],
+            'HEADERS' => getallheaders() ?: [],
+        ];
         
         // ALWAYS track failures
         $data = $this->collector->collect($job, $connectionName, 'failed', [
@@ -63,9 +70,12 @@ class JobMonitor
             'exception' => [
                 'class' => get_class($exception),
                 'message' => $exception->getMessage(),
+                'code' => $exception->getCode(),
                 'file' => $exception->getFile(),
                 'line' => $exception->getLine(),
-                'trace' => $exception->getTraceAsString(),
+                'error' => $exception->getTraceAsString(), // Stack trace goes in error field
+                'storage' => array_filter($storage), // Server/headers data goes in storage field
+                'environment' => config('app.env', 'production'),
             ],
         ]);
 
@@ -139,8 +149,6 @@ class JobMonitor
 
     protected function send(array $data): void
     {
-        file_put_contents('/tmp/larabug-send.log', date('Y-m-d H:i:s') . ' - JobMonitor::send() called for: ' . ($data['job_class'] ?? 'unknown') . "\n", FILE_APPEND);
-        
         try {
             $payload = [
                 'type' => 'queue_job',
@@ -148,17 +156,9 @@ class JobMonitor
                 'job' => $data,
             ];
             
-            file_put_contents('/tmp/larabug-send.log', 'Sending to: ' . config('larabug.server') . "\n", FILE_APPEND);
-            file_put_contents('/tmp/larabug-send.log', 'Payload: ' . json_encode($payload) . "\n", FILE_APPEND);
-            
-            $response = $this->client->report($payload);
-            
-            file_put_contents('/tmp/larabug-send.log', 'Response status: ' . ($response ? $response->getStatusCode() : 'null') . "\n", FILE_APPEND);
-            file_put_contents('/tmp/larabug-send.log', 'Response body: ' . ($response ? $response->getBody() : 'null') . "\n\n", FILE_APPEND);
+            $this->client->report($payload);
         } catch (Throwable $e) {
             // Silent fail - never break user's jobs
-            file_put_contents('/tmp/larabug-send.log', 'ERROR: ' . $e->getMessage() . "\n", FILE_APPEND);
-            file_put_contents('/tmp/larabug-send.log', 'Stack: ' . $e->getTraceAsString() . "\n\n", FILE_APPEND);
         }
     }
 }
