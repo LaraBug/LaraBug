@@ -1,38 +1,7 @@
 <?php
 
-namespace Illuminate\Foundation\Bus {
-
-    /**
-     * IDE Helper for LaraBug Queue Monitoring
-     *
-     * @method $this track(bool $track = true) Enable LaraBug tracking for this specific job
-     */
-    class PendingDispatch
-    {
-        //
-    }
-
-    /**
-     * IDE Helper for LaraBug Queue Monitoring
-     *
-     * @method $this track(bool $track = true) Enable LaraBug tracking for all jobs in this chain
-     */
-    class PendingChain
-    {
-        //
-    }
-
-    /**
-     * IDE Helper for LaraBug Queue Monitoring
-     * Extends PendingDispatch, so ->track() is automatically available
-     *
-     * @method $this track(bool $track = true) Enable LaraBug tracking for this closure job
-     */
-    class PendingClosureDispatch extends PendingDispatch
-    {
-        //
-    }
-}
+// This file is intentionally left minimal to avoid conflicts with Laravel's core classes.
+// IDE autocompletion for the ->track() method is provided via the TrackableJob trait.
 
 namespace Illuminate\Support\Facades {
 
