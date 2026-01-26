@@ -1,6 +1,6 @@
 {
     "name": "larabug/larabug",
-    "description": "Laravel 6.x/7.x/8.x/9.x/10.x/11.x bug notifier",
+    "description": "Laravel 6.x/7.x/8.x/9.x/10.x/11.x/12.x bug notifier",
     "keywords": [
         "laravel",
         "log",
@@ -21,7 +21,10 @@
     "autoload": {
         "psr-4": {
             "LaraBug\\": "src/"
-        }
+        },
+        "files": [
+            "src/helpers.php"
+        ]
     },
     "autoload-dev": {
         "psr-4": {
@@ -34,13 +37,13 @@
         "format": "vendor/bin/php-cs-fixer fix"
     },
     "extra": {
-        "branch-alias": {
-            "dev-master": "3.3.x-dev"
-        },
         "laravel": {
             "providers": [
                 "LaraBug\\ServiceProvider"
             ]
+        },
+        "branch-alias": {
+            "dev-feature/queue-monitoring": "3.3.x-dev"
         }
     },
     "minimum-stability": "dev",

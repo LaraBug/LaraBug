@@ -15,7 +15,7 @@ return [
     |
     */
 
-    'dsn' => env('LB_DSN', ''),
+    'dsn' => env('LB_DSN'),
 
     /*
     |--------------------------------------------------------------------------
@@ -156,5 +156,47 @@ return [
     |
     */
     'verify_ssl' => env('LB_VERIFY_SSL', true),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Job Monitoring Configuration
+    |--------------------------------------------------------------------------
+    |
+    | Configure queue job monitoring behavior.
+    |
+    */
+    'jobs' => [
+        /*
+        | Enable or disable queue job tracking
+        | Set to false via LB_TRACK_JOBS=false to completely disable
+        | Default: true (tracking enabled)
+        */
+        'track_jobs' => env('LB_TRACK_JOBS', true),
+
+        /*
+        | Only track jobs on specific queues (empty array = all queues)
+        | Example: ['high-priority', 'emails']
+        | Environment: LB_ONLY_QUEUES=high-priority,emails
+        */
+        'only_queues' => array_filter(explode(',', env('LB_ONLY_QUEUES', ''))),
+
+        /*
+        | Ignore jobs on specific queues
+        | Example: ['low-priority', 'notifications']
+        | Environment: LB_IGNORE_QUEUES=low-priority,notifications
+        */
+        'ignore_queues' => array_filter(explode(',', env('LB_IGNORE_QUEUES', ''))),
+
+        /*
+        | Ignore specific job classes
+        | Example: [\App\Jobs\UnimportantJob::class]
+        */
+        'ignore_jobs' => [],
+
+        /*
+        | Maximum payload size in bytes (payloads larger will be truncated)
+        */
+        'max_payload_size' => env('LB_JOBS_MAX_PAYLOAD_SIZE', 10000),
+    ],
 
 ];
