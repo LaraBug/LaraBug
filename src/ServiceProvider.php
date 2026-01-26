@@ -44,7 +44,7 @@ class ServiceProvider extends BaseServiceProvider
         Blade::include('larabug::larabug-js-client', 'larabugJavaScriptClient');
 
         // Register queue monitoring events
-        if (config('larabug.jobs.enabled', false)) {
+        if (config('larabug.jobs.track_jobs', true)) {
             $this->app['events']->subscribe(\LaraBug\Queue\JobEventSubscriber::class);
         }
     }
@@ -58,19 +58,25 @@ class ServiceProvider extends BaseServiceProvider
 
         // Register the HTTP Client as a singleton
         $this->app->singleton(\LaraBug\Http\Client::class, function ($app) {
-            // Check if DSN is configured
-            if ($dsn = config('larabug.dsn')) {
-                $parsed = \LaraBug\Support\Dsn::make($dsn);
+            // Check if DSN is configured and valid
+            $dsn = config('larabug.dsn');
+            
+            if ($dsn && is_string($dsn) && trim($dsn) !== '' && \LaraBug\Support\Dsn::isValid($dsn)) {
+                try {
+                    $parsed = \LaraBug\Support\Dsn::make($dsn);
 
-                // Override config values with DSN values
-                config(['larabug.login_key' => $parsed->getLoginKey()]);
-                config(['larabug.project_key' => $parsed->getProjectKey()]);
-                config(['larabug.server' => $parsed->getServer()]);
+                    // Override config values with DSN values
+                    config(['larabug.login_key' => $parsed->getLoginKey()]);
+                    config(['larabug.project_key' => $parsed->getProjectKey()]);
+                    config(['larabug.server' => $parsed->getServer()]);
 
-                return new \LaraBug\Http\Client(
-                    $parsed->getLoginKey(),
-                    $parsed->getProjectKey()
-                );
+                    return new \LaraBug\Http\Client(
+                        $parsed->getLoginKey(),
+                        $parsed->getProjectKey()
+                    );
+                } catch (\InvalidArgumentException $e) {
+                    // DSN parsing failed, fall back to individual config keys
+                }
             }
 
             // Fallback to individual config keys
