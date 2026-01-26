@@ -1,6 +1,6 @@
 {
     "name": "larabug/larabug",
-    "description": "Laravel 6.x/7.x/8.x/9.x/10.x/11.x bug notifier",
+    "description": "Laravel 6.x/7.x/8.x/9.x/10.x/11.x/12.x bug notifier",
     "keywords": [
         "laravel",
         "log",
@@ -37,9 +37,6 @@
         "format": "vendor/bin/php-cs-fixer fix"
     },
     "extra": {
-        "branch-alias": {
-            "dev-master": "3.3.x-dev"
-        },
         "laravel": {
             "providers": [
                 "LaraBug\\ServiceProvider"
