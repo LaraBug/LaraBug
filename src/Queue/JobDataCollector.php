@@ -30,7 +30,9 @@ class JobDataCollector
     public function collect(Job $job, string $connectionName, string $status, array $extra = []): array
     {
         $payload = json_decode($job->getRawBody(), true) ?? [];
-        $jobId = $job->getJobId();
+        
+        // Use UUID from payload if available, otherwise fall back to job ID
+        $jobId = $payload['uuid'] ?? $job->getJobId();
 
         $data = [
             'job_id' => $jobId,
