@@ -44,7 +44,7 @@ class ServiceProvider extends BaseServiceProvider
         Blade::include('larabug::larabug-js-client', 'larabugJavaScriptClient');
 
         // Register queue monitoring events
-        if (config('larabug.jobs.enabled', false)) {
+        if (config('larabug.jobs.track_jobs', true)) {
             $this->app['events']->subscribe(\LaraBug\Queue\JobEventSubscriber::class);
         }
     }
