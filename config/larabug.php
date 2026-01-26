@@ -167,33 +167,31 @@ return [
     */
     'jobs' => [
         /*
-        | Enable or disable job monitoring
+        | Enable or disable queue job tracking
+        | Set to false via LB_TRACK_JOBS=false to completely disable
+        | Default: true (tracking enabled)
         */
-        'enabled' => env('LB_JOBS_ENABLED', false),
+        'track_jobs' => env('LB_TRACK_JOBS', true),
 
         /*
-        | Track all jobs (true) or only failed jobs (false)
-        | Default: false (only failures) to minimize API usage
+        | Only track jobs on specific queues (empty array = all queues)
+        | Example: ['high-priority', 'emails']
+        | Environment: LB_ONLY_QUEUES=high-priority,emails
         */
-        'track_all_jobs' => env('LB_JOBS_TRACK_ALL', false),
+        'only_queues' => array_filter(explode(',', env('LB_ONLY_QUEUES', ''))),
+
+        /*
+        | Ignore jobs on specific queues
+        | Example: ['low-priority', 'notifications']
+        | Environment: LB_IGNORE_QUEUES=low-priority,notifications
+        */
+        'ignore_queues' => array_filter(explode(',', env('LB_IGNORE_QUEUES', ''))),
 
         /*
         | Ignore specific job classes
         | Example: [\App\Jobs\UnimportantJob::class]
         */
         'ignore_jobs' => [],
-
-        /*
-        | Only track jobs on specific queues (empty = all queues)
-        | Example: ['high-priority', 'emails']
-        */
-        'only_queues' => [],
-
-        /*
-        | Ignore jobs on specific queues
-        | Example: ['low-priority']
-        */
-        'ignore_queues' => [],
 
         /*
         | Maximum payload size in bytes (payloads larger will be truncated)

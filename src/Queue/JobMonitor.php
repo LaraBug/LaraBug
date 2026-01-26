@@ -83,45 +83,15 @@ class JobMonitor
     }
 
     /**
-     * Check if this specific job status should be tracked (success/processing)
-     * Jobs can opt-in by calling ->track() when dispatching
-     */
-    protected function shouldTrackStatus(Job $job): bool
-    {
-        // Check if job explicitly wants to be tracked via ->track()
-        $jobInstance = $this->getJobInstance($job);
-        
-        if ($jobInstance && property_exists($jobInstance, 'trackInLaraBug') && $jobInstance->trackInLaraBug === true) {
-            return true;
-        }
-
-        // Otherwise respect global track_all_jobs setting
-        return $this->config['jobs']['track_all_jobs'] ?? false;
-    }
-
-    /**
-     * Get the actual job instance from the Job container
-     */
-    protected function getJobInstance(Job $job)
-    {
-        try {
-            $payload = json_decode($job->getRawBody(), true);
-            
-            if (isset($payload['data']['command'])) {
-                return unserialize($payload['data']['command']);
-            }
-        } catch (\Throwable $e) {
-            // Silently fail - don't break jobs
-        }
-
-        return null;
-    }
-
-    /**
-     * Check if job should be tracked based on filters
+     * Check if job should be tracked based on filters and configuration
      */
     protected function shouldTrack(Job $job): bool
     {
+        // Check if tracking is globally disabled
+        if (!($this->config['jobs']['track_jobs'] ?? true)) {
+            return false;
+        }
+
         $jobClass = $job->resolveName();
 
         // Check ignore list
