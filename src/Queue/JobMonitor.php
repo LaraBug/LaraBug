@@ -13,17 +13,27 @@ class JobMonitor
     protected array $config;
 
     protected JobDataCollector $collector;
+    
+    protected ?EventBuffer $buffer = null;
 
     public function __construct(Client $client, array $config)
     {
         $this->client = $client;
         $this->config = $config;
         $this->collector = new JobDataCollector($config);
+        
+        // Initialize buffer for dynamic batching
+        $this->buffer = new EventBuffer($client, $config);
     }
 
     public function trackJobStarted(Job $job, string $connectionName): void
     {
         if (!$this->shouldTrack($job)) {
+            return;
+        }
+        
+        // Check if we should track processing events
+        if (!($this->config['jobs']['track_processing'] ?? false)) {
             return;
         }
 
@@ -35,6 +45,16 @@ class JobMonitor
     public function trackJobCompleted(Job $job, string $connectionName, ?float $durationMs, ?int $memoryUsed): void
     {
         if (!$this->shouldTrack($job)) {
+            return;
+        }
+        
+        // Check if we should track completed events
+        if (!($this->config['jobs']['track_completed'] ?? true)) {
+            return;
+        }
+        
+        // Apply sampling rate
+        if (!$this->shouldSample()) {
             return;
         }
 
@@ -64,7 +84,11 @@ class JobMonitor
             'HEADERS' => getallheaders() ?: [],
         ];
         
-        // ALWAYS track failures
+        // ALWAYS track failures (unless explicitly disabled)
+        if (!($this->config['jobs']['track_failed'] ?? true)) {
+            return;
+        }
+        
         $data = $this->collector->collect($job, $connectionName, 'failed', [
             'duration_ms' => $durationMs,
             'exception' => [
@@ -120,6 +144,13 @@ class JobMonitor
     protected function send(array $data): void
     {
         try {
+            // Use buffer for dynamic batching
+            if ($this->buffer) {
+                $this->buffer->add($data);
+                return;
+            }
+            
+            // Fall back to direct sending if buffer not initialized
             $payload = [
                 'type' => 'queue_job',
                 'project' => $this->config['project_key'],
@@ -129,6 +160,61 @@ class JobMonitor
             $this->client->report($payload);
         } catch (Throwable $e) {
             // Silent fail - never break user's jobs
+            // But report the error if configured
+            $this->reportError($e);
+        }
+    }
+    
+    /**
+     * Apply sampling rate for successful job completions
+     */
+    protected function shouldSample(): bool
+    {
+        $sampleRate = $this->config['jobs']['sample_rate'] ?? 1.0;
+        
+        // Always sample at 100%
+        if ($sampleRate >= 1.0) {
+            return true;
+        }
+        
+        // Never sample
+        if ($sampleRate <= 0.0) {
+            return false;
+        }
+        
+        // Random sampling
+        return (mt_rand() / mt_getrandmax()) <= $sampleRate;
+    }
+    
+    /**
+     * Report SDK errors (for debugging)
+     */
+    protected function reportError(Throwable $e): void
+    {
+        try {
+            if ($this->config['jobs']['report_sdk_errors'] ?? false) {
+                $this->client->report([
+                    'type' => 'sdk_error',
+                    'exception' => [
+                        'class' => get_class($e),
+                        'message' => $e->getMessage(),
+                        'file' => $e->getFile(),
+                        'line' => $e->getLine(),
+                    ],
+                ]);
+            }
+        } catch (Throwable $ignored) {
+            // Never let error reporting break the app
+        }
+    }
+    
+    /**
+     * Manually flush the buffer (useful for testing or long-running processes)
+     */
+    public function flush(): void
+    {
+        if ($this->buffer) {
+            $this->buffer->flush();
         }
     }
 }
