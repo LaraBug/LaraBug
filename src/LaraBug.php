@@ -136,11 +136,11 @@ class LaraBug
      */
     public function isSkipEnvironment()
     {
-        if (count(config('larabug.environments')) == 0) {
+        if (count(config('larabug.environments', [])) == 0) {
             return true;
         }
 
-        if (in_array(App::environment(), config('larabug.environments'))) {
+        if (in_array(App::environment(), config('larabug.environments', []))) {
             return false;
         }
 
