@@ -116,7 +116,25 @@ class JobMonitor
             return false;
         }
 
+        // Don't track queue events while a regular exception capture is in flight —
+        // prevents the queue tracking path from re-entering the send pipeline
+        // while it is already being used by LaraBug::handle().
+        if (\LaraBug\LaraBug::isCapturing()) {
+            return false;
+        }
+
         $jobClass = $job->resolveName();
+
+        // Never track SDK-internal jobs. This is a hard-coded safety rail on top
+        // of the user-configurable ignore list below: when the LaraBug package is
+        // installed inside the LaraBug SaaS itself (dogfooding), we never want the
+        // ingest queue jobs shipping themselves back to the server.
+        if (is_string($jobClass) && (
+            str_starts_with($jobClass, 'LaraBug\\')
+            || str_starts_with($jobClass, 'Larabug\\')
+        )) {
+            return false;
+        }
 
         // Check ignore list
         foreach ($this->config['jobs']['ignore_jobs'] ?? [] as $ignoredJob) {
