@@ -26,6 +26,15 @@ class LaraBug
     private static $customContext = [];
 
     /**
+     * Re-entry guard. Set while handle() is executing so any exception
+     * thrown *inside* the capture path (HTTP errors, serialization, etc.)
+     * can't recursively trigger another capture and blow the stack.
+     *
+     * @var bool
+     */
+    private static $capturing = false;
+
+    /**
      * @param Client $client
      */
     public function __construct(Client $client)
@@ -62,73 +71,102 @@ class LaraBug
      */
     public function handle(Throwable $exception, $fileType = 'php', array $customData = [])
     {
-        if ($this->isSkipEnvironment()) {
+        // Drop any capture that re-enters while another capture is still in flight.
+        // Without this, an error thrown inside logError() would be caught by
+        // Laravel's handler and fed back into handle(), looping forever.
+        if (self::$capturing) {
             return false;
         }
 
-        $data = $this->getExceptionData($exception);
+        self::$capturing = true;
 
-        if ($this->isSkipException($data['class'])) {
-            return false;
-        }
-
-        if ($this->isSleepingException($data)) {
-            return false;
-        }
-
-        if ($fileType == 'javascript') {
-            $data['fullUrl'] = $customData['url'];
-            $data['file'] = $customData['file'];
-            $data['file_type'] = $fileType;
-            $data['error'] = $customData['message'];
-            $data['exception'] = $customData['stack'];
-            $data['line'] = $customData['line'];
-            $data['class'] = null;
-
-            $count = config('larabug.lines_count');
-
-            if ($count > 50) {
-                $count = 12;
+        try {
+            if ($this->isSkipEnvironment()) {
+                return false;
             }
 
-            $lines = file($data['file']);
-            $data['executor'] = [];
+            $data = $this->getExceptionData($exception);
 
-            for ($i = -1 * abs($count); $i <= abs($count); $i++) {
-                $currentLine = $data['line'] + $i;
+            if ($this->isSkipException($data['class'])) {
+                return false;
+            }
 
-                $index = $currentLine - 1;
+            if ($this->isSleepingException($data)) {
+                return false;
+            }
 
-                if (!array_key_exists($index, $lines)) {
-                    continue;
+            if ($fileType == 'javascript') {
+                $data['fullUrl'] = $customData['url'];
+                $data['file'] = $customData['file'];
+                $data['file_type'] = $fileType;
+                $data['error'] = $customData['message'];
+                $data['exception'] = $customData['stack'];
+                $data['line'] = $customData['line'];
+                $data['class'] = null;
+
+                $count = config('larabug.lines_count');
+
+                if ($count > 50) {
+                    $count = 12;
                 }
 
-                $data['executor'][] = [
-                    'line_number' => $currentLine,
-                    'line' => $lines[$index],
-                ];
+                $lines = file($data['file']);
+                $data['executor'] = [];
+
+                for ($i = -1 * abs($count); $i <= abs($count); $i++) {
+                    $currentLine = $data['line'] + $i;
+
+                    $index = $currentLine - 1;
+
+                    if (!array_key_exists($index, $lines)) {
+                        continue;
+                    }
+
+                    $data['executor'][] = [
+                        'line_number' => $currentLine,
+                        'line' => $lines[$index],
+                    ];
+                }
+
+                $data['executor'] = array_filter($data['executor']);
             }
 
-            $data['executor'] = array_filter($data['executor']);
-        }
+            $rawResponse = $this->logError($data);
 
-        $rawResponse = $this->logError($data);
+            if (!$rawResponse) {
+                return false;
+            }
 
-        if (!$rawResponse) {
+            $response = json_decode($rawResponse->getBody()->getContents());
+
+            if (isset($response->id)) {
+                $this->setLastExceptionId($response->id);
+            }
+
+            if (config('larabug.sleep') !== 0) {
+                $this->addExceptionToSleep($data);
+            }
+
+            return $response;
+        } catch (Throwable $inner) {
+            // Anything that blows up inside capture must NOT re-enter Laravel's
+            // exception handler — that would loop back into this method. Swallow
+            // to stderr and let the outer process keep going.
+            error_log('[LaraBug] capture failed: '.$inner->getMessage());
+
             return false;
+        } finally {
+            self::$capturing = false;
         }
+    }
 
-        $response = json_decode($rawResponse->getBody()->getContents());
-
-        if (isset($response->id)) {
-            $this->setLastExceptionId($response->id);
-        }
-
-        if (config('larabug.sleep') !== 0) {
-            $this->addExceptionToSleep($data);
-        }
-
-        return $response;
+    /**
+     * @internal Used by tests and the queue tracking path to check whether
+     * a capture is currently in flight.
+     */
+    public static function isCapturing(): bool
+    {
+        return self::$capturing;
     }
 
     /**
