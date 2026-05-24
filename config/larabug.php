@@ -336,4 +336,62 @@ return [
         */
         'report_buffer_errors' => env('LB_REPORT_BUFFER_ERRORS', false),
     ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | CVE / Dependency vulnerability scanning
+    |--------------------------------------------------------------------------
+    |
+    | When enabled, the package periodically scans your composer.lock against
+    | LaraBug's CVE database and surfaces findings as Issues on your project.
+    | Independent of error and queue tracking — you can install LaraBug just
+    | for vulnerability scanning if you want.
+    |
+    */
+    'cve' => [
+        /*
+        | Master toggle. Off by default so existing installs don't change behavior.
+        */
+        'enabled' => env('LB_CVE_ENABLED', false),
+
+        /*
+        | How scans get triggered:
+        |   'request'  — piggyback on incoming HTTP requests. Detects composer.lock
+        |                changes ~immediately after deploy. Zero scheduler needed.
+        |   'schedule' — only via the daily scheduled command. Requires schedule:run.
+        |   'both'     — request-piggyback is the primary trigger; the scheduler
+        |                acts as a safety net for apps with no inbound traffic.
+        | Default: both.
+        */
+        'trigger' => env('LB_CVE_TRIGGER', 'both'),
+
+        /*
+        | Scheduler frequency. 'daily' | 'hourly' | 'twice-daily', or a custom
+        | cron expression. Only used when trigger includes 'schedule' or 'both'.
+        */
+        'schedule' => env('LB_CVE_SCHEDULE', 'daily'),
+
+        /*
+        | Hours to wait before re-scanning an unchanged composer.lock when
+        | triggered by request piggyback. Hash-change is detected immediately
+        | regardless; this only applies to the heartbeat for stale stacks.
+        */
+        'request_throttle_hours' => env('LB_CVE_REQUEST_THROTTLE_HOURS', 24),
+
+        /*
+        | Include `packages-dev` from composer.lock in the scan.
+        | Off by default — production deps are what matters in deployed apps.
+        */
+        'include_dev' => env('LB_CVE_INCLUDE_DEV', false),
+
+        /*
+        | Path to composer.lock. Defaults to base_path('composer.lock').
+        */
+        'lock_path' => env('LB_CVE_LOCK_PATH'),
+
+        /*
+        | Environment label sent alongside the scan (matches `app.env` by default).
+        */
+        'environment' => env('LB_CVE_ENVIRONMENT'),
+    ],
 ];
