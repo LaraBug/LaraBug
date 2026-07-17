@@ -50,7 +50,7 @@ class CveScanCommandTest extends TestCase
         $client = $this->bindClient(new CveClient());
 
         $this->artisan('larabug:scan')
-            ->expectsOutput('CVE scanning is disabled. Set LB_CVE_ENABLED=true to enable.')
+            ->expectsOutput('CVE scanning is disabled. Remove LB_CVE_ENABLED=false to enable it.')
             ->assertExitCode(2);
 
         $client->assertRequestsSent(0);

@@ -350,9 +350,17 @@ return [
     */
     'cve' => [
         /*
-        | Master toggle. Off by default so existing installs don't change behavior.
+        | Master toggle. On by default — set LB_CVE_ENABLED=false to opt out.
+        |
+        | Turning this on alone does not start scanning: the project also has to
+        | have CVE scanning enabled in LaraBug. Until it does, the server answers
+        | 403 and the client backs off for an hour, so leaving this on costs at
+        | most one request an hour.
+        |
+        | Only package names, versions and a hash of composer.lock ever leave the
+        | app. No source, no paths, no env values.
         */
-        'enabled' => env('LB_CVE_ENABLED', false),
+        'enabled' => env('LB_CVE_ENABLED', true),
 
         /*
         | How scans get triggered:

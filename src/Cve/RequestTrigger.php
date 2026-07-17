@@ -23,8 +23,10 @@ class RequestTrigger
 {
     protected const CACHE_KEY_HASH = 'larabug.cve.last_sent_hash';
     protected const CACHE_KEY_TIMESTAMP = 'larabug.cve.last_sent_at';
+    protected const CACHE_KEY_BACKOFF = 'larabug.cve.backoff_until';
     protected const LOCK_KEY = 'larabug.cve.trigger_lock';
     protected const LOCK_SECONDS = 60;
+    protected const BACKOFF_SECONDS = 3600;
 
     /** Memoized lockfile payload for this process. */
     protected static ?array $cachedPayload = null;
@@ -46,7 +48,7 @@ class RequestTrigger
 
     public function maybeTrigger(): void
     {
-        if (! config('larabug.cve.enabled', false)) {
+        if (! config('larabug.cve.enabled', true)) {
             return;
         }
 
@@ -107,6 +109,13 @@ class RequestTrigger
 
     protected function shouldFire(string $currentHash): bool
     {
+        // The server has told us it does not want these yet. Without this the
+        // scan is enabled by default but the project is not, so every single
+        // request would post the lockfile and collect another 403.
+        if ($this->cache->get(self::CACHE_KEY_BACKOFF)) {
+            return false;
+        }
+
         $lastHash = $this->cache->get(self::CACHE_KEY_HASH);
 
         if ($lastHash !== $currentHash) {
@@ -126,9 +135,6 @@ class RequestTrigger
             'composer_lock' => $payload,
         ]);
 
-        // Only treat 2xx and "skipped" responses as success. 403 (feature off
-        // on the server) and other errors leave the cache untouched so we try
-        // again on the next request rather than wedging until the throttle expires.
         $status = $response && method_exists($response, 'getStatusCode')
             ? $response->getStatusCode()
             : 0;
@@ -139,10 +145,24 @@ class RequestTrigger
 
         $unchanged = is_array($body) && ($body['skipped'] ?? null) === 'unchanged';
 
+        // Only 2xx and "skipped" count as the scan having landed.
         if (($status >= 200 && $status < 300) || $unchanged) {
             $ttl = max(1, (int) config('larabug.cve.request_throttle_hours', 24)) * 3600;
             $this->cache->put(self::CACHE_KEY_HASH, $payload['content_hash'], $ttl);
             $this->cache->put(self::CACHE_KEY_TIMESTAMP, time(), $ttl);
+
+            return;
         }
+
+        // 403 is the server saying this project has not turned CVE scanning on.
+        // That is a settled answer, not a blip, so back off rather than asking
+        // again on the very next request. Short enough that enabling it in the
+        // panel starts working without waiting out the full throttle window.
+        if ($status === 403) {
+            $this->cache->put(self::CACHE_KEY_BACKOFF, time(), self::BACKOFF_SECONDS);
+        }
+
+        // Anything else (a 5xx, a timeout) leaves the cache untouched, so the
+        // next request tries again.
     }
 }

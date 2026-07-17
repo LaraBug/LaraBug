@@ -177,15 +177,75 @@ class CveRequestTriggerTest extends TestCase
     }
 
     /** @test */
-    public function it_does_not_remember_a_rejected_scan_so_the_next_request_retries()
+    public function it_does_not_remember_a_rejected_scan_as_a_success()
     {
-        // 403 is the server saying the feature is off for this project. Caching
-        // that would wedge the client until the throttle expired.
+        // A 403 must not look like a delivered scan: the lockfile it describes
+        // has not been recorded, so nothing should claim it has.
         $client = new CveClient(403, '{"error":"feature_disabled","feature":"cve"}');
         $this->trigger($client)->maybeTrigger();
 
         $client->assertRequestsSent(1);
         $this->assertNull($this->app['cache']->store('array')->get('larabug.cve.last_sent_hash'));
+    }
+
+    /** @test */
+    public function it_is_on_for_a_config_that_predates_the_feature()
+    {
+        // A config file published before CVE scanning existed has no cve.enabled
+        // key at all. Scanning is opt-out, so an absent key still scans.
+        $cve = $this->app['config']['larabug.cve'];
+        unset($cve['enabled']);
+        $this->app['config']['larabug.cve'] = $cve;
+
+        $this->assertNull($this->app['config']['larabug.cve.enabled']);
+
+        $client = new CveClient();
+        $this->trigger($client)->maybeTrigger();
+
+        $client->assertRequestsSent(1);
+    }
+
+    /** @test */
+    public function it_backs_off_after_a_403_instead_of_asking_on_every_request()
+    {
+        // Being on by default means most apps meet a project that has not
+        // enabled scanning. Without a backoff every request would post the
+        // lockfile again to collect the same 403.
+        $rejected = new CveClient(403, '{"error":"feature_disabled","feature":"cve"}');
+        $this->trigger($rejected)->maybeTrigger();
+        $rejected->assertRequestsSent(1);
+
+        foreach (range(1, 3) as $ignored) {
+            $this->resetStaticState();
+
+            $next = new CveClient();
+            $this->trigger($next)->maybeTrigger();
+            $next->assertRequestsSent(0);
+        }
+    }
+
+    /** @test */
+    public function it_tries_again_once_the_backoff_has_lapsed()
+    {
+        $rejected = new CveClient(403, '{"error":"feature_disabled","feature":"cve"}');
+        $this->trigger($rejected)->maybeTrigger();
+
+        $this->resetStaticState();
+        $this->app['cache']->store('array')->forget('larabug.cve.backoff_until');
+
+        $retry = new CveClient();
+        $this->trigger($retry)->maybeTrigger();
+
+        $retry->assertRequestsSent(1);
+    }
+
+    /** @test */
+    public function it_keeps_retrying_after_a_server_error_rather_than_backing_off()
+    {
+        // A 5xx is a blip, not an answer, so it must not trip the backoff.
+        $down = new CveClient(500, 'upstream is having a moment');
+        $this->trigger($down)->maybeTrigger();
+        $down->assertRequestsSent(1);
 
         $this->resetStaticState();
 
