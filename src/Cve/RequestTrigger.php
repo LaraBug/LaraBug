@@ -30,11 +30,18 @@ class RequestTrigger
     protected static ?array $cachedPayload = null;
     protected static bool $alreadyFired = false;
 
-    public function __construct(
-        protected CacheRepository $cache,
-        protected ComposerLockScanner $scanner,
-        protected Client $client,
-    ) {
+    protected CacheRepository $cache;
+    protected ComposerLockScanner $scanner;
+    protected Client $client;
+
+    // Written out rather than promoted: promotion and the trailing comma in a
+    // parameter list are both PHP 8.0+, and this package still supports 7.4.
+    // Typed properties are fine, those landed in 7.4.
+    public function __construct(CacheRepository $cache, ComposerLockScanner $scanner, Client $client)
+    {
+        $this->cache = $cache;
+        $this->scanner = $scanner;
+        $this->client = $client;
     }
 
     public function maybeTrigger(): void

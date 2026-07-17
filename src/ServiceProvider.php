@@ -85,12 +85,23 @@ class ServiceProvider extends BaseServiceProvider
 
     protected function applyCadence($event, string $cadence): void
     {
-        match (strtolower($cadence)) {
-            'hourly' => $event->hourly(),
-            'twice-daily', 'twicedaily' => $event->twiceDaily(),
-            'daily' => $event->daily(),
-            default => $event->cron($cadence),
-        };
+        // switch, not match: this package still supports PHP 7.4, where a match
+        // expression is a parse error. The provider loads in every test, so it
+        // would take the whole suite down rather than just this path.
+        switch (strtolower($cadence)) {
+            case 'hourly':
+                $event->hourly();
+                break;
+            case 'twice-daily':
+            case 'twicedaily':
+                $event->twiceDaily();
+                break;
+            case 'daily':
+                $event->daily();
+                break;
+            default:
+                $event->cron($cadence);
+        }
     }
 
     /**
