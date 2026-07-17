@@ -4,7 +4,9 @@ namespace LaraBug;
 
 use LaraBug\Queue\DispatchMacros;
 use Monolog\Logger;
+use LaraBug\Commands\ScanCommand;
 use LaraBug\Commands\TestCommand;
+use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ServiceProvider as BaseServiceProvider;
@@ -35,6 +37,7 @@ class ServiceProvider extends BaseServiceProvider
         // Register commands
         $this->commands([
             TestCommand::class,
+            ScanCommand::class,
         ]);
 
         // Map any routes
@@ -46,6 +49,58 @@ class ServiceProvider extends BaseServiceProvider
         // Register queue monitoring events
         if (config('larabug.jobs.track_jobs', true)) {
             $this->app['events']->subscribe(\LaraBug\Queue\JobEventSubscriber::class);
+        }
+
+        // CVE triggers
+        if (config('larabug.cve.enabled', false)) {
+            $trigger = strtolower((string) config('larabug.cve.trigger', 'both'));
+
+            // Scheduler trigger: safety net for apps without inbound traffic.
+            if (in_array($trigger, ['schedule', 'both'], true)) {
+                $this->app->booted(function () {
+                    $schedule = $this->app->make(Schedule::class);
+                    $cadence = config('larabug.cve.schedule', 'daily');
+
+                    $event = $schedule->command('larabug:scan')
+                        ->withoutOverlapping()
+                        ->onOneServer();
+
+                    $this->applyCadence($event, $cadence);
+                });
+            }
+
+            // Request-piggyback trigger: fires after the response is sent.
+            // Detects composer.lock changes ~immediately and works without cron.
+            if (in_array($trigger, ['request', 'both'], true) && ! $this->app->runningInConsole()) {
+                $this->app->terminating(function () {
+                    try {
+                        $this->app->make(\LaraBug\Cve\RequestTrigger::class)->maybeTrigger();
+                    } catch (\Throwable $e) {
+                        // Never let CVE scanning break the user's app.
+                    }
+                });
+            }
+        }
+    }
+
+    protected function applyCadence($event, string $cadence): void
+    {
+        // switch, not match: this package still supports PHP 7.4, where a match
+        // expression is a parse error. The provider loads in every test, so it
+        // would take the whole suite down rather than just this path.
+        switch (strtolower($cadence)) {
+            case 'hourly':
+                $event->hourly();
+                break;
+            case 'twice-daily':
+            case 'twicedaily':
+                $event->twiceDaily();
+                break;
+            case 'daily':
+                $event->daily();
+                break;
+            default:
+                $event->cron($cadence);
         }
     }
 
