@@ -411,14 +411,15 @@ return [
     | Ships application log lines to LaraBug, so the lines leading up to an
     | error are there when you open it.
     |
-    | Adding the channel to your stack in config/logging.php is the opt-in;
-    | nothing is sent until you do. Logs run at far higher volume than
-    | exceptions and count against your plan, so opt in deliberately.
+    | Naming the channel in your logging stack is the opt-in; nothing is sent
+    | until you do. Logs run at far higher volume than exceptions and count
+    | against your plan, so opt in deliberately.
     |
-    |   'stack' => [
-    |       'driver' => 'stack',
-    |       'channels' => ['single', 'larabug-logs'],
-    |   ],
+    |   LOG_STACK=single,larabug-logs
+    |
+    | The package defines the `larabug-logs` channel itself, so there is
+    | nothing to add to config/logging.php. Define a channel of that name
+    | yourself if you want different settings; yours wins.
     |
     */
 

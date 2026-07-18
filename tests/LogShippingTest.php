@@ -21,8 +21,45 @@ class LogShippingTest extends TestCase
         $this->app->instance(Client::class, $this->client);
 
         $this->app['config']['larabug.project_key'] = 'project';
-        $this->app['config']['logging.channels.larabug-logs'] = ['driver' => 'larabug-logs'];
+
+        // Deliberately no logging.channels.larabug-logs here: the package
+        // defines the channel, and naming it is all an application should have
+        // to do.
         $this->app['config']['logging.default'] = 'larabug-logs';
+    }
+
+    /** @test */
+    public function it_defines_the_channel_without_any_logging_config()
+    {
+        $this->assertSame(
+            'larabug-logs',
+            $this->app['config']['logging.channels.larabug-logs.driver']
+        );
+
+        Log::info('Shipped through a channel nobody declared');
+
+        $this->buffer()->flush();
+
+        $this->client->assertRequestsSent(1);
+    }
+
+    /** @test */
+    public function an_application_defined_channel_wins()
+    {
+        $this->app['config']['logging.channels.larabug-logs'] = [
+            'driver' => 'larabug-logs',
+            'level' => 'warning',
+        ];
+
+        Log::info('Below the threshold');
+        Log::warning('At the threshold');
+
+        $this->buffer()->flush();
+
+        $logs = $this->client->requests()[0]['logs'];
+
+        $this->assertCount(1, $logs);
+        $this->assertSame('At the threshold', $logs[0]['message']);
     }
 
     /** @test */
@@ -45,22 +82,6 @@ class LogShippingTest extends TestCase
         $this->assertSame('First line', $payload['logs'][0]['message']);
         $this->assertSame('info', $payload['logs'][0]['level']);
         $this->assertSame('error', $payload['logs'][1]['level']);
-    }
-
-    /** @test */
-    public function it_respects_the_configured_level()
-    {
-        $this->app['config']['larabug.logs.level'] = 'warning';
-
-        Log::info('Below the threshold');
-        Log::warning('At the threshold');
-
-        $this->buffer()->flush();
-
-        $logs = $this->client->requests()[0]['logs'];
-
-        $this->assertCount(1, $logs);
-        $this->assertSame('At the threshold', $logs[0]['message']);
     }
 
     /** @test */

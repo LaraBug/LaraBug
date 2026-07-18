@@ -46,6 +46,18 @@ class ServiceProvider extends BaseServiceProvider
         // Create an alias to the larabug-js-client.blade.php include
         Blade::include('larabug::larabug-js-client', 'larabugJavaScriptClient');
 
+        // Define the channel so applications only have to name it in their
+        // stack, never copy a block into config/logging.php. An application
+        // that does define its own keeps it: theirs wins.
+        if (! config('logging.channels.larabug-logs')) {
+            config([
+                'logging.channels.larabug-logs' => [
+                    'driver' => 'larabug-logs',
+                    'level' => config('larabug.logs.level', 'info'),
+                ],
+            ]);
+        }
+
         // Send whatever is still buffered at the end of the request. Without
         // this a request that logs less than one batch ships nothing, which is
         // most requests. Monolog's own close() covers the CLI case.
