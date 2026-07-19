@@ -8,6 +8,18 @@ use Throwable;
 
 class ExceptionHandlerRegistrationTest extends TestCase
 {
+    public function setUp(): void
+    {
+        parent::setUp();
+
+        // Laravel only started accepting reportable callbacks in 8.x. Below
+        // that the provider leaves the handler alone and an application keeps
+        // calling handle() itself.
+        if (! method_exists($this->app[ExceptionHandler::class], 'reportable')) {
+            $this->markTestSkipped('The exception handler accepts reportable callbacks from Laravel 8 onwards.');
+        }
+    }
+
     /** @test */
     public function it_reports_exceptions_through_the_applications_exception_handler()
     {

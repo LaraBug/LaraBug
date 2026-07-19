@@ -47,19 +47,6 @@ return [
     | LaraBug::handle() yourself and decide per exception whether to send it.
     |
     */
-
-    'register_exception_handler' => env('LB_REGISTER_EXCEPTION_HANDLER', true),
-
-    /*
-    |--------------------------------------------------------------------------
-    | Register the exception handler
-    |--------------------------------------------------------------------------
-    |
-    | Report exceptions automatically, so an application does not have to wire
-    | LaraBug into its own exception handler. Disable this if you want to call
-    | LaraBug::handle() yourself and decide per exception whether to send it.
-    |
-    */
     'register_exception_handler' => env('LB_REGISTER_EXCEPTION_HANDLER', true),
 
     /*
@@ -84,6 +71,7 @@ return [
     |
     */
     'project_version' => null,
+
     /*
     |--------------------------------------------------------------------------
     | Lines near exception
