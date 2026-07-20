@@ -2,8 +2,12 @@
 
 namespace LaraBug\Tests;
 
+use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 use LaraBug\Requests\QueryNormaliser;
+use LaraBug\Requests\RequestMonitor;
 use LaraBug\Requests\Sampler;
+use LaraBug\Requests\TraceContext;
 
 class RequestMonitoringTest extends TestCase
 {
@@ -97,5 +101,128 @@ class RequestMonitoringTest extends TestCase
 
         config(['larabug.requests.sample_rate' => 0.25]);
         $this->assertSame(0.25, (new Sampler())->rate());
+    }
+
+    /** @test */
+    public function it_replaces_credential_headers_with_a_marker()
+    {
+        $request = Request::create('/orders', 'GET');
+        $request->headers->set('Authorization', 'Bearer real-token');
+        $request->headers->set('Cookie', 'session=abc');
+        $request->headers->set('Accept', 'application/json');
+
+        $headers = $this->headersFor($request);
+
+        $this->assertSame('[redacted]', $headers['authorization']);
+        $this->assertSame('[redacted]', $headers['cookie']);
+        // Everything not on the list survives: a header nobody thought about
+        // is usually diagnostic.
+        $this->assertSame('application/json', $headers['accept']);
+    }
+
+    /** @test */
+    public function it_redacts_headers_even_when_the_published_config_predates_the_key()
+    {
+        // The shape an application upgrading into this feature is actually in.
+        // mergeConfigFrom is shallow, so a published file that predates these
+        // keys replaces the whole requests array and the key is simply absent.
+        $requests = config('larabug.requests');
+        unset($requests['redact_headers']);
+        config(['larabug.requests' => $requests]);
+
+        $request = Request::create('/orders', 'GET');
+        $request->headers->set('Authorization', 'Bearer real-token');
+
+        $this->assertSame('[redacted]', $this->headersFor($request)['authorization']);
+    }
+
+    /** @test */
+    public function a_body_is_kept_only_when_the_request_failed()
+    {
+        config(['larabug.requests.capture_payload_on_error' => true]);
+
+        $body = ['email' => 'a@b.c'];
+
+        $this->assertSame('', $this->payloadFor(Request::create('/orders', 'POST', $body), 200));
+        $this->assertSame('', $this->payloadFor(Request::create('/orders', 'POST', $body), 422));
+        // A GET has no body worth keeping, and its parameters are in the query
+        // string, which is never stored.
+        $this->assertSame('', $this->payloadFor(Request::create('/orders', 'GET', $body), 500));
+
+        $this->assertNotSame('', $this->payloadFor(Request::create('/orders', 'POST', $body), 500));
+    }
+
+    /** @test */
+    public function a_kept_body_carries_no_secrets_at_any_depth()
+    {
+        config(['larabug.requests.capture_payload_on_error' => true]);
+
+        $request = Request::create('/orders', 'POST', [
+            'email' => 'a@b.c',
+            'password' => 'hunter2',
+            'password_confirmation' => 'hunter2',
+            'card' => ['number' => '4111111111111111', 'cvv' => '123'],
+            'order_reference' => 'SUITE-1001',
+        ]);
+
+        $payload = json_decode($this->payloadFor($request, 500), true);
+
+        $this->assertSame('[redacted]', $payload['password']);
+        // Matched as a substring, because the field that matters is rarely
+        // named exactly what the list says.
+        $this->assertSame('[redacted]', $payload['password_confirmation']);
+        // The whole branch goes, because its parent key matched.
+        $this->assertSame('[redacted]', $payload['card']);
+
+        // And the rest survives, or there would be nothing left worth storing.
+        $this->assertSame('a@b.c', $payload['email']);
+        $this->assertSame('SUITE-1001', $payload['order_reference']);
+    }
+
+    /** @test */
+    public function everything_in_one_execution_shares_a_trace_id()
+    {
+        TraceContext::reset();
+
+        $first = TraceContext::id();
+
+        $this->assertSame($first, TraceContext::id());
+
+        TraceContext::reset();
+
+        $this->assertNotSame($first, TraceContext::id());
+    }
+
+    /** @test */
+    public function an_exception_counts_against_the_request_that_threw_it()
+    {
+        $monitor = new RequestMonitor();
+
+        $monitor->recordException('exc-1');
+        $monitor->recordException();
+
+        $record = $monitor->toArray(Request::create('/orders', 'GET'), new Response('', 500), 1.0);
+
+        $this->assertSame(2, $record['exceptions']);
+        // The first id reported wins: it is the one that caused the failure,
+        // and later ones are usually the handler's own noise.
+        $this->assertSame('exc-1', $record['exception_id']);
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private function headersFor(Request $request)
+    {
+        $record = (new RequestMonitor())->toArray($request, new Response('', 200), 1.0);
+
+        return json_decode($record['headers'], true);
+    }
+
+    private function payloadFor(Request $request, int $status)
+    {
+        $record = (new RequestMonitor())->toArray($request, new Response('', $status), 1.0);
+
+        return $record['payload'];
     }
 }

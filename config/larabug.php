@@ -259,6 +259,51 @@ return [
         */
         'capture_ip' => env('LB_REQUEST_CAPTURE_IP', true),
         'capture_user' => env('LB_REQUEST_CAPTURE_USER', true),
+
+        /*
+        | Whether request headers are recorded
+        | Headers are how you tell a browser from a crawler and a v1 client
+        | from a v2 one, which is usually what a strange request turns out to
+        | be. The names below are replaced with a marker rather than dropped:
+        | knowing a request carried an Authorization header is worth having,
+        | and knowing which token it carried is not
+        | Default: true
+        */
+        'capture_headers' => env('LB_REQUEST_CAPTURE_HEADERS', true),
+
+        'redact_headers' => [
+            'authorization',
+            'cookie',
+            'set-cookie',
+            'x-api-key',
+            'x-csrf-token',
+            'x-xsrf-token',
+            'proxy-authorization',
+        ],
+
+        /*
+        | Whether the request body is kept when the request failed
+        | Off by default, and never on a success: a body is the most sensitive
+        | thing a request carries, and it is only worth its risk on the handful
+        | of requests that returned a 5xx and have to be reproduced
+        | Default: false
+        */
+        'capture_payload_on_error' => env('LB_REQUEST_CAPTURE_PAYLOAD_ON_ERROR', false),
+
+        /*
+        | Fields replaced with a marker inside a captured body
+        | Matched against the key at any depth, case-insensitively, and as a
+        | substring: 'password' covers password_confirmation
+        */
+        'redact_fields' => [
+            'password',
+            'password_confirmation',
+            'token',
+            'secret',
+            'card',
+            'cvv',
+            'iban',
+        ],
     ],
 
     'heartbeat' => [

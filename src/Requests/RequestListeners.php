@@ -44,6 +44,17 @@ class RequestListeners
         $events->listen('Illuminate\Queue\Events\JobQueued', [$this, 'onJobQueued']);
         $events->listen('Illuminate\Mail\Events\MessageSent', [$this, 'onMailSent']);
         $events->listen('Illuminate\Notifications\Events\NotificationSent', [$this, 'onNotificationSent']);
+
+        // Outgoing HTTP, via the client's own event rather than Guzzle
+        // middleware: the event exists from Laravel 8 and needs no handler
+        // stack to be pushed onto a client we do not own.
+        $events->listen('Illuminate\Http\Client\Events\ResponseReceived', [$this, 'onOutgoingRequest']);
+        $events->listen('Illuminate\Http\Client\Events\ConnectionFailed', [$this, 'onOutgoingRequest']);
+
+        // Every log line written while this request was being served. The
+        // counter is what makes "this endpoint logs forty lines a request"
+        // visible without storing forty lines against it.
+        $events->listen('Illuminate\Log\Events\MessageLogged', [$this, 'onMessageLogged']);
     }
 
     public function onRouteMatched($event): void
@@ -115,6 +126,20 @@ class RequestListeners
     {
         $this->guard(function () {
             $this->monitor->increment('notifications_sent');
+        });
+    }
+
+    public function onOutgoingRequest($event): void
+    {
+        $this->guard(function () {
+            $this->monitor->increment('outgoing_requests');
+        });
+    }
+
+    public function onMessageLogged($event): void
+    {
+        $this->guard(function () {
+            $this->monitor->recordLog();
         });
     }
 

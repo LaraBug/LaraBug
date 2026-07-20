@@ -3,6 +3,7 @@
 namespace LaraBug\Requests;
 
 use Illuminate\Http\Request;
+use Illuminate\Http\UploadedFile;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
@@ -43,7 +44,10 @@ class RequestMonitor
     protected $route = null;
 
     /** @var string */
-    protected $traceId = '';
+    protected $exceptionId = '';
+
+    /** @var array<string, mixed>|null */
+    protected $payload = null;
 
     /** @var int */
     protected $maxQueries;
@@ -79,9 +83,25 @@ class RequestMonitor
         $this->route = $route;
     }
 
-    public function setTraceId(string $traceId): void
+    /**
+     * The exception this request threw, if the SDK reported one.
+     *
+     * Set from the report path rather than guessed from the status code: a 500
+     * can be returned deliberately, and an exception can be reported on a
+     * request that still answers 200.
+     */
+    public function recordException(string $exceptionId = ''): void
     {
-        $this->traceId = $traceId;
+        $this->counters['exceptions']++;
+
+        if ($exceptionId !== '' && $this->exceptionId === '') {
+            $this->exceptionId = $exceptionId;
+        }
+    }
+
+    public function recordLog(): void
+    {
+        $this->counters['logs']++;
     }
 
     /**
@@ -146,7 +166,23 @@ class RequestMonitor
             'duration_ms' => round(array_sum($stages), 3),
 
             'sample_rate' => $sampleRate,
-            'trace_id' => $this->traceId,
+
+            // The same id the log lines and the exception from this execution
+            // carry, which is the whole reason any of them is worth joining.
+            'trace_id' => TraceContext::id(),
+            'exception_id' => $this->exceptionId,
+
+            'user_agent' => (string) $request->userAgent(),
+            'host' => (string) gethostname(),
+
+            // Redacted here, not on the way out: the headers most worth losing
+            // are the ones an exception in between would otherwise carry.
+            'headers' => $this->headers($request),
+
+            // Only when the request failed, and only when asked for. A request
+            // body is the highest-value thing in this payload and the one with
+            // no business being stored for the requests that worked.
+            'payload' => $this->payload($request, $response),
 
             'memory_peak_kb' => (int) round(memory_get_peak_usage(true) / 1024),
             'request_size' => strlen($request->getContent()),
@@ -160,6 +196,141 @@ class RequestMonitor
 
             'sql' => $this->queries,
         ], $stages, $this->counters);
+    }
+
+    /**
+     * Request headers, minus the ones that are credentials.
+     *
+     * An allow-by-default list with an explicit deny, rather than the reverse:
+     * a header nobody thought about is usually diagnostic, and the handful that
+     * are not are well known.
+     *
+     * @return string JSON
+     */
+    protected function headers(Request $request): string
+    {
+        if (! config('larabug.requests.capture_headers', true)) {
+            return '';
+        }
+
+        // The fallback matters more than it looks. An application that
+        // published its config before these keys existed reads nothing from
+        // the file, and an empty list here would mean its Authorization header
+        // was stored in full. The default is the list, not the absence of one.
+        $redact = array_map('strtolower', (array) config('larabug.requests.redact_headers', [
+            'authorization',
+            'cookie',
+            'set-cookie',
+            'x-api-key',
+            'x-csrf-token',
+            'x-xsrf-token',
+            'proxy-authorization',
+        ]));
+
+        $headers = [];
+
+        foreach ($request->headers->all() as $name => $values) {
+            $value = is_array($values) ? implode(', ', $values) : (string) $values;
+
+            // A constant marker, not one that preserves the length: the length
+            // of a secret is itself something worth not publishing.
+            $headers[$name] = in_array(strtolower($name), $redact, true) ? '[redacted]' : $value;
+        }
+
+        return (string) json_encode($headers);
+    }
+
+    /**
+     * The request body, on failure only.
+     *
+     * Nightwatch's bargain, and the right one: the body is what you need to
+     * reproduce the request that broke, and what you have no reason to hold for
+     * the thousands that did not.
+     */
+    protected function payload(Request $request, Response $response): string
+    {
+        if (! config('larabug.requests.capture_payload_on_error', false)) {
+            return '';
+        }
+
+        if ($response->getStatusCode() < 500) {
+            return '';
+        }
+
+        if (in_array($request->getMethod(), ['GET', 'HEAD', 'OPTIONS', 'TRACE'], true)) {
+            return '';
+        }
+
+        $redact = array_map('strtolower', (array) config('larabug.requests.redact_fields', [
+            'password',
+            'password_confirmation',
+            'token',
+            'secret',
+            'card',
+            'cvv',
+            'iban',
+        ]));
+
+        return (string) json_encode($this->redact($request->all(), $redact));
+    }
+
+    /**
+     * Replace sensitive values anywhere in a body.
+     *
+     * Depth-first and by substring, because the field that matters is rarely at
+     * the top level under exactly the name the config lists: a checkout posts
+     * card[cvv], a registration posts user.password_confirmation, and a rule
+     * that only reads the outermost keys would store both.
+     *
+     * @param  array<int|string, mixed>  $input
+     * @param  array<int, string>  $redact  lowercased needles
+     * @return array<int|string, mixed>
+     */
+    protected function redact(array $input, array $redact): array
+    {
+        foreach ($input as $key => $value) {
+            // The key is judged before the value is walked into. A matching key
+            // takes its whole branch with it: 'card' has to remove
+            // card[number] as well as card[cvv], and recursing first would only
+            // have caught the one that happened to be named in the list.
+            if ($this->isSensitive($key, $redact)) {
+                $input[$key] = '[redacted]';
+
+                continue;
+            }
+
+            // An upload is a file handle, not data. It has no JSON form worth
+            // sending and its contents are not ours to hold, so it is described
+            // rather than serialised.
+            if ($value instanceof UploadedFile) {
+                $input[$key] = '[file: '.$value->getClientOriginalName().']';
+
+                continue;
+            }
+
+            if (is_array($value)) {
+                $input[$key] = $this->redact($value, $redact);
+            }
+        }
+
+        return $input;
+    }
+
+    /**
+     * @param  int|string  $key
+     * @param  array<int, string>  $redact  lowercased needles
+     */
+    protected function isSensitive($key, array $redact): bool
+    {
+        $name = strtolower((string) $key);
+
+        foreach ($redact as $needle) {
+            if ($needle !== '' && strpos($name, $needle) !== false) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

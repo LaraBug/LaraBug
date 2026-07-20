@@ -7,6 +7,7 @@ use Illuminate\Http\Request;
 use LaraBug\Requests\RequestBuffer;
 use LaraBug\Requests\RequestMonitor;
 use LaraBug\Requests\Sampler;
+use LaraBug\Requests\TraceContext;
 use Throwable;
 
 /**
@@ -41,6 +42,17 @@ class CaptureRequest
     {
         try {
             $this->sampler->decide($request);
+
+            // A new request is a new trace. Reset first, because under Octane
+            // this process already served one and would otherwise hand its id
+            // to every request for the life of the worker.
+            //
+            // Touched at the start so every log line and exception from here on
+            // carries the same id, whether or not this request ends up sampled:
+            // deciding late would leave the earliest lines unstamped.
+            TraceContext::reset();
+            TraceContext::id();
+
             $this->monitor->mark('booted');
             $this->monitor->mark('action_start');
         } catch (Throwable $e) {
