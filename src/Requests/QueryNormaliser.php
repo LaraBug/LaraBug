@@ -27,8 +27,14 @@ class QueryNormaliser
         return trim(preg_replace('/\s+/', ' ', $sql));
     }
 
+    /**
+     * md5, not xxh128: this package supports PHP 7.4 and xxh128 arrived in 8.1,
+     * so the faster algorithm would have thrown on half the versions we claim
+     * to run on. It is a grouping key, not a signature — collisions cost a
+     * merged row, not a vulnerability.
+     */
     public static function hash(string $connection, string $normalisedSql): string
     {
-        return hash('xxh128', $connection.','.$normalisedSql);
+        return md5($connection.','.$normalisedSql);
     }
 }

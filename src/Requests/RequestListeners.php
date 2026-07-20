@@ -26,17 +26,24 @@ class RequestListeners
         $this->sampler = $sampler;
     }
 
-    public function subscribe(Dispatcher $events): array
+    /**
+     * Registered one at a time rather than by returning a map, which the
+     * dispatcher only understands from Laravel 8. This package supports 6, and
+     * a subscriber that quietly listens to nothing is worse than one that fails
+     * loudly.
+     *
+     * Events that do not exist on older versions, such as JobQueued, are named
+     * as strings and simply never fire.
+     */
+    public function subscribe(Dispatcher $events): void
     {
-        return [
-            'Illuminate\Routing\Events\RouteMatched' => 'onRouteMatched',
-            'Illuminate\Database\Events\QueryExecuted' => 'onQueryExecuted',
-            'Illuminate\Cache\Events\CacheHit' => 'onCacheHit',
-            'Illuminate\Cache\Events\CacheMissed' => 'onCacheMissed',
-            'Illuminate\Queue\Events\JobQueued' => 'onJobQueued',
-            'Illuminate\Mail\Events\MessageSent' => 'onMailSent',
-            'Illuminate\Notifications\Events\NotificationSent' => 'onNotificationSent',
-        ];
+        $events->listen('Illuminate\Routing\Events\RouteMatched', [$this, 'onRouteMatched']);
+        $events->listen('Illuminate\Database\Events\QueryExecuted', [$this, 'onQueryExecuted']);
+        $events->listen('Illuminate\Cache\Events\CacheHit', [$this, 'onCacheHit']);
+        $events->listen('Illuminate\Cache\Events\CacheMissed', [$this, 'onCacheMissed']);
+        $events->listen('Illuminate\Queue\Events\JobQueued', [$this, 'onJobQueued']);
+        $events->listen('Illuminate\Mail\Events\MessageSent', [$this, 'onMailSent']);
+        $events->listen('Illuminate\Notifications\Events\NotificationSent', [$this, 'onNotificationSent']);
     }
 
     public function onRouteMatched($event): void

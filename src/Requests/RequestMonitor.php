@@ -214,7 +214,9 @@ class RequestMonitor
 
         sort($methods);
 
-        return hash('xxh128', implode('|', $methods).','.$this->routeValue('domain', '').','.$this->routeValue('path', ''));
+        // md5 for the same reason QueryNormaliser uses it: xxh128 is PHP 8.1+
+        // and this package still supports 7.4.
+        return md5(implode('|', $methods).','.$this->routeValue('domain', '').','.$this->routeValue('path', ''));
     }
 
     /**
