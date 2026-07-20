@@ -4,6 +4,7 @@ namespace LaraBug\Logger;
 
 use DateTimeInterface;
 use JsonSerializable;
+use LaraBug\Requests\TraceContext;
 use Monolog\Handler\AbstractProcessingHandler;
 use Monolog\Logger;
 use Throwable;
@@ -81,7 +82,11 @@ class LaraBugLogHandler extends AbstractProcessingHandler
             // not into context, so dropping it would lose most of what makes a
             // line useful.
             'extra' => $this->normalize($this->arrayValue($record, 'extra')),
-            'trace_id' => (string) $this->correlation($record, 'trace_id'),
+            // Falls back to the ambient trace rather than to nothing. An
+            // application that never sets one still gets its lines joined to
+            // the request or the job that wrote them, which is the entire
+            // reason the field exists.
+            'trace_id' => $this->traceId($record),
             'exception_id' => (string) $this->correlation($record, 'exception_id'),
             'environment' => (string) ($this->config['environment'] ?? ''),
             'release' => (string) ($this->config['release'] ?? ''),
@@ -128,6 +133,30 @@ class LaraBugLogHandler extends AbstractProcessingHandler
      *
      * @param array|\ArrayAccess $record
      * @param string $key
+     * @return string
+     */
+    /**
+     * @param array|\ArrayAccess $record
+     * @return string
+     */
+    protected function traceId($record): string
+    {
+        $supplied = $this->correlation($record, 'trace_id');
+
+        if ($supplied !== '') {
+            return $supplied;
+        }
+
+        try {
+            return TraceContext::id();
+        } catch (Throwable $e) {
+            // A line that cannot be correlated is still a line worth shipping.
+            return '';
+        }
+    }
+
+    /**
+     * @param array|\ArrayAccess $record
      * @return string
      */
     protected function correlation($record, string $key): string

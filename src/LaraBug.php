@@ -95,6 +95,12 @@ class LaraBug
                 return false;
             }
 
+            // The request being served, if there is one, learns that it threw.
+            // Read from the container rather than injected: this class is
+            // resolved in applications with request monitoring switched off,
+            // where the monitor is never bound at all.
+            $this->tellTheRequestMonitor();
+
             if ($fileType == 'javascript') {
                 $data['fullUrl'] = $customData['url'];
                 $data['file'] = $customData['file'];
@@ -206,6 +212,27 @@ class LaraBug
      * @param Throwable $exception
      * @return array
      */
+    /**
+     * Count this exception against the request that caused it, and stamp the
+     * shared trace id onto the report.
+     *
+     * Wrapped whole: an application with request monitoring off has no monitor
+     * bound, and a failure to record a count must never stop an exception being
+     * reported.
+     */
+    protected function tellTheRequestMonitor(): void
+    {
+        try {
+            if (! config('larabug.requests.track_requests', false)) {
+                return;
+            }
+
+            app(\LaraBug\Requests\RequestMonitor::class)->recordException();
+        } catch (Throwable $e) {
+            //
+        }
+    }
+
     public function getExceptionData(Throwable $exception)
     {
         $data = [];
