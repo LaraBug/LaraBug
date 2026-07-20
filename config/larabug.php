@@ -181,6 +181,86 @@ return [
     | wait Horizon measures per queue.
     |
     */
+    /*
+    |--------------------------------------------------------------------------
+    | Request Monitoring
+    |--------------------------------------------------------------------------
+    |
+    | Records the HTTP requests this application serves: how long each stage of
+    | the framework took, how many queries and cache calls it made, and which
+    | statements ran.
+    |
+    | Off by default, and sampled at a tenth when switched on. A package that
+    | starts reporting every request the moment it updates is a package that
+    | spends its user's quota without being asked.
+    |
+    */
+    'requests' => [
+        /*
+        | Enable or disable request monitoring
+        | Set to true via LB_TRACK_REQUESTS=true to start recording
+        | Default: false (opt-in)
+        */
+        'track_requests' => env('LB_TRACK_REQUESTS', false),
+
+        /*
+        | The fraction of requests recorded, 0.0 to 1.0
+        | The server divides by this to report real throughput, so a tenth here
+        | still reports the whole picture, just from a tenth of the evidence
+        | Default: 0.1
+        */
+        'sample_rate' => env('LB_REQUEST_SAMPLE_RATE', 0.1),
+
+        /*
+        | The rate a failed request is reconsidered at
+        | A request that threw is the one worth having, so an unsampled one
+        | re-rolls at this rate rather than being lost to an earlier coin toss
+        | Default: 1.0 (always keep a failure)
+        */
+        'exception_sample_rate' => env('LB_REQUEST_EXCEPTION_SAMPLE_RATE', 1.0),
+
+        /*
+        | Paths never recorded, matched with fnmatch against the route path
+        | Checked again once the route is known, so patterns can name routes
+        */
+        'ignore_paths' => [
+            '/horizon*',
+            '/telescope*',
+            '/_debugbar*',
+            '/up',
+            '/health*',
+        ],
+
+        /*
+        | How many statements are kept per request
+        | The query counter keeps counting past this: a request running ten
+        | thousand queries is worth knowing about, and what makes it worth
+        | knowing about is the number rather than the ten thousandth statement
+        | Default: 100
+        */
+        'max_queries' => env('LB_REQUEST_MAX_QUERIES', 100),
+
+        /*
+        | How many records are held before they are sent
+        | A web process serves one request, so this mostly matters for Octane
+        | and for the console
+        | Default: 20
+        */
+        'batch_size' => env('LB_REQUEST_BATCH_SIZE', 20),
+
+        'max_retries' => env('LB_REQUEST_MAX_RETRIES', 2),
+
+        /*
+        | Whether the client IP and the authenticated user id are recorded
+        | Both are personal data; both are useful. Neither is a query string,
+        | which is never recorded at all: reset tokens and signed url
+        | signatures live there
+        | Default: true
+        */
+        'capture_ip' => env('LB_REQUEST_CAPTURE_IP', true),
+        'capture_user' => env('LB_REQUEST_CAPTURE_USER', true),
+    ],
+
     'heartbeat' => [
         /*
         | Enable or disable the heartbeat

@@ -78,6 +78,21 @@ class ServiceProvider extends BaseServiceProvider
             }
         });
 
+        // Request monitoring. Pushed rather than prepended: the stage either
+        // side of this middleware is meant to be the application's own stack,
+        // and running first would fold every other middleware into the action.
+        if (config('larabug.requests.track_requests', false) && ! $this->app->runningInConsole()) {
+            try {
+                $this->app->make(\Illuminate\Contracts\Http\Kernel::class)
+                    ->pushMiddleware(\LaraBug\Http\Middleware\CaptureRequest::class);
+
+                $this->app['events']->subscribe(\LaraBug\Requests\RequestListeners::class);
+            } catch (\Throwable $e) {
+                // An application with no HTTP kernel, or one that resolves it
+                // differently, simply does not get request monitoring.
+            }
+        }
+
         // Register queue monitoring events
         if (config('larabug.jobs.track_jobs', true)) {
             $this->app['events']->subscribe(\LaraBug\Queue\JobEventSubscriber::class);
@@ -295,6 +310,19 @@ class ServiceProvider extends BaseServiceProvider
                 return new Logger('larabug-logs', [$handler]);
             });
         }
+
+        // Request monitoring. One of each per execution: the monitor holds the
+        // state of the request being served, the sampler holds the decision
+        // made about it, and the buffer outlives both to flush on shutdown.
+        $this->app->singleton(\LaraBug\Requests\RequestMonitor::class);
+        $this->app->singleton(\LaraBug\Requests\Sampler::class);
+
+        $this->app->singleton(\LaraBug\Requests\RequestBuffer::class, function ($app) {
+            return new \LaraBug\Requests\RequestBuffer(
+                $app->make(\LaraBug\Http\Client::class),
+                config('larabug')
+            );
+        });
 
         // Register queue monitoring singleton (always, will be lazy loaded)
         $this->app->singleton(\LaraBug\Queue\JobMonitor::class, function ($app) {

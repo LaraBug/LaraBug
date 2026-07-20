@@ -63,6 +63,45 @@ class Client
     }
 
     /**
+     * Report a batch of served HTTP requests.
+     *
+     * The same endpoint and the same envelope as everything else, told apart by
+     * type. Each record carries the queries that request ran, inline, because
+     * they are one execution: a request whose queries arrived separately could
+     * have half of itself stored.
+     *
+     * @param  array<int, array<string, mixed>>  $records
+     * @return \Psr\Http\Message\ResponseInterface|null
+     */
+    public function reportRequests(array $records)
+    {
+        try {
+            return $this->getGuzzleHttpClient()->request('POST', config('larabug.server'), [
+                'headers' => [
+                    'Authorization' => 'Bearer '.$this->login,
+                    'Content-Type' => 'application/json',
+                    'Accept' => 'application/json',
+                    'User-Agent' => 'LaraBug-Package',
+                ],
+                'json' => [
+                    'type' => 'requests_batch',
+                    'project' => $this->project,
+                    'requests' => $records,
+                    'count' => count($records),
+                ],
+                'verify' => config('larabug.verify_ssl'),
+                // Shorter than a report's fifteen. This runs on shutdown while
+                // the worker is still held, so our slowness is their capacity.
+                'timeout' => 5,
+            ]);
+        } catch (\GuzzleHttp\Exception\RequestException $e) {
+            return $e->getResponse();
+        } catch (\Exception $e) {
+            return null;
+        }
+    }
+
+    /**
      * Report that this app's workers are alive.
      *
      * Its own endpoint rather than a kind of report: this arrives on a schedule
