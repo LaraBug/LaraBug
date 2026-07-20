@@ -166,6 +166,55 @@ return [
     | Configure queue job monitoring behavior.
     |
     */
+    /*
+    |--------------------------------------------------------------------------
+    | Queue Heartbeat
+    |--------------------------------------------------------------------------
+    |
+    | Everything else this package sends is a report about something that
+    | happened. None of it can tell a queue with no work from a queue with no
+    | workers, since both send nothing at all.
+    |
+    | The heartbeat is the one message that says a worker exists. It runs from
+    | the scheduler, so it needs `schedule:run` to be running; where Horizon is
+    | installed it also carries its supervisor status, process counts and the
+    | wait Horizon measures per queue.
+    |
+    */
+    'heartbeat' => [
+        /*
+        | Enable or disable the heartbeat
+        | Set to false via LB_HEARTBEAT=false to stop reporting worker state
+        | Default: true
+        */
+        'enabled' => env('LB_HEARTBEAT', true),
+
+        /*
+        | How often the heartbeat is scheduled
+        | One of: everyMinute, everyTwoMinutes, everyFiveMinutes, everyTenMinutes
+        | Anything longer and a stopped worker goes unnoticed for that long
+        | Default: everyMinute
+        */
+        'schedule' => env('LB_HEARTBEAT_SCHEDULE', 'everyMinute'),
+
+        /*
+        | Where the heartbeat is sent
+        | Left null it follows `server` above, which is what a self-hosted
+        | install wants; set it only when the two live apart
+        | Default: null
+        */
+        'server' => env('LB_HEARTBEAT_SERVER'),
+
+        /*
+        | Which queues to measure when Horizon is not installed
+        | Either names on the default connection, ['emails', 'default'], or
+        | pairs, [['connection' => 'redis', 'queue' => 'emails']]
+        | Left empty the default connection's own queue is used
+        | Default: []
+        */
+        'queues' => [],
+    ],
+
     'jobs' => [
         /*
         | Enable or disable queue job tracking

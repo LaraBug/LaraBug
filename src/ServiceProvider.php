@@ -4,6 +4,7 @@ namespace LaraBug;
 
 use LaraBug\Queue\DispatchMacros;
 use Monolog\Logger;
+use LaraBug\Commands\HeartbeatCommand;
 use LaraBug\Commands\ScanCommand;
 use LaraBug\Commands\TestCommand;
 use Illuminate\Console\Scheduling\Schedule;
@@ -40,6 +41,7 @@ class ServiceProvider extends BaseServiceProvider
         $this->commands([
             TestCommand::class,
             ScanCommand::class,
+            HeartbeatCommand::class,
         ]);
 
         // Map any routes
@@ -81,6 +83,22 @@ class ServiceProvider extends BaseServiceProvider
             $this->app['events']->subscribe(\LaraBug\Queue\JobEventSubscriber::class);
         }
 
+        // The heartbeat only has a job to do where the scheduler runs, which is
+        // also the only place it can be registered from.
+        if (config('larabug.heartbeat.enabled', true)) {
+            $this->app->booted(function () {
+                $schedule = $this->app->make(Schedule::class);
+
+                $event = $schedule->command('larabug:heartbeat')
+                    ->withoutOverlapping()
+                    // Not onOneServer: each server runs its own workers, and a
+                    // heartbeat from one of them says nothing about the rest.
+                    ->runInBackground();
+
+                $this->applyHeartbeatCadence($event, config('larabug.heartbeat.schedule', 'everyMinute'));
+            });
+        }
+
         // CVE triggers
         if (config('larabug.cve.enabled', false)) {
             $trigger = strtolower((string) config('larabug.cve.trigger', 'both'));
@@ -110,6 +128,27 @@ class ServiceProvider extends BaseServiceProvider
                     }
                 });
             }
+        }
+    }
+
+    /**
+     * switch, not match, for the same reason applyCadence below uses one: this
+     * package still supports PHP 7.4, where a match expression will not parse.
+     */
+    protected function applyHeartbeatCadence($event, string $cadence): void
+    {
+        switch (strtolower($cadence)) {
+            case 'everytwominutes':
+                $event->everyTwoMinutes();
+                break;
+            case 'everyfiveminutes':
+                $event->everyFiveMinutes();
+                break;
+            case 'everytenminutes':
+                $event->everyTenMinutes();
+                break;
+            default:
+                $event->everyMinute();
         }
     }
 
