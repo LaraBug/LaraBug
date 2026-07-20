@@ -1,7 +1,6 @@
 <?php
 
 return [
-
     /*
     |--------------------------------------------------------------------------
     | DSN (Data Source Name)
@@ -14,7 +13,6 @@ return [
     | If DSN is set, it will take precedence over individual keys below.
     |
     */
-
     'dsn' => env('LB_DSN'),
 
     /*
@@ -26,7 +24,6 @@ return [
     | Retrieve your key from https://www.larabug.com
     |
     */
-
     'login_key' => env('LB_KEY', ''),
 
     /*
@@ -38,8 +35,19 @@ return [
     | Retrieve your key from https://www.larabug.com
     |
     */
-
     'project_key' => env('LB_PROJECT_KEY', ''),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Register the exception handler
+    |--------------------------------------------------------------------------
+    |
+    | Report exceptions automatically, so an application does not have to wire
+    | LaraBug into its own exception handler. Disable this if you want to call
+    | LaraBug::handle() yourself and decide per exception whether to send it.
+    |
+    */
+    'register_exception_handler' => env('LB_REGISTER_EXCEPTION_HANDLER', true),
 
     /*
     |--------------------------------------------------------------------------
@@ -49,7 +57,6 @@ return [
     | This setting determines if the exception should be send over or not.
     |
     */
-
     'environments' => [
         'production',
     ],
@@ -75,7 +82,6 @@ return [
     | 12 if higher than 50 automatically.
     |
     */
-
     'lines_count' => 12,
 
     /*
@@ -86,7 +92,6 @@ return [
     | Set the sleep time between duplicate exceptions. This value is in seconds, default: 60 seconds (1 minute)
     |
     */
-
     'sleep' => 60,
 
     /*
@@ -97,7 +102,6 @@ return [
     | List of exceptions to skip sending.
     |
     */
-
     'except' => [
         'Symfony\Component\HttpKernel\Exception\NotFoundHttpException',
     ],
@@ -110,7 +114,6 @@ return [
     | Filter out these variables before sending them to LaraBug
     |
     */
-
     'blacklist' => [
         '*authorization*',
         '*password*',
@@ -132,7 +135,6 @@ return [
     |
     |
     */
-
     // 'release' => trim(exec('git --git-dir ' . base_path('.git') . ' log --pretty="%h" -n1 HEAD')),
 
     /*
@@ -143,7 +145,6 @@ return [
     | This setting allows you to change the server.
     |
     */
-
     'server' => env('LB_SERVER', 'https://www.larabug.com/api/log'),
 
     /*

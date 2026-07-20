@@ -7,9 +7,11 @@ use Monolog\Logger;
 use LaraBug\Commands\ScanCommand;
 use LaraBug\Commands\TestCommand;
 use Illuminate\Console\Scheduling\Schedule;
+use Illuminate\Contracts\Debug\ExceptionHandler;
 use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ServiceProvider as BaseServiceProvider;
+use Throwable;
 
 class ServiceProvider extends BaseServiceProvider
 {
@@ -45,6 +47,13 @@ class ServiceProvider extends BaseServiceProvider
 
         // Create an alias to the larabug-js-client.blade.php include
         Blade::include('larabug::larabug-js-client', 'larabugJavaScriptClient');
+
+        // Report exceptions without every application having to wire LaraBug
+        // into its own exception handler, which is silently forgotten often
+        // enough that an application looks healthy while reporting nothing.
+        if (config('larabug.register_exception_handler', true)) {
+            $this->registerExceptionHandler();
+        }
 
         // Define the channel so applications only have to name it in their
         // stack, never copy a block into config/logging.php. An application
@@ -123,6 +132,46 @@ class ServiceProvider extends BaseServiceProvider
             default:
                 $event->cron($cadence);
         }
+    }
+
+    /**
+     * Handlers that already carry our reportable callback.
+     *
+     * @var \SplObjectStorage
+     */
+    protected $handlersRegistered;
+
+    /**
+     * Report every reported exception to LaraBug.
+     */
+    protected function registerExceptionHandler(): void
+    {
+        $this->handlersRegistered = new \SplObjectStorage();
+
+        $this->callAfterResolving(ExceptionHandler::class, function ($handler) {
+            // A handler that does not extend Laravel's own has no reportable(),
+            // in which case the application keeps calling handle() itself.
+            if (! method_exists($handler, 'reportable')) {
+                return;
+            }
+
+            // Resolving the handler more than once is normal, Collision wraps it
+            // for one. Without this guard every resolution adds another callback
+            // and one exception is reported once per resolution.
+            if ($this->handlersRegistered->contains($handler)) {
+                return;
+            }
+
+            $this->handlersRegistered->attach($handler);
+
+            $handler->reportable(function (Throwable $exception) {
+                // Deliberately not returning handle()'s value. A reportable
+                // callback that returns false stops the exception reaching the
+                // application's own logging, and handle() returns false for
+                // everything it skips.
+                $this->app['larabug']->handle($exception);
+            });
+        });
     }
 
     /**
