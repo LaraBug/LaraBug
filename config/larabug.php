@@ -403,4 +403,64 @@ return [
         */
         'environment' => env('LB_CVE_ENVIRONMENT'),
     ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Logs
+    |--------------------------------------------------------------------------
+    |
+    | Ships application log lines to LaraBug, so the lines leading up to an
+    | error are there when you open it.
+    |
+    | Naming the channel in your logging stack is the opt-in; nothing is sent
+    | until you do. Logs run at far higher volume than exceptions and count
+    | against your plan, so opt in deliberately.
+    |
+    |   LOG_STACK=single,larabug-logs
+    |
+    | The package defines the `larabug-logs` channel itself, so there is
+    | nothing to add to config/logging.php. Define a channel of that name
+    | yourself if you want different settings; yours wins.
+    |
+    */
+
+    'logs' => [
+        /*
+        | Kill switch. Leave it on: the channel decides whether logs are sent.
+        | Set LB_LOGS_ENABLED=false to stop shipping without touching the
+        | logging config, for instance while debugging a noisy deploy.
+        */
+        'enabled' => env('LB_LOGS_ENABLED', true),
+
+        /*
+        | Minimum severity to send, as a PSR-3 level name. Shipping 'debug'
+        | from production is rarely what you want.
+        */
+        'level' => env('LB_LOGS_LEVEL', 'info'),
+
+        /*
+        | Lines held before a batch is sent. A request that logs fewer than
+        | this sends one batch when it terminates.
+        */
+        'batch_size' => env('LB_LOGS_BATCH_SIZE', 50),
+
+        /*
+        | Retries on a 5xx. A refused batch (402, 403, 422) is never retried
+        | and stops collection for the rest of the process.
+        */
+        'max_retries' => env('LB_LOGS_MAX_RETRIES', 3),
+
+        /*
+        | Ceiling on how many keys of one context or extra bag are sent. Log
+        | context routinely holds whole models, and the rest is dropped with a
+        | `_truncated` marker rather than shipping an object graph per line.
+        */
+        'max_context_keys' => env('LB_LOGS_MAX_CONTEXT_KEYS', 50),
+
+        /*
+        | Release identifier sent with every line, so a spike can be tied to a
+        | deploy. A commit sha or a version tag.
+        */
+        'release' => env('LB_LOGS_RELEASE'),
+    ],
 ];

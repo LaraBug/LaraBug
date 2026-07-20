@@ -23,6 +23,14 @@ class LaraBugClient extends \LaraBug\Http\Client
     }
 
     /**
+     * @return array
+     */
+    public function requests()
+    {
+        return $this->requests;
+    }
+
+    /**
      * @param int $expectedCount
      */
     public function assertRequestsSent(int $expectedCount)

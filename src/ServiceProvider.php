@@ -55,6 +55,27 @@ class ServiceProvider extends BaseServiceProvider
             $this->registerExceptionHandler();
         }
 
+        // Define the channel so applications only have to name it in their
+        // stack, never copy a block into config/logging.php. An application
+        // that does define its own keeps it: theirs wins.
+        if (! config('logging.channels.larabug-logs')) {
+            config([
+                'logging.channels.larabug-logs' => [
+                    'driver' => 'larabug-logs',
+                    'level' => config('larabug.logs.level', 'info'),
+                ],
+            ]);
+        }
+
+        // Send whatever is still buffered at the end of the request. Without
+        // this a request that logs less than one batch ships nothing, which is
+        // most requests. Monolog's own close() covers the CLI case.
+        $this->app->terminating(function () {
+            if ($this->app->resolved(\LaraBug\Logger\LogBuffer::class)) {
+                $this->app[\LaraBug\Logger\LogBuffer::class]->flush();
+            }
+        });
+
         // Register queue monitoring events
         if (config('larabug.jobs.track_jobs', true)) {
             $this->app['events']->subscribe(\LaraBug\Queue\JobEventSubscriber::class);
@@ -195,6 +216,15 @@ class ServiceProvider extends BaseServiceProvider
             return new LaraBug($app[\LaraBug\Http\Client::class]);
         });
 
+        // Log shipping buffer. Bound lazily, so an app that never adds the
+        // channel never builds one.
+        $this->app->singleton(\LaraBug\Logger\LogBuffer::class, function ($app) {
+            return new \LaraBug\Logger\LogBuffer(
+                $app[\LaraBug\Http\Client::class],
+                $app['config']->get('larabug', [])
+            );
+        });
+
         if ($this->app['log'] instanceof \Illuminate\Log\LogManager) {
             $this->app['log']->extend('larabug', function ($app, $config) {
                 $handler = new \LaraBug\Logger\LaraBugHandler(
@@ -202,6 +232,28 @@ class ServiceProvider extends BaseServiceProvider
                 );
 
                 return new Logger('larabug', [$handler]);
+            });
+
+            $this->app['log']->extend('larabug-logs', function ($app, $config) {
+                $larabug = $app['config']->get('larabug', []);
+
+                $handler = new \LaraBug\Logger\LaraBugLogHandler(
+                    $app[\LaraBug\Logger\LogBuffer::class],
+                    [
+                        'logs' => isset($larabug['logs']) ? $larabug['logs'] : [],
+                        'environment' => $app['config']->get('app.env', ''),
+                        'release' => isset($larabug['logs']['release']) ? $larabug['logs']['release'] : '',
+                    ],
+                    // The channel's own level wins, so a stack can ship warnings
+                    // to us while writing everything to disk.
+                    Logger::toMonologLevel(
+                        isset($config['level'])
+                            ? $config['level']
+                            : (isset($larabug['logs']['level']) ? $larabug['logs']['level'] : 'info')
+                    )
+                );
+
+                return new Logger('larabug-logs', [$handler]);
             });
         }
 
