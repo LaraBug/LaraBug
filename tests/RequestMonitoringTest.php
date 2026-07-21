@@ -437,6 +437,52 @@ class RequestMonitoringTest extends TestCase
         $this->assertCount(2, $record['mail']);
     }
 
+    /** @test */
+    public function it_records_a_queued_mailable_at_dispatch_marked_queued()
+    {
+        $monitor = new RequestMonitor();
+        $listeners = new RequestListeners($monitor, new Sampler());
+
+        $mailable = new class extends \Illuminate\Mail\Mailable {};
+        $mailable->to('alice@example.com')->cc('team@other.test');
+
+        $event = new \stdClass();
+        $event->job = new \Illuminate\Mail\SendQueuedMailable($mailable);
+
+        $listeners->onJobQueued($event);
+
+        $record = $monitor->toArray(Request::create('/register', 'POST'), new Response('', 200), 1.0);
+
+        // The job is still a queued job, and now also a message.
+        $this->assertSame(1, $record['jobs_queued']);
+        $this->assertSame(1, $record['mail_sent']);
+        $this->assertCount(1, $record['mail']);
+
+        $message = $record['mail'][0];
+        $this->assertSame(get_class($mailable), $message['mailable']);
+        $this->assertSame(1, $message['to_count']);
+        $this->assertSame(1, $message['cc_count']);
+        $this->assertSame('example.com,other.test', $message['recipient_domains']);
+        $this->assertSame(1, $message['queued']);
+    }
+
+    /** @test */
+    public function a_queued_job_that_is_not_a_mailable_records_no_mail()
+    {
+        $monitor = new RequestMonitor();
+        $listeners = new RequestListeners($monitor, new Sampler());
+
+        $event = new \stdClass();
+        $event->job = new \stdClass();
+
+        $listeners->onJobQueued($event);
+
+        $record = $monitor->toArray(Request::create('/x', 'GET'), new Response('', 200), 1.0);
+
+        $this->assertSame(1, $record['jobs_queued']);
+        $this->assertSame([], $record['mail']);
+    }
+
     /**
      * A stand-in for a mail message. Symfony's Email and the older Swift message
      * share these getter names; this returns Address-shaped objects the way

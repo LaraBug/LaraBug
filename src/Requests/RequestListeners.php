@@ -118,8 +118,18 @@ class RequestListeners
 
     public function onJobQueued($event): void
     {
-        $this->guard(function () {
+        $this->guard(function () use ($event) {
             $this->monitor->increment('jobs_queued');
+
+            // A queued mailable is a job whose payload is the mailable itself,
+            // and its send happens a worker away where no request is being
+            // recorded. Caught here, at dispatch, it is counted against the
+            // request that queued it or it is never seen inside one at all.
+            $job = $event->job ?? null;
+
+            if ($job instanceof \Illuminate\Mail\SendQueuedMailable) {
+                $this->recordQueuedMail($job->mailable ?? null);
+            }
         });
     }
 
@@ -299,6 +309,72 @@ class RequestListeners
         unset($this->mailStartedAt[$key]);
 
         return $duration;
+    }
+
+    /**
+     * Record a mailable that was queued rather than sent inline.
+     *
+     * Read off the mailable the job carries, not off a message: there is no
+     * message yet, the send is a worker away. Its recipients are already filled
+     * in by the time it is queued, so the counts and domains are known; the
+     * subject often is not, since an envelope resolves it at render, and the
+     * duration cannot be, so both are left for the send that is not ours to see.
+     *
+     * @param  mixed  $mailable
+     */
+    private function recordQueuedMail($mailable): void
+    {
+        if (! is_object($mailable)) {
+            return;
+        }
+
+        $to = $this->mailableAddresses($mailable, 'to');
+        $cc = $this->mailableAddresses($mailable, 'cc');
+        $bcc = $this->mailableAddresses($mailable, 'bcc');
+
+        $this->monitor->recordMail([
+            'mailable' => get_class($mailable),
+            'subject' => (string) ($mailable->subject ?? ''),
+            'to_count' => count($to),
+            'cc_count' => count($cc),
+            'bcc_count' => count($bcc),
+            'recipient_domains' => $this->mailRecipients(array_merge($to, $cc, $bcc)),
+            'queued' => 1,
+            'duration_ms' => 0.0,
+        ]);
+    }
+
+    /**
+     * The addresses in one of a mailable's recipient lists. A Mailable holds its
+     * to, cc and bcc as public arrays of ['name' => ..., 'address' => ...], which
+     * is a different shape from the message getters a sent message exposes.
+     *
+     * @param  mixed  $mailable
+     * @return array<int, string>
+     */
+    private function mailableAddresses($mailable, string $property): array
+    {
+        $recipients = $mailable->{$property} ?? [];
+
+        if (! is_array($recipients)) {
+            return [];
+        }
+
+        $addresses = [];
+
+        foreach ($recipients as $recipient) {
+            if (is_array($recipient) && isset($recipient['address'])) {
+                $addresses[] = (string) $recipient['address'];
+
+                continue;
+            }
+
+            if (is_string($recipient) && $recipient !== '') {
+                $addresses[] = $recipient;
+            }
+        }
+
+        return $addresses;
     }
 
     public function onNotificationSent($event): void
