@@ -5,6 +5,7 @@ namespace LaraBug;
 use Throwable;
 use LaraBug\Http\Client;
 use LaraBug\Filters\DataFilter;
+use LaraBug\Requests\TraceContext;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\App;
 use Illuminate\Support\Facades\Cache;
@@ -286,6 +287,13 @@ class LaraBug
 
         // Get project version
         $data['project_version'] = config('larabug.project_version', null);
+
+        // The trace this exception was thrown in. An exception thrown while
+        // serving a request carries that request's id (the middleware set it
+        // before routing), which is what lets the server join the failed
+        // request to the issue it caused. Outside a tracked request this is a
+        // fresh id that simply no request shares.
+        $data['trace_id'] = TraceContext::id();
 
         // Add custom context data
         if (!empty(self::$customContext)) {

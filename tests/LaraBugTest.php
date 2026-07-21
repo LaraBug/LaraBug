@@ -144,7 +144,12 @@ class LaraBugTest extends TestCase
         $this->assertSame('http://localhost', $data['fullUrl']);
         $this->assertSame('it_can_get_formatted_exception_data', $data['exception']);
 
-        $this->assertCount(13, $data);
+        // The trace the exception was thrown in, so the server can join it to
+        // the request that failed.
+        $this->assertArrayHasKey('trace_id', $data);
+        $this->assertNotSame('', $data['trace_id']);
+
+        $this->assertCount(14, $data);
     }
 
     /** @test */
