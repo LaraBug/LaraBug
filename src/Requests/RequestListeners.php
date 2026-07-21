@@ -20,6 +20,9 @@ class RequestListeners
     /** @var Sampler */
     protected $sampler;
 
+    /** @var array<int, float> Send-start marks, in seconds, keyed by message. */
+    protected $mailStartedAt = [];
+
     public function __construct(RequestMonitor $monitor, Sampler $sampler)
     {
         $this->monitor = $monitor;
@@ -42,6 +45,11 @@ class RequestListeners
         $events->listen('Illuminate\Cache\Events\CacheHit', [$this, 'onCacheHit']);
         $events->listen('Illuminate\Cache\Events\CacheMissed', [$this, 'onCacheMissed']);
         $events->listen('Illuminate\Queue\Events\JobQueued', [$this, 'onJobQueued']);
+
+        // Paired: the sending event only starts a timer, the sent event is what
+        // records the message. A send that throws never reaches sent and leaves
+        // only a mark that the next send overwrites.
+        $events->listen('Illuminate\Mail\Events\MessageSending', [$this, 'onMailSending']);
         $events->listen('Illuminate\Mail\Events\MessageSent', [$this, 'onMailSent']);
         $events->listen('Illuminate\Notifications\Events\NotificationSent', [$this, 'onNotificationSent']);
 
@@ -115,11 +123,182 @@ class RequestListeners
         });
     }
 
+    public function onMailSending($event): void
+    {
+        $this->guard(function () use ($event) {
+            $message = $event->message ?? null;
+
+            if ($message === null) {
+                return;
+            }
+
+            $this->mailStartedAt[spl_object_id($message)] = microtime(true);
+        });
+    }
+
     public function onMailSent($event): void
     {
-        $this->guard(function () {
-            $this->monitor->increment('mail_sent');
+        $this->guard(function () use ($event) {
+            $message = $event->message ?? null;
+
+            if ($message === null) {
+                // A mailer that fired the event without a message still sent
+                // one; keep the tile honest even when there is nothing to detail.
+                $this->monitor->recordMail([]);
+
+                return;
+            }
+
+            $to = $this->mailAddresses($this->recipients($message, 'getTo'));
+            $cc = $this->mailAddresses($this->recipients($message, 'getCc'));
+            $bcc = $this->mailAddresses($this->recipients($message, 'getBcc'));
+
+            $this->monitor->recordMail([
+                'mailable' => $this->mailableClass(),
+                'subject' => $this->mailSubject($message),
+                'to_count' => count($to),
+                'cc_count' => count($cc),
+                'bcc_count' => count($bcc),
+                'recipient_domains' => $this->mailRecipients(array_merge($to, $cc, $bcc)),
+                'queued' => 0,
+                'duration_ms' => $this->mailDuration($message),
+            ]);
         });
+    }
+
+    /**
+     * The class of the mailable being sent, when there is one.
+     *
+     * Neither mail event carries it, so it is read off the call stack instead:
+     * a Mailable's send() is always a frame below the event that fires inside
+     * it. Empty for mail sent without a mailable — Mail::raw() and the like —
+     * where the subject is the only name a message has.
+     */
+    private function mailableClass(): string
+    {
+        foreach (debug_backtrace(DEBUG_BACKTRACE_PROVIDE_OBJECT, 50) as $frame) {
+            $object = $frame['object'] ?? null;
+
+            if ($object instanceof \Illuminate\Mail\Mailable) {
+                return get_class($object);
+            }
+        }
+
+        return '';
+    }
+
+    private function mailSubject($message): string
+    {
+        if (! method_exists($message, 'getSubject')) {
+            return '';
+        }
+
+        return (string) $message->getSubject();
+    }
+
+    /**
+     * One address list off a message, across mail engines. Symfony's Email has
+     * the getters and returns Address objects; the older Swift message had the
+     * same getter names and returned an [address => name] map. A version without
+     * the getter simply contributes nobody.
+     *
+     * @return array<int|string, mixed>
+     */
+    private function recipients($message, string $getter): array
+    {
+        if (! method_exists($message, $getter)) {
+            return [];
+        }
+
+        return (array) $message->{$getter}();
+    }
+
+    /**
+     * The address strings in a recipient list, whichever engine produced it.
+     * Symfony hands over Address objects; Swift keyed the address and put the
+     * name in the value.
+     *
+     * @param  array<int|string, mixed>  $recipients
+     * @return array<int, string>
+     */
+    private function mailAddresses(array $recipients): array
+    {
+        $addresses = [];
+
+        foreach ($recipients as $key => $value) {
+            if (is_object($value) && method_exists($value, 'getAddress')) {
+                $addresses[] = (string) $value->getAddress();
+
+                continue;
+            }
+
+            if (is_string($key) && $key !== '') {
+                $addresses[] = $key;
+
+                continue;
+            }
+
+            if (is_string($value) && $value !== '') {
+                $addresses[] = $value;
+            }
+        }
+
+        return $addresses;
+    }
+
+    /**
+     * What is stored for who a message went to: the domains it reached, deduped,
+     * and never the addresses themselves. The domain is the diagnostic part — a
+     * bounce is a bounce to gmail.com, not to a person — and the local part is
+     * the customer data the whole request position rests on not keeping.
+     *
+     * An application that has decided its recipients are safe to store opts the
+     * full addresses in, the same shape the payload capture takes.
+     *
+     * @param  array<int, string>  $addresses
+     */
+    private function mailRecipients(array $addresses): string
+    {
+        if (config('larabug.requests.capture_mail_recipients', false)) {
+            return implode(',', $addresses);
+        }
+
+        $domains = [];
+
+        foreach ($addresses as $address) {
+            $at = strrpos($address, '@');
+
+            if ($at !== false) {
+                $domains[$this->normalisedDomain(substr($address, $at + 1))] = true;
+            }
+        }
+
+        return implode(',', array_keys($domains));
+    }
+
+    private function normalisedDomain(string $domain): string
+    {
+        return strtolower(trim($domain, " \t\n\r\0\x0B>"));
+    }
+
+    /**
+     * How long the send took, when the sending event was seen for this same
+     * message. Zero when it was not: a mailer that only fires sent, or a message
+     * whose sending threw before the mark was read back.
+     */
+    private function mailDuration($message): float
+    {
+        $key = spl_object_id($message);
+
+        if (! isset($this->mailStartedAt[$key])) {
+            return 0.0;
+        }
+
+        $duration = round((microtime(true) - $this->mailStartedAt[$key]) * 1000, 3);
+
+        unset($this->mailStartedAt[$key]);
+
+        return $duration;
     }
 
     public function onNotificationSent($event): void

@@ -43,6 +43,9 @@ class RequestMonitor
     /** @var array<int, array<string, mixed>> */
     protected $outgoing = [];
 
+    /** @var array<int, array<string, mixed>> */
+    protected $mail = [];
+
     /** @var array<string, mixed>|null */
     protected $route = null;
 
@@ -58,10 +61,14 @@ class RequestMonitor
     /** @var int */
     protected $maxOutgoing;
 
+    /** @var int */
+    protected $maxMail;
+
     public function __construct()
     {
         $this->maxQueries = (int) config('larabug.requests.max_queries', 100);
         $this->maxOutgoing = (int) config('larabug.requests.max_outgoing', 50);
+        $this->maxMail = (int) config('larabug.requests.max_mail', 50);
 
         // LARAVEL_START is set in public/index.php before the framework boots,
         // so it is the only honest answer to "when did this request begin".
@@ -173,6 +180,28 @@ class RequestMonitor
     }
 
     /**
+     * Record one message sent.
+     *
+     * Carries the counter the same way recordOutgoing does, so the mail_sent
+     * tile still counts every message even on a request that sends more than the
+     * cap keeps. The recipients arrive as domains rather than addresses unless
+     * the application opted the full ones in: who a request emailed is personal
+     * data, and which service it emailed is the diagnostic part.
+     *
+     * @param  array<string, mixed>  $message
+     */
+    public function recordMail(array $message): void
+    {
+        $this->counters['mail_sent']++;
+
+        if (count($this->mail) >= $this->maxMail) {
+            return;
+        }
+
+        $this->mail[] = $message;
+    }
+
+    /**
      * The finished record.
      *
      * @return array<string, mixed>
@@ -235,6 +264,7 @@ class RequestMonitor
 
             'sql' => $this->queries,
             'outgoing' => $this->outgoing,
+            'mail' => $this->mail,
         ], $stages, $this->counters);
     }
 

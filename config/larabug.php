@@ -250,6 +250,15 @@ return [
         'max_outgoing' => env('LB_REQUEST_MAX_OUTGOING', 50),
 
         /*
+        | How many messages are kept per request
+        | The mail counter keeps counting past this, the same as queries and
+        | outgoing calls: a request that fans a newsletter out to a hundred
+        | recipients is worth knowing about, and the number is what says so
+        | Default: 50
+        */
+        'max_mail' => env('LB_REQUEST_MAX_MAIL', 50),
+
+        /*
         | How many records are held before they are sent
         | A web process serves one request, so this mostly matters for Octane
         | and for the console
@@ -268,6 +277,16 @@ return [
         */
         'capture_ip' => env('LB_REQUEST_CAPTURE_IP', true),
         'capture_user' => env('LB_REQUEST_CAPTURE_USER', true),
+
+        /*
+        | Whether a sent message's full recipient addresses are recorded
+        | Off by default: the domains a request emailed are kept either way,
+        | which is the diagnostic part, and the addresses are personal data with
+        | no more business being stored than a query string's values. Turn this
+        | on only where the recipients are yours to keep
+        | Default: false
+        */
+        'capture_mail_recipients' => env('LB_REQUEST_CAPTURE_MAIL_RECIPIENTS', false),
 
         /*
         | Whether request headers are recorded
