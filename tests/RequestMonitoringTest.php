@@ -252,6 +252,10 @@ class RequestMonitoringTest extends TestCase
     /** @test */
     public function it_records_an_outgoing_call_with_its_query_values_stripped()
     {
+        if (! class_exists(\Illuminate\Http\Client\Request::class)) {
+            $this->markTestSkipped('The Http client and its ResponseReceived event are Laravel 7+.');
+        }
+
         $monitor = new RequestMonitor();
         $listeners = new RequestListeners($monitor, new Sampler());
 
@@ -278,6 +282,10 @@ class RequestMonitoringTest extends TestCase
     /** @test */
     public function it_marks_an_outgoing_call_that_never_got_a_response()
     {
+        if (! class_exists(\Illuminate\Http\Client\Request::class)) {
+            $this->markTestSkipped('The Http client and its ConnectionFailed event are Laravel 7+.');
+        }
+
         $monitor = new RequestMonitor();
         $listeners = new RequestListeners($monitor, new Sampler());
 
