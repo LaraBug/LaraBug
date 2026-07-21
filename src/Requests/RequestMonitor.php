@@ -40,6 +40,9 @@ class RequestMonitor
     /** @var array<int, array<string, mixed>> */
     protected $queries = [];
 
+    /** @var array<int, array<string, mixed>> */
+    protected $outgoing = [];
+
     /** @var array<string, mixed>|null */
     protected $route = null;
 
@@ -52,9 +55,13 @@ class RequestMonitor
     /** @var int */
     protected $maxQueries;
 
+    /** @var int */
+    protected $maxOutgoing;
+
     public function __construct()
     {
         $this->maxQueries = (int) config('larabug.requests.max_queries', 100);
+        $this->maxOutgoing = (int) config('larabug.requests.max_outgoing', 50);
 
         // LARAVEL_START is set in public/index.php before the framework boots,
         // so it is the only honest answer to "when did this request begin".
@@ -144,6 +151,28 @@ class RequestMonitor
     }
 
     /**
+     * Record one outbound HTTP call.
+     *
+     * The counter keeps counting past the cap, the same as queries: a request
+     * that fans out to a hundred services is worth knowing about, and the number
+     * is what says so. The url arrives with its query values already stripped by
+     * the listener, the same stance the request path takes: a token in a
+     * callback url is customer data we have no business storing.
+     *
+     * @param  array<string, mixed>  $call
+     */
+    public function recordOutgoing(array $call): void
+    {
+        $this->counters['outgoing_requests']++;
+
+        if (count($this->outgoing) >= $this->maxOutgoing) {
+            return;
+        }
+
+        $this->outgoing[] = $call;
+    }
+
+    /**
      * The finished record.
      *
      * @return array<string, mixed>
@@ -205,6 +234,7 @@ class RequestMonitor
             'ip' => (string) config('larabug.requests.capture_ip', true) ? (string) $request->ip() : '',
 
             'sql' => $this->queries,
+            'outgoing' => $this->outgoing,
         ], $stages, $this->counters);
     }
 

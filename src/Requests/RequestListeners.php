@@ -131,9 +131,103 @@ class RequestListeners
 
     public function onOutgoingRequest($event): void
     {
-        $this->guard(function () {
-            $this->monitor->increment('outgoing_requests');
+        $this->guard(function () use ($event) {
+            $request = $event->request ?? null;
+
+            if ($request === null) {
+                return;
+            }
+
+            // ConnectionFailed carries no response: the call never completed.
+            $response = $event->response ?? null;
+            $failed = $response === null;
+
+            $url = (string) $request->url();
+
+            // recordOutgoing carries the counter, so a request that fans out
+            // past the cap is still counted while only the first calls are kept.
+            $this->monitor->recordOutgoing([
+                'method' => (string) $request->method(),
+                'host' => (string) parse_url($url, PHP_URL_HOST),
+                'url' => $this->strippedUrl($url),
+                'status_code' => $response ? (int) $response->status() : 0,
+                'duration_ms' => $this->outgoingDuration($response),
+                'failed' => $failed ? 1 : 0,
+                'error' => $this->outgoingError($event, $failed),
+            ]);
         });
+    }
+
+    /**
+     * The url with its query values stripped, the names kept, the same stance
+     * the request path takes. Rebuilt rather than regexed so a value carrying an
+     * & or = of its own cannot smuggle itself back in.
+     */
+    private function strippedUrl(string $url): string
+    {
+        $parts = parse_url($url);
+
+        if ($parts === false) {
+            return '';
+        }
+
+        $rebuilt = (isset($parts['scheme']) ? $parts['scheme'].'://' : '')
+            .($parts['host'] ?? '')
+            .(isset($parts['port']) ? ':'.$parts['port'] : '')
+            .($parts['path'] ?? '');
+
+        if (! isset($parts['query']) || $parts['query'] === '') {
+            return $rebuilt;
+        }
+
+        parse_str($parts['query'], $params);
+
+        $names = implode('&', array_map(function ($key) {
+            return $key.'=';
+        }, array_keys($params)));
+
+        return $names === '' ? $rebuilt : $rebuilt.'?'.$names;
+    }
+
+    /**
+     * The round trip in milliseconds, off Guzzle's transfer stats which the Http
+     * client hangs on the response. Zero when the call never got one.
+     *
+     * @param  mixed  $response
+     */
+    private function outgoingDuration($response): float
+    {
+        if ($response === null) {
+            return 0.0;
+        }
+
+        $stats = $response->transferStats ?? null;
+
+        if ($stats === null || ! method_exists($stats, 'getTransferTime') || $stats->getTransferTime() === null) {
+            return 0.0;
+        }
+
+        return round($stats->getTransferTime() * 1000, 3);
+    }
+
+    /**
+     * A short reason a call failed, for the ones that never got a response.
+     * ConnectionFailed grew an exception in later Laravel; older versions carry
+     * only the request, so a generic marker is the most that can be said.
+     *
+     * @param  mixed  $event
+     */
+    private function outgoingError($event, bool $failed): string
+    {
+        if (! $failed) {
+            return '';
+        }
+
+        if (isset($event->exception) && $event->exception instanceof \Throwable) {
+            return mb_substr($event->exception->getMessage(), 0, 255);
+        }
+
+        return 'Connection failed';
     }
 
     public function onMessageLogged($event): void
