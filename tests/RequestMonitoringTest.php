@@ -7,6 +7,7 @@ use Illuminate\Http\Response;
 use LaraBug\Http\Middleware\CaptureRequest;
 use LaraBug\Requests\QueryNormaliser;
 use LaraBug\Requests\RequestBuffer;
+use LaraBug\Requests\RequestListeners;
 use LaraBug\Requests\RequestMonitor;
 use LaraBug\Requests\Sampler;
 use LaraBug\Requests\TraceContext;
@@ -246,6 +247,90 @@ class RequestMonitoringTest extends TestCase
         $this->assertCount(1, $records);
         // Kept every time (0.1 + 0.9 * 1.0), so it weighs one and not ten.
         $this->assertSame(1.0, $records[0]['sample_rate']);
+    }
+
+    /** @test */
+    public function it_records_an_outgoing_call_with_its_query_values_stripped()
+    {
+        $monitor = new RequestMonitor();
+        $listeners = new RequestListeners($monitor, new Sampler());
+
+        $listeners->onOutgoingRequest($this->outgoingEvent(
+            'GET',
+            'https://api.example.com/v1/users?token=secret&page=2',
+            new \Illuminate\Http\Client\Response(new \GuzzleHttp\Psr7\Response(200))
+        ));
+
+        $record = $monitor->toArray(Request::create('/orders', 'GET'), new Response('', 200), 1.0);
+
+        $this->assertSame(1, $record['outgoing_requests']);
+        $this->assertCount(1, $record['outgoing']);
+
+        $call = $record['outgoing'][0];
+        $this->assertSame('GET', $call['method']);
+        $this->assertSame('api.example.com', $call['host']);
+        $this->assertSame(200, $call['status_code']);
+        $this->assertSame(0, $call['failed']);
+        // The parameter names survive; a token in a callback url does not.
+        $this->assertSame('https://api.example.com/v1/users?token=&page=', $call['url']);
+    }
+
+    /** @test */
+    public function it_marks_an_outgoing_call_that_never_got_a_response()
+    {
+        $monitor = new RequestMonitor();
+        $listeners = new RequestListeners($monitor, new Sampler());
+
+        // No response: the ConnectionFailed shape.
+        $listeners->onOutgoingRequest($this->outgoingEvent('POST', 'https://down.example.com/hook', null));
+
+        $call = $monitor->toArray(Request::create('/orders', 'GET'), new Response('', 200), 1.0)['outgoing'][0];
+
+        $this->assertSame(1, $call['failed']);
+        $this->assertSame(0, $call['status_code']);
+        $this->assertNotSame('', $call['error']);
+    }
+
+    /** @test */
+    public function the_outgoing_counter_keeps_counting_past_the_cap()
+    {
+        config(['larabug.requests.max_outgoing' => 2]);
+
+        $monitor = new RequestMonitor();
+
+        for ($i = 0; $i < 5; $i++) {
+            $monitor->recordOutgoing([
+                'method' => 'GET', 'host' => 'x', 'url' => 'https://x',
+                'status_code' => 200, 'duration_ms' => 1.0, 'failed' => 0, 'error' => '',
+            ]);
+        }
+
+        $record = $monitor->toArray(Request::create('/orders', 'GET'), new Response('', 200), 1.0);
+
+        // All five counted, only two kept.
+        $this->assertSame(5, $record['outgoing_requests']);
+        $this->assertCount(2, $record['outgoing']);
+    }
+
+    /**
+     * A stand-in for an Http client event: the handler reads only ->request and
+     * ->response, so a plain object with those is enough and sidesteps the
+     * event constructors that changed shape between Laravel versions.
+     *
+     * @param  \Illuminate\Http\Client\Response|null  $response
+     */
+    private function outgoingEvent(string $method, string $url, $response): object
+    {
+        $event = new \stdClass();
+        $event->request = new \Illuminate\Http\Client\Request(
+            new \GuzzleHttp\Psr7\Request($method, $url)
+        );
+
+        if ($response !== null) {
+            $event->response = $response;
+        }
+
+        return $event;
     }
 
     /**

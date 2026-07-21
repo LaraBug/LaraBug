@@ -241,6 +241,15 @@ return [
         'max_queries' => env('LB_REQUEST_MAX_QUERIES', 100),
 
         /*
+        | How many outbound HTTP calls are kept per request
+        | The outgoing counter keeps counting past this, the same as queries: a
+        | request that fans out to a hundred services is worth knowing about, and
+        | the number is what says so
+        | Default: 50
+        */
+        'max_outgoing' => env('LB_REQUEST_MAX_OUTGOING', 50),
+
+        /*
         | How many records are held before they are sent
         | A web process serves one request, so this mostly matters for Octane
         | and for the console
