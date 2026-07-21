@@ -4,7 +4,9 @@ namespace LaraBug\Tests;
 
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use LaraBug\Http\Middleware\CaptureRequest;
 use LaraBug\Requests\QueryNormaliser;
+use LaraBug\Requests\RequestBuffer;
 use LaraBug\Requests\RequestMonitor;
 use LaraBug\Requests\Sampler;
 use LaraBug\Requests\TraceContext;
@@ -207,6 +209,80 @@ class RequestMonitoringTest extends TestCase
         // The first id reported wins: it is the one that caused the failure,
         // and later ones are usually the handler's own noise.
         $this->assertSame('exc-1', $record['exception_id']);
+    }
+
+    /** @test */
+    public function a_failed_request_that_was_not_sampled_is_kept_at_the_exception_rate()
+    {
+        config([
+            'larabug.requests.sample_rate' => 0.0,
+            'larabug.requests.exception_sample_rate' => 1.0,
+        ]);
+
+        $this->assertCount(1, $this->recordsForFailedRequest());
+    }
+
+    /** @test */
+    public function a_failed_request_is_dropped_when_the_exception_rate_is_zero()
+    {
+        config([
+            'larabug.requests.sample_rate' => 0.0,
+            'larabug.requests.exception_sample_rate' => 0.0,
+        ]);
+
+        $this->assertCount(0, $this->recordsForFailedRequest());
+    }
+
+    /** @test */
+    public function a_kept_failure_carries_its_effective_rate_not_the_head_rate()
+    {
+        config([
+            'larabug.requests.sample_rate' => 0.1,
+            'larabug.requests.exception_sample_rate' => 1.0,
+        ]);
+
+        $records = $this->recordsForFailedRequest();
+
+        $this->assertCount(1, $records);
+        // Kept every time (0.1 + 0.9 * 1.0), so it weighs one and not ten.
+        $this->assertSame(1.0, $records[0]['sample_rate']);
+    }
+
+    /**
+     * Run a 500 through the middleware and return whatever it buffered.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function recordsForFailedRequest(): array
+    {
+        // A buffer that records rather than sends. It skips the parent
+        // constructor, so no shutdown flush is registered and no client is
+        // needed for a test that only cares whether the record was kept.
+        $buffer = new class extends RequestBuffer {
+            /** @var array<int, array<string, mixed>> */
+            public $records = [];
+
+            public function __construct()
+            {
+            }
+
+            public function add(array $record): void
+            {
+                $this->records[] = $record;
+            }
+        };
+
+        $middleware = new CaptureRequest(new RequestMonitor(), new Sampler(), $buffer);
+
+        $request = Request::create('/orders', 'GET');
+        $response = new Response('boom', 500);
+
+        $middleware->handle($request, function () use ($response) {
+            return $response;
+        });
+        $middleware->terminate($request, $response);
+
+        return $buffer->records;
     }
 
     /**

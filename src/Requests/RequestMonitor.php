@@ -68,6 +68,16 @@ class RequestMonitor
         $this->marks[$name] = microtime(true);
     }
 
+    /**
+     * Whether the middleware got as far as marking where the action began. A
+     * terminate that runs after a handle that could not started nothing worth
+     * recording, and has no failure to promote.
+     */
+    public function started(): bool
+    {
+        return isset($this->marks['action_start']);
+    }
+
     public function increment(string $counter, int $by = 1): void
     {
         if (isset($this->counters[$counter])) {

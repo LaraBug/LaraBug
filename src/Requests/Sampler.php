@@ -90,6 +90,26 @@ class Sampler
         return $this->rate > 0 && $this->rate <= 1 ? $this->rate : 1.0;
     }
 
+    /**
+     * The rate a failed record travels with, which is not the head rate.
+     *
+     * A 5xx is kept far more often than head sampling implies: whatever the
+     * coin did on arrival, it re-rolls at the exception rate, so at the default
+     * 1.0 every failure is kept. Dividing by the head rate would then weight a
+     * failure by ten while it was really kept every time, counting ten failures
+     * where there was one and wrecking the error rate. Its true keep-chance is
+     * "head-sampled, or not and the exception re-roll kept it".
+     */
+    public function rateForException(): float
+    {
+        $head = $this->rate();
+        $exception = $this->exceptionRate > 0 && $this->exceptionRate <= 1 ? $this->exceptionRate : 1.0;
+
+        $effective = $head + (1 - $head) * $exception;
+
+        return $effective > 0 && $effective <= 1 ? $effective : 1.0;
+    }
+
     protected function roll(float $rate): bool
     {
         if ($rate >= 1) {

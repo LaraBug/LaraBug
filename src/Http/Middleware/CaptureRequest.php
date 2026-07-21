@@ -73,7 +73,15 @@ class CaptureRequest
 
     public function terminate(Request $request, $response): void
     {
-        if (! $this->sampler->decided()) {
+        // A failure that head sampling dropped is worth having anyway: re-roll
+        // it at the exception rate and keep it if it now lands. Only for a 5xx,
+        // and only when the monitor actually started this request, so a
+        // terminate after a handle that could not is left alone rather than
+        // buffering a record with no stages behind it.
+        if (! $this->sampler->decided()
+            && ! ($this->isServerError($response)
+                && $this->monitor->started()
+                && $this->sampler->reconsiderForException())) {
             return;
         }
 
@@ -81,7 +89,14 @@ class CaptureRequest
             $this->monitor->mark('response_sent');
             $this->monitor->mark('terminating');
 
-            $record = $this->monitor->toArray($request, $response, $this->sampler->rate());
+            // A 5xx carries its effective keep-rate, not the head rate: it is
+            // kept far more often than head sampling implies, so weighting it by
+            // the head rate would count each failure many times over.
+            $rate = $this->isServerError($response)
+                ? $this->sampler->rateForException()
+                : $this->sampler->rate();
+
+            $record = $this->monitor->toArray($request, $response, $rate);
 
             $this->monitor->mark('terminated');
 
@@ -90,5 +105,13 @@ class CaptureRequest
             // Same bargain as everywhere else in this package: losing the
             // record is acceptable, breaking the application is not.
         }
+    }
+
+    /**
+     * @param  mixed  $response
+     */
+    private function isServerError($response): bool
+    {
+        return method_exists($response, 'getStatusCode') && $response->getStatusCode() >= 500;
     }
 }
