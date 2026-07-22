@@ -104,6 +104,11 @@ class ServiceProvider extends BaseServiceProvider
             $this->app['events']->subscribe(\LaraBug\Console\CommandListeners::class);
         }
 
+        // Scheduled task monitoring, the same context as commands.
+        if (config('larabug.schedule.track_scheduled_tasks', false)) {
+            $this->app['events']->subscribe(\LaraBug\Console\ScheduledTaskListeners::class);
+        }
+
         // The heartbeat only has a job to do where the scheduler runs, which is
         // also the only place it can be registered from.
         if (config('larabug.heartbeat.enabled', true)) {
@@ -332,6 +337,13 @@ class ServiceProvider extends BaseServiceProvider
 
         $this->app->singleton(\LaraBug\Console\CommandBuffer::class, function ($app) {
             return new \LaraBug\Console\CommandBuffer(
+                $app->make(\LaraBug\Http\Client::class),
+                config('larabug')
+            );
+        });
+
+        $this->app->singleton(\LaraBug\Console\ScheduledTaskBuffer::class, function ($app) {
+            return new \LaraBug\Console\ScheduledTaskBuffer(
                 $app->make(\LaraBug\Http\Client::class),
                 config('larabug')
             );

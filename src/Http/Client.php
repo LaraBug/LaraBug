@@ -131,6 +131,35 @@ class Client
     }
 
     /**
+     * @param  array<int, array<string, mixed>>  $records
+     */
+    public function reportScheduledTasks(array $records)
+    {
+        try {
+            return $this->getGuzzleHttpClient()->request('POST', config('larabug.server'), [
+                'headers' => [
+                    'Authorization' => 'Bearer '.$this->login,
+                    'Content-Type' => 'application/json',
+                    'Accept' => 'application/json',
+                    'User-Agent' => 'LaraBug-Package',
+                ],
+                'json' => [
+                    'type' => 'scheduled_tasks_batch',
+                    'project' => $this->project,
+                    'scheduled_tasks' => $records,
+                    'count' => count($records),
+                ],
+                'verify' => config('larabug.verify_ssl'),
+                'timeout' => 5,
+            ]);
+        } catch (\GuzzleHttp\Exception\RequestException $e) {
+            return $e->getResponse();
+        } catch (\Exception $e) {
+            return null;
+        }
+    }
+
+    /**
      * Report that this app's workers are alive.
      *
      * Its own endpoint rather than a kind of report: this arrives on a schedule
