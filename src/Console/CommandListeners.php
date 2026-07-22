@@ -44,9 +44,11 @@ class CommandListeners
         $this->guard(function () use ($event) {
             $command = (string) ($event->command ?? '');
 
-            if ($command === '' || $this->ignored($command)) {
-                // A null frame keeps the finish handler's stack balanced without
-                // recording the ignored command.
+            // A command run by the scheduler in the same process belongs to the
+            // schedule, not to commands: the scheduled task listener counts it,
+            // and counting it here too would double it. A null frame keeps the
+            // finish handler's stack balanced without recording it.
+            if ($command === '' || $this->ignored($command) || ScheduledTaskListeners::$inFlight > 0) {
                 $this->stack[] = null;
 
                 return;

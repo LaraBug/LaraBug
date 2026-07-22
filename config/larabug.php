@@ -421,6 +421,32 @@ return [
         'max_retries' => env('LB_COMMAND_MAX_RETRIES', 2),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Scheduled Task Monitoring
+    |--------------------------------------------------------------------------
+    |
+    | Records the scheduled tasks this application runs: whether each ran, failed
+    | or was skipped, how long it took, and the cron it runs on. Its own context,
+    | told apart from a standalone command run: a scheduled command emits command
+    | events too, and the command listener bows out while a task is in flight so
+    | the run is counted once, against the schedule.
+    |
+    | Off by default. Kept whole, the same as commands.
+    |
+    */
+    'schedule' => [
+        /*
+        | Enable or disable scheduled task monitoring
+        | Set to true via LB_TRACK_SCHEDULED_TASKS=true to start recording
+        | Default: false (opt-in)
+        */
+        'track_scheduled_tasks' => env('LB_TRACK_SCHEDULED_TASKS', false),
+
+        'batch_size' => env('LB_SCHEDULED_TASK_BATCH_SIZE', 20),
+        'max_retries' => env('LB_SCHEDULED_TASK_MAX_RETRIES', 2),
+    ],
+
     'heartbeat' => [
         /*
         | Enable or disable the heartbeat
