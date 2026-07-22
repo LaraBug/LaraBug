@@ -98,6 +98,12 @@ class ServiceProvider extends BaseServiceProvider
             $this->app['events']->subscribe(\LaraBug\Queue\JobEventSubscriber::class);
         }
 
+        // Command monitoring. The inverse of request monitoring: a command runs
+        // in the console, so this is not gated behind runningInConsole.
+        if (config('larabug.commands.track_commands', false)) {
+            $this->app['events']->subscribe(\LaraBug\Console\CommandListeners::class);
+        }
+
         // The heartbeat only has a job to do where the scheduler runs, which is
         // also the only place it can be registered from.
         if (config('larabug.heartbeat.enabled', true)) {
@@ -319,6 +325,13 @@ class ServiceProvider extends BaseServiceProvider
 
         $this->app->singleton(\LaraBug\Requests\RequestBuffer::class, function ($app) {
             return new \LaraBug\Requests\RequestBuffer(
+                $app->make(\LaraBug\Http\Client::class),
+                config('larabug')
+            );
+        });
+
+        $this->app->singleton(\LaraBug\Console\CommandBuffer::class, function ($app) {
+            return new \LaraBug\Console\CommandBuffer(
                 $app->make(\LaraBug\Http\Client::class),
                 config('larabug')
             );
