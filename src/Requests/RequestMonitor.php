@@ -46,6 +46,9 @@ class RequestMonitor
     /** @var array<int, array<string, mixed>> */
     protected $mail = [];
 
+    /** @var array<int, array<string, mixed>> */
+    protected $notifications = [];
+
     /** @var array<string, mixed>|null */
     protected $route = null;
 
@@ -64,11 +67,15 @@ class RequestMonitor
     /** @var int */
     protected $maxMail;
 
+    /** @var int */
+    protected $maxNotifications;
+
     public function __construct()
     {
         $this->maxQueries = (int) config('larabug.requests.max_queries', 100);
         $this->maxOutgoing = (int) config('larabug.requests.max_outgoing', 50);
         $this->maxMail = (int) config('larabug.requests.max_mail', 50);
+        $this->maxNotifications = (int) config('larabug.requests.max_notifications', 50);
 
         // LARAVEL_START is set in public/index.php before the framework boots,
         // so it is the only honest answer to "when did this request begin".
@@ -202,6 +209,28 @@ class RequestMonitor
     }
 
     /**
+     * Record one notification sent.
+     *
+     * Carries the counter like recordMail does, one entry per channel: a
+     * notification going out over mail and database is two sends, which is what
+     * the notifiable actually receives. The notifiable is kept as its class,
+     * never its id: which model type gets notified is diagnostic, and which row
+     * is personal data.
+     *
+     * @param  array<string, mixed>  $notification
+     */
+    public function recordNotification(array $notification): void
+    {
+        $this->counters['notifications_sent']++;
+
+        if (count($this->notifications) >= $this->maxNotifications) {
+            return;
+        }
+
+        $this->notifications[] = $notification;
+    }
+
+    /**
      * The finished record.
      *
      * @return array<string, mixed>
@@ -265,6 +294,7 @@ class RequestMonitor
             'sql' => $this->queries,
             'outgoing' => $this->outgoing,
             'mail' => $this->mail,
+            'notifications' => $this->notifications,
         ], $stages, $this->counters);
     }
 

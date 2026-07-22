@@ -438,6 +438,88 @@ class RequestMonitoringTest extends TestCase
     }
 
     /** @test */
+    public function it_records_a_notification_with_its_channel_and_notifiable_type()
+    {
+        $monitor = new RequestMonitor();
+        $listeners = new RequestListeners($monitor, new Sampler());
+
+        $listeners->onNotificationSent($this->notificationEvent(
+            new FakeNotification(),
+            'mail',
+            new FakeNotifiable(),
+        ));
+
+        $record = $monitor->toArray(Request::create('/orders', 'POST'), new Response('', 200), 1.0);
+
+        $this->assertSame(1, $record['notifications_sent']);
+        $this->assertCount(1, $record['notifications']);
+
+        $notification = $record['notifications'][0];
+        $this->assertSame(FakeNotification::class, $notification['notification']);
+        $this->assertSame('mail', $notification['channel']);
+        // The type, never the id: the class is diagnostic, the row is personal.
+        $this->assertSame(FakeNotifiable::class, $notification['notifiable_type']);
+        $this->assertSame(1, $notification['success']);
+    }
+
+    /** @test */
+    public function it_marks_a_failed_notification()
+    {
+        $monitor = new RequestMonitor();
+        $listeners = new RequestListeners($monitor, new Sampler());
+
+        $listeners->onNotificationFailed($this->notificationEvent(
+            new FakeNotification(),
+            'slack',
+            new FakeNotifiable(),
+        ));
+
+        $notification = $monitor->toArray(Request::create('/x', 'GET'), new Response('', 200), 1.0)['notifications'][0];
+
+        $this->assertSame(0, $notification['success']);
+    }
+
+    /** @test */
+    public function a_notification_sent_over_mail_is_not_also_counted_as_mail()
+    {
+        $monitor = new RequestMonitor();
+        $listeners = new RequestListeners($monitor, new Sampler());
+
+        $event = $this->mailEvent($this->mailMessage('Reset your password', ['a@b.test']));
+        // The stamp Laravel puts on a notification's mail: the notification path
+        // already records it, so the mail path must leave it alone.
+        $event->data = ['__laravel_notification' => FakeNotification::class];
+
+        $listeners->onMailSent($event);
+
+        $record = $monitor->toArray(Request::create('/x', 'GET'), new Response('', 200), 1.0);
+
+        $this->assertSame(0, $record['mail_sent']);
+        $this->assertSame([], $record['mail']);
+    }
+
+    /** @test */
+    public function the_notification_counter_keeps_counting_past_the_cap()
+    {
+        config(['larabug.requests.max_notifications' => 2]);
+
+        $monitor = new RequestMonitor();
+
+        for ($i = 0; $i < 5; $i++) {
+            $monitor->recordNotification([
+                'notification' => FakeNotification::class, 'channel' => 'mail',
+                'notifiable_type' => FakeNotifiable::class, 'success' => 1,
+            ]);
+        }
+
+        $record = $monitor->toArray(Request::create('/x', 'GET'), new Response('', 200), 1.0);
+
+        // All five counted, only two kept.
+        $this->assertSame(5, $record['notifications_sent']);
+        $this->assertCount(2, $record['notifications']);
+    }
+
+    /** @test */
     public function it_records_a_queued_mailable_at_dispatch_marked_queued()
     {
         $monitor = new RequestMonitor();
@@ -564,6 +646,20 @@ class RequestMonitoringTest extends TestCase
     }
 
     /**
+     * A stand-in for a notification event: the handler reads ->notification,
+     * ->channel and ->notifiable, so a plain object with those is enough.
+     */
+    private function notificationEvent(object $notification, string $channel, object $notifiable): object
+    {
+        $event = new \stdClass();
+        $event->notification = $notification;
+        $event->channel = $channel;
+        $event->notifiable = $notifiable;
+
+        return $event;
+    }
+
+    /**
      * A stand-in for an Http client event: the handler reads only ->request and
      * ->response, so a plain object with those is enough and sidesteps the
      * event constructors that changed shape between Laravel versions.
@@ -637,4 +733,16 @@ class RequestMonitoringTest extends TestCase
 
         return $record['payload'];
     }
+}
+
+/**
+ * Named stand-ins so a notification and its notifiable have stable class names
+ * to assert against, rather than the file-path names anonymous classes carry.
+ */
+class FakeNotification
+{
+}
+
+class FakeNotifiable
+{
 }

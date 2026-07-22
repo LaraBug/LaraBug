@@ -52,6 +52,7 @@ class RequestListeners
         $events->listen('Illuminate\Mail\Events\MessageSending', [$this, 'onMailSending']);
         $events->listen('Illuminate\Mail\Events\MessageSent', [$this, 'onMailSent']);
         $events->listen('Illuminate\Notifications\Events\NotificationSent', [$this, 'onNotificationSent']);
+        $events->listen('Illuminate\Notifications\Events\NotificationFailed', [$this, 'onNotificationFailed']);
 
         // Outgoing HTTP, via the client's own event rather than Guzzle
         // middleware: the event exists from Laravel 8 and needs no handler
@@ -136,6 +137,10 @@ class RequestListeners
     public function onMailSending($event): void
     {
         $this->guard(function () use ($event) {
+            if ($this->isNotificationMail($event)) {
+                return;
+            }
+
             $message = $event->message ?? null;
 
             if ($message === null) {
@@ -149,6 +154,13 @@ class RequestListeners
     public function onMailSent($event): void
     {
         $this->guard(function () use ($event) {
+            // A notification sent over mail fires this too, and the notification
+            // path already records it; bowing out here keeps it from counting as
+            // both a mail and a notification, the same split Nightwatch draws.
+            if ($this->isNotificationMail($event)) {
+                return;
+            }
+
             $message = $event->message ?? null;
 
             if ($message === null) {
@@ -379,9 +391,60 @@ class RequestListeners
 
     public function onNotificationSent($event): void
     {
-        $this->guard(function () {
-            $this->monitor->increment('notifications_sent');
+        $this->guard(function () use ($event) {
+            $this->recordNotification($event, 1);
         });
+    }
+
+    public function onNotificationFailed($event): void
+    {
+        $this->guard(function () use ($event) {
+            $this->recordNotification($event, 0);
+        });
+    }
+
+    /**
+     * Record one notification, one entry per channel.
+     *
+     * @param  mixed  $event
+     */
+    private function recordNotification($event, int $success): void
+    {
+        $notification = $event->notification ?? null;
+        $notifiable = $event->notifiable ?? null;
+
+        $this->monitor->recordNotification([
+            'notification' => is_object($notification) ? $this->normalisedClass(get_class($notification)) : '',
+            'channel' => (string) ($event->channel ?? ''),
+            // The type, never the notifiable itself: the class is diagnostic and
+            // the id is who got notified, which is not ours to keep.
+            'notifiable_type' => is_object($notifiable) ? $this->normalisedClass(get_class($notifiable)) : '',
+            'success' => $success,
+        ]);
+    }
+
+    /**
+     * A class name with an anonymous marker trimmed off. An on-the-fly
+     * notification is an anonymous class, and get_class returns its file path
+     * after a null byte; the part before it is the only stable name it has.
+     */
+    private function normalisedClass(string $class): string
+    {
+        $nul = strpos($class, "\0");
+
+        return $nul === false ? $class : substr($class, 0, $nul);
+    }
+
+    /**
+     * Whether a mail event is a notification going out over the mail channel.
+     * Laravel stamps the notification on the event data, and the notification
+     * path already records it, so the mail path leaves it alone.
+     *
+     * @param  mixed  $event
+     */
+    private function isNotificationMail($event): bool
+    {
+        return is_array($event->data ?? null) && isset($event->data['__laravel_notification']);
     }
 
     public function onOutgoingRequest($event): void

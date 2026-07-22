@@ -259,6 +259,15 @@ return [
         'max_mail' => env('LB_REQUEST_MAX_MAIL', 50),
 
         /*
+        | How many notifications are kept per request
+        | The notification counter keeps counting past this, one entry per
+        | channel, the same as mail: a request that notifies a thousand users is
+        | worth knowing about, and the number is what says so
+        | Default: 50
+        */
+        'max_notifications' => env('LB_REQUEST_MAX_NOTIFICATIONS', 50),
+
+        /*
         | How many records are held before they are sent
         | A web process serves one request, so this mostly matters for Octane
         | and for the console
