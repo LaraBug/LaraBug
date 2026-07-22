@@ -520,6 +520,80 @@ class RequestMonitoringTest extends TestCase
     }
 
     /** @test */
+    public function it_records_cache_operations_with_the_key_narrowed_to_a_prefix()
+    {
+        $monitor = new RequestMonitor();
+        $listeners = new RequestListeners($monitor, new Sampler());
+
+        $listeners->onCacheHit($this->cacheEvent('user:42:profile', 'redis'));
+        $listeners->onCacheMissed($this->cacheEvent('config:mail', 'redis'));
+        $listeners->onCacheWritten($this->cacheEvent('user:42:profile', 'redis', 3600));
+        $listeners->onCacheForgotten($this->cacheEvent('user:42:profile', 'redis'));
+
+        $record = $monitor->toArray(Request::create('/x', 'GET'), new Response('', 200), 1.0);
+
+        // The hit and miss counters still track their totals.
+        $this->assertSame(1, $record['cache_hits']);
+        $this->assertSame(1, $record['cache_misses']);
+
+        $this->assertCount(4, $record['cache']);
+        $this->assertSame(['hit', 'miss', 'write', 'forget'], array_column($record['cache'], 'op'));
+
+        $hit = $record['cache'][0];
+        // The prefix up to the first colon; the id after it is dropped.
+        $this->assertSame('user', $hit['key_prefix']);
+        $this->assertSame('redis', $hit['store']);
+
+        // A ttl only means something on a write.
+        $this->assertSame(3600, $record['cache'][2]['ttl']);
+        $this->assertSame(0, $record['cache'][0]['ttl']);
+    }
+
+    /** @test */
+    public function it_keeps_the_full_cache_key_only_when_opted_in()
+    {
+        config(['larabug.requests.capture_cache_keys' => true]);
+
+        $monitor = new RequestMonitor();
+        $listeners = new RequestListeners($monitor, new Sampler());
+
+        $listeners->onCacheHit($this->cacheEvent('user:42:profile', 'redis'));
+
+        $event = $monitor->toArray(Request::create('/x', 'GET'), new Response('', 200), 1.0)['cache'][0];
+
+        $this->assertSame('user:42:profile', $event['key_prefix']);
+    }
+
+    /** @test */
+    public function the_cache_buffer_is_capped()
+    {
+        config(['larabug.requests.max_cache_events' => 2]);
+
+        $monitor = new RequestMonitor();
+
+        for ($i = 0; $i < 5; $i++) {
+            $monitor->recordCacheEvent(['op' => 'hit', 'key_prefix' => 'k', 'store' => 'redis', 'ttl' => 0]);
+        }
+
+        $record = $monitor->toArray(Request::create('/x', 'GET'), new Response('', 200), 1.0);
+
+        $this->assertCount(2, $record['cache']);
+    }
+
+    private function cacheEvent(string $key, string $store, ?int $seconds = null): object
+    {
+        $event = new \stdClass();
+        $event->key = $key;
+        $event->storeName = $store;
+
+        if ($seconds !== null) {
+            $event->seconds = $seconds;
+        }
+
+        return $event;
+    }
+
+    /** @test */
     public function it_records_a_queued_mailable_at_dispatch_marked_queued()
     {
         $monitor = new RequestMonitor();

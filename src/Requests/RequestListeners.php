@@ -44,6 +44,8 @@ class RequestListeners
         $events->listen('Illuminate\Database\Events\QueryExecuted', [$this, 'onQueryExecuted']);
         $events->listen('Illuminate\Cache\Events\CacheHit', [$this, 'onCacheHit']);
         $events->listen('Illuminate\Cache\Events\CacheMissed', [$this, 'onCacheMissed']);
+        $events->listen('Illuminate\Cache\Events\KeyWritten', [$this, 'onCacheWritten']);
+        $events->listen('Illuminate\Cache\Events\KeyForgotten', [$this, 'onCacheForgotten']);
         $events->listen('Illuminate\Queue\Events\JobQueued', [$this, 'onJobQueued']);
 
         // Paired: the sending event only starts a timer, the sent event is what
@@ -105,16 +107,71 @@ class RequestListeners
 
     public function onCacheHit($event): void
     {
-        $this->guard(function () {
+        $this->guard(function () use ($event) {
             $this->monitor->increment('cache_hits');
+            $this->recordCacheEvent('hit', $event);
         });
     }
 
     public function onCacheMissed($event): void
     {
-        $this->guard(function () {
+        $this->guard(function () use ($event) {
             $this->monitor->increment('cache_misses');
+            $this->recordCacheEvent('miss', $event);
         });
+    }
+
+    public function onCacheWritten($event): void
+    {
+        $this->guard(function () use ($event) {
+            $this->recordCacheEvent('write', $event);
+        });
+    }
+
+    public function onCacheForgotten($event): void
+    {
+        $this->guard(function () use ($event) {
+            $this->recordCacheEvent('forget', $event);
+        });
+    }
+
+    /**
+     * Buffer one cache operation. The key is narrowed to a prefix unless the
+     * application opted the full keys in; the ttl is only meaningful on a write.
+     *
+     * @param  mixed  $event
+     */
+    private function recordCacheEvent(string $op, $event): void
+    {
+        $this->monitor->recordCacheEvent([
+            'op' => $op,
+            'key_prefix' => $this->cacheKey((string) ($event->key ?? '')),
+            'store' => (string) ($event->storeName ?? ''),
+            'ttl' => $op === 'write' ? (int) ($event->seconds ?? 0) : 0,
+        ]);
+    }
+
+    /**
+     * A cache key narrowed to what is safe to keep. Laravel's keys are routinely
+     * "prefix:id", and the prefix is the diagnostic part while the id is customer
+     * data; the part up to the first colon keeps the former and drops the latter.
+     * A key with no colon is bounded to a fixed length. An application that has
+     * decided its keys are safe keeps them whole, the same shape the payload
+     * capture takes.
+     */
+    private function cacheKey(string $key): string
+    {
+        if (config('larabug.requests.capture_cache_keys', false)) {
+            return mb_substr($key, 0, 255);
+        }
+
+        $colon = strpos($key, ':');
+
+        if ($colon > 0) {
+            return mb_substr($key, 0, $colon);
+        }
+
+        return mb_substr($key, 0, 64);
     }
 
     public function onJobQueued($event): void

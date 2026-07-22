@@ -268,6 +268,15 @@ return [
         'max_notifications' => env('LB_REQUEST_MAX_NOTIFICATIONS', 50),
 
         /*
+        | How many cache operations are kept per request
+        | The hit and miss counters keep counting past this on their own; a
+        | request that touches the cache a thousand times is common, and the
+        | first hundred operations are enough to read its shape
+        | Default: 100
+        */
+        'max_cache_events' => env('LB_REQUEST_MAX_CACHE_EVENTS', 100),
+
+        /*
         | How many records are held before they are sent
         | A web process serves one request, so this mostly matters for Octane
         | and for the console
@@ -296,6 +305,15 @@ return [
         | Default: false
         */
         'capture_mail_recipients' => env('LB_REQUEST_CAPTURE_MAIL_RECIPIENTS', false),
+
+        /*
+        | Whether full cache keys are recorded
+        | Off by default: a key up to its first colon is kept, which is the store
+        | and the kind of thing cached, and the id after it is dropped the way a
+        | query's bindings are. Turn this on only where the keys are yours to keep
+        | Default: false
+        */
+        'capture_cache_keys' => env('LB_REQUEST_CAPTURE_CACHE_KEYS', false),
 
         /*
         | Whether request headers are recorded
