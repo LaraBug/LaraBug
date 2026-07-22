@@ -320,6 +320,249 @@ class RequestMonitoringTest extends TestCase
         $this->assertCount(2, $record['outgoing']);
     }
 
+    /** @test */
+    public function it_records_a_message_with_its_recipient_domains_and_not_the_addresses()
+    {
+        $monitor = new RequestMonitor();
+        $listeners = new RequestListeners($monitor, new Sampler());
+
+        $listeners->onMailSent($this->mailEvent($this->mailMessage(
+            'Welcome aboard',
+            ['alice@example.com', 'bob@example.com'],
+            ['team@other.test'],
+        )));
+
+        $record = $monitor->toArray(Request::create('/register', 'POST'), new Response('', 200), 1.0);
+
+        $this->assertSame(1, $record['mail_sent']);
+        $this->assertCount(1, $record['mail']);
+
+        $message = $record['mail'][0];
+        $this->assertSame('Welcome aboard', $message['subject']);
+        $this->assertSame(2, $message['to_count']);
+        $this->assertSame(1, $message['cc_count']);
+        $this->assertSame(0, $message['bcc_count']);
+        // Deduped domains, in recipient order, and never a local part.
+        $this->assertSame('example.com,other.test', $message['recipient_domains']);
+        $this->assertStringNotContainsString('alice', $message['recipient_domains']);
+    }
+
+    /** @test */
+    public function it_keeps_the_full_recipient_addresses_only_when_they_are_opted_in()
+    {
+        config(['larabug.requests.capture_mail_recipients' => true]);
+
+        $monitor = new RequestMonitor();
+        $listeners = new RequestListeners($monitor, new Sampler());
+
+        $listeners->onMailSent($this->mailEvent($this->mailMessage('Receipt', ['alice@example.com'])));
+
+        $message = $monitor->toArray(Request::create('/orders', 'POST'), new Response('', 200), 1.0)['mail'][0];
+
+        $this->assertSame('alice@example.com', $message['recipient_domains']);
+    }
+
+    /** @test */
+    public function it_resolves_the_mailable_class_from_the_call_stack()
+    {
+        $monitor = new RequestMonitor();
+        $listeners = new RequestListeners($monitor, new Sampler());
+
+        $event = $this->mailEvent($this->mailMessage('Hi', ['a@b.test']));
+
+        // The resolver walks the stack for a Mailable frame; firing the event
+        // from inside one is what a real send does.
+        $mailable = new class extends \Illuminate\Mail\Mailable {
+            public function fire(RequestListeners $listeners, object $event): void
+            {
+                $listeners->onMailSent($event);
+            }
+        };
+
+        $mailable->fire($listeners, $event);
+
+        $message = $monitor->toArray(Request::create('/x', 'GET'), new Response('', 200), 1.0)['mail'][0];
+
+        $this->assertSame(get_class($mailable), $message['mailable']);
+    }
+
+    /** @test */
+    public function mail_sent_without_a_mailable_carries_an_empty_class()
+    {
+        $monitor = new RequestMonitor();
+        $listeners = new RequestListeners($monitor, new Sampler());
+
+        $listeners->onMailSent($this->mailEvent($this->mailMessage('Raw', ['a@b.test'])));
+
+        $this->assertSame('', $monitor->toArray(Request::create('/x', 'GET'), new Response('', 200), 1.0)['mail'][0]['mailable']);
+    }
+
+    /** @test */
+    public function it_times_a_send_from_its_sending_event()
+    {
+        $monitor = new RequestMonitor();
+        $listeners = new RequestListeners($monitor, new Sampler());
+
+        $event = $this->mailEvent($this->mailMessage('Timed', ['a@b.test']));
+
+        $listeners->onMailSending($event);
+        usleep(2000);
+        $listeners->onMailSent($event);
+
+        $message = $monitor->toArray(Request::create('/x', 'GET'), new Response('', 200), 1.0)['mail'][0];
+
+        // Paired with its sending event, so a real duration rather than the zero
+        // a sent-only mailer leaves.
+        $this->assertGreaterThan(0, $message['duration_ms']);
+    }
+
+    /** @test */
+    public function the_mail_counter_keeps_counting_past_the_cap()
+    {
+        config(['larabug.requests.max_mail' => 2]);
+
+        $monitor = new RequestMonitor();
+
+        for ($i = 0; $i < 5; $i++) {
+            $monitor->recordMail([
+                'mailable' => '', 'subject' => "m{$i}", 'to_count' => 1, 'cc_count' => 0,
+                'bcc_count' => 0, 'recipient_domains' => 'x.test', 'queued' => 0, 'duration_ms' => 0.0,
+            ]);
+        }
+
+        $record = $monitor->toArray(Request::create('/x', 'GET'), new Response('', 200), 1.0);
+
+        // All five counted, only two kept.
+        $this->assertSame(5, $record['mail_sent']);
+        $this->assertCount(2, $record['mail']);
+    }
+
+    /** @test */
+    public function it_records_a_queued_mailable_at_dispatch_marked_queued()
+    {
+        $monitor = new RequestMonitor();
+        $listeners = new RequestListeners($monitor, new Sampler());
+
+        $mailable = new class extends \Illuminate\Mail\Mailable {};
+        $mailable->to('alice@example.com')->cc('team@other.test');
+
+        $event = new \stdClass();
+        $event->job = new \Illuminate\Mail\SendQueuedMailable($mailable);
+
+        $listeners->onJobQueued($event);
+
+        $record = $monitor->toArray(Request::create('/register', 'POST'), new Response('', 200), 1.0);
+
+        // The job is still a queued job, and now also a message.
+        $this->assertSame(1, $record['jobs_queued']);
+        $this->assertSame(1, $record['mail_sent']);
+        $this->assertCount(1, $record['mail']);
+
+        $message = $record['mail'][0];
+        $this->assertSame(get_class($mailable), $message['mailable']);
+        $this->assertSame(1, $message['to_count']);
+        $this->assertSame(1, $message['cc_count']);
+        $this->assertSame('example.com,other.test', $message['recipient_domains']);
+        $this->assertSame(1, $message['queued']);
+    }
+
+    /** @test */
+    public function a_queued_job_that_is_not_a_mailable_records_no_mail()
+    {
+        $monitor = new RequestMonitor();
+        $listeners = new RequestListeners($monitor, new Sampler());
+
+        $event = new \stdClass();
+        $event->job = new \stdClass();
+
+        $listeners->onJobQueued($event);
+
+        $record = $monitor->toArray(Request::create('/x', 'GET'), new Response('', 200), 1.0);
+
+        $this->assertSame(1, $record['jobs_queued']);
+        $this->assertSame([], $record['mail']);
+    }
+
+    /**
+     * A stand-in for a mail message. Symfony's Email and the older Swift message
+     * share these getter names; this returns Address-shaped objects the way
+     * Symfony does, which is what current Laravel hands the event.
+     *
+     * @param  array<int, string>  $to
+     * @param  array<int, string>  $cc
+     * @param  array<int, string>  $bcc
+     */
+    private function mailMessage(string $subject, array $to, array $cc = [], array $bcc = []): object
+    {
+        $address = fn (string $email): object => new class($email) {
+            /** @var string */
+            private $email;
+
+            public function __construct(string $email)
+            {
+                $this->email = $email;
+            }
+
+            public function getAddress(): string
+            {
+                return $this->email;
+            }
+        };
+
+        return new class($subject, array_map($address, $to), array_map($address, $cc), array_map($address, $bcc)) {
+            /** @var string */
+            public $subject;
+
+            /** @var array<int, object> */
+            public $to;
+
+            /** @var array<int, object> */
+            public $cc;
+
+            /** @var array<int, object> */
+            public $bcc;
+
+            public function __construct(string $subject, array $to, array $cc, array $bcc)
+            {
+                $this->subject = $subject;
+                $this->to = $to;
+                $this->cc = $cc;
+                $this->bcc = $bcc;
+            }
+
+            public function getSubject(): string
+            {
+                return $this->subject;
+            }
+
+            /** @return array<int, object> */
+            public function getTo(): array
+            {
+                return $this->to;
+            }
+
+            /** @return array<int, object> */
+            public function getCc(): array
+            {
+                return $this->cc;
+            }
+
+            /** @return array<int, object> */
+            public function getBcc(): array
+            {
+                return $this->bcc;
+            }
+        };
+    }
+
+    private function mailEvent(object $message): object
+    {
+        $event = new \stdClass();
+        $event->message = $message;
+
+        return $event;
+    }
+
     /**
      * A stand-in for an Http client event: the handler reads only ->request and
      * ->response, so a plain object with those is enough and sidesteps the
