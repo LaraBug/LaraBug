@@ -361,6 +361,66 @@ return [
         ],
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Command Monitoring
+    |--------------------------------------------------------------------------
+    |
+    | Records the artisan commands this application runs: how long each took, the
+    | code it exited with, and the arguments it was given. A separate execution
+    | context from a request, so it has its own switch.
+    |
+    | Off by default, and kept whole rather than sampled: commands run at nothing
+    | like request volume, and the one that failed at 3am is the one worth having.
+    |
+    */
+    'commands' => [
+        /*
+        | Enable or disable command monitoring
+        | Set to true via LB_TRACK_COMMANDS=true to start recording
+        | Default: false (opt-in)
+        */
+        'track_commands' => env('LB_TRACK_COMMANDS', false),
+
+        /*
+        | Commands never recorded, matched with fnmatch against the command name
+        | The workers and schedulers that run forever or every minute would drown
+        | the real commands, and this package's own commands would report on
+        | themselves
+        */
+        'ignore' => [
+            'schedule:run',
+            'schedule:finish',
+            'schedule:work',
+            'queue:work',
+            'queue:listen',
+            'horizon',
+            'horizon:*',
+            'larabug:*',
+            'list',
+            'tinker',
+        ],
+
+        /*
+        | Arguments and options replaced with a marker before sending, matched
+        | against the name at any depth, case-insensitively, as a substring
+        */
+        'redact' => [
+            'password',
+            'secret',
+            'token',
+            'key',
+        ],
+
+        /*
+        | How many records are held before they are sent, and the retries on a
+        | 5xx. A console process runs one command and exits, so the shutdown flush
+        | usually sends a batch of one
+        */
+        'batch_size' => env('LB_COMMAND_BATCH_SIZE', 20),
+        'max_retries' => env('LB_COMMAND_MAX_RETRIES', 2),
+    ],
+
     'heartbeat' => [
         /*
         | Enable or disable the heartbeat
