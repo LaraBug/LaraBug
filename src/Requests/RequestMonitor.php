@@ -49,6 +49,9 @@ class RequestMonitor
     /** @var array<int, array<string, mixed>> */
     protected $notifications = [];
 
+    /** @var array<int, array<string, mixed>> */
+    protected $cache = [];
+
     /** @var array<string, mixed>|null */
     protected $route = null;
 
@@ -70,12 +73,16 @@ class RequestMonitor
     /** @var int */
     protected $maxNotifications;
 
+    /** @var int */
+    protected $maxCacheEvents;
+
     public function __construct()
     {
         $this->maxQueries = (int) config('larabug.requests.max_queries', 100);
         $this->maxOutgoing = (int) config('larabug.requests.max_outgoing', 50);
         $this->maxMail = (int) config('larabug.requests.max_mail', 50);
         $this->maxNotifications = (int) config('larabug.requests.max_notifications', 50);
+        $this->maxCacheEvents = (int) config('larabug.requests.max_cache_events', 100);
 
         // LARAVEL_START is set in public/index.php before the framework boots,
         // so it is the only honest answer to "when did this request begin".
@@ -231,6 +238,27 @@ class RequestMonitor
     }
 
     /**
+     * Record one cache operation.
+     *
+     * The hit and miss counters are kept by their own listeners, so this only
+     * buffers the detail and is capped on its own: a request that reads the cache
+     * a thousand times is common, and the first hundred operations are enough to
+     * see its shape. The key arrives already narrowed to a prefix unless the
+     * application opted the full keys in, the same stance the query bindings take:
+     * a cache key routinely carries an id, which is customer data.
+     *
+     * @param  array<string, mixed>  $event
+     */
+    public function recordCacheEvent(array $event): void
+    {
+        if (count($this->cache) >= $this->maxCacheEvents) {
+            return;
+        }
+
+        $this->cache[] = $event;
+    }
+
+    /**
      * The finished record.
      *
      * @return array<string, mixed>
@@ -295,6 +323,7 @@ class RequestMonitor
             'outgoing' => $this->outgoing,
             'mail' => $this->mail,
             'notifications' => $this->notifications,
+            'cache' => $this->cache,
         ], $stages, $this->counters);
     }
 
