@@ -2,16 +2,16 @@
 
 namespace LaraBug\Tests;
 
-use Illuminate\Support\Facades\Log;
+use RuntimeException;
 use LaraBug\Http\Client;
 use LaraBug\Logger\LogBuffer;
+use Illuminate\Support\Facades\Log;
 use LaraBug\Tests\Mocks\LaraBugClient;
-use RuntimeException;
+use PHPUnit\Framework\Attributes\Test;
 
 class LogShippingTest extends TestCase
 {
-    /** @var LaraBugClient */
-    protected $client;
+    protected LaraBugClient $client;
 
     public function setUp(): void
     {
@@ -22,13 +22,11 @@ class LogShippingTest extends TestCase
 
         $this->app['config']['larabug.project_key'] = 'project';
 
-        // Deliberately no logging.channels.larabug-logs here: the package
-        // defines the channel, and naming it is all an application should have
-        // to do.
+        // Deliberately no logging.channels.larabug-logs config: the package defines the channel, naming it must be enough.
         $this->app['config']['logging.default'] = 'larabug-logs';
     }
 
-    /** @test */
+    #[Test]
     public function it_defines_the_channel_without_any_logging_config()
     {
         $this->assertSame(
@@ -43,7 +41,7 @@ class LogShippingTest extends TestCase
         $this->client->assertRequestsSent(1);
     }
 
-    /** @test */
+    #[Test]
     public function an_application_defined_channel_wins()
     {
         $this->app['config']['logging.channels.larabug-logs'] = [
@@ -62,7 +60,7 @@ class LogShippingTest extends TestCase
         $this->assertSame('At the threshold', $logs[0]['message']);
     }
 
-    /** @test */
+    #[Test]
     public function it_ships_log_lines_as_a_batch()
     {
         Log::info('First line');
@@ -84,7 +82,7 @@ class LogShippingTest extends TestCase
         $this->assertSame('error', $payload['logs'][1]['level']);
     }
 
-    /** @test */
+    #[Test]
     public function it_sends_automatically_once_the_batch_is_full()
     {
         $this->app['config']['larabug.logs.batch_size'] = 2;
@@ -95,11 +93,10 @@ class LogShippingTest extends TestCase
         $this->client->assertRequestsSent(1);
     }
 
-    /** @test */
+    #[Test]
     public function it_strips_the_exception_from_the_context()
     {
-        // The Throwable is what LaraBugHandler reports separately, and left in
-        // place it would be the largest thing in the payload.
+        // The Throwable is reported separately by LaraBugHandler and would be the largest thing in the payload.
         Log::error('Something broke', ['exception' => new RuntimeException('boom'), 'order' => 7]);
 
         $this->buffer()->flush();
@@ -110,7 +107,7 @@ class LogShippingTest extends TestCase
         $this->assertSame(7, $context['order']);
     }
 
-    /** @test */
+    #[Test]
     public function it_carries_correlation_ids_from_the_context()
     {
         Log::info('Correlated', ['trace_id' => 'trace-1', 'user_identifier' => 'user-2']);
@@ -123,7 +120,7 @@ class LogShippingTest extends TestCase
         $this->assertSame('user-2', $log['user_identifier']);
     }
 
-    /** @test */
+    #[Test]
     public function it_bounds_what_a_single_context_may_carry()
     {
         $this->app['config']['larabug.logs.max_context_keys'] = 2;
@@ -139,7 +136,7 @@ class LogShippingTest extends TestCase
         $this->assertTrue($context['_truncated']);
     }
 
-    /** @test */
+    #[Test]
     public function it_sends_nothing_once_the_server_refuses_the_batch()
     {
         $this->app['config']['larabug.logs.enabled'] = false;
@@ -151,10 +148,7 @@ class LogShippingTest extends TestCase
         $this->client->assertRequestsSent(0);
     }
 
-    /**
-     * @return LogBuffer
-     */
-    protected function buffer()
+    protected function buffer(): LogBuffer
     {
         return $this->app[LogBuffer::class];
     }

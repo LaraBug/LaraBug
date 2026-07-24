@@ -2,15 +2,15 @@
 
 namespace LaraBug\Tests;
 
-use LaraBug\Cve\RequestTrigger;
-use LaraBug\Scanners\ComposerLockScanner;
-use LaraBug\Tests\Mocks\CveClient;
 use ReflectionClass;
+use LaraBug\Cve\RequestTrigger;
+use LaraBug\Tests\Mocks\CveClient;
+use PHPUnit\Framework\Attributes\Test;
+use LaraBug\Scanners\ComposerLockScanner;
 
 class CveRequestTriggerTest extends TestCase
 {
-    /** @var string */
-    protected $lockPath;
+    protected string $lockPath;
 
     public function setUp(): void
     {
@@ -24,8 +24,7 @@ class CveRequestTriggerTest extends TestCase
         $this->app['config']['larabug.cve.lock_path'] = $this->lockPath;
         $this->app['config']['larabug.cve.request_throttle_hours'] = 24;
 
-        // The trigger memoises per process; without this each test would inherit
-        // the previous one's "already fired" and cached payload.
+        // The trigger memoises per process; without a reset each test would inherit the previous one's state.
         $this->resetStaticState();
     }
 
@@ -45,9 +44,7 @@ class CveRequestTriggerTest extends TestCase
         $reflection = new ReflectionClass(RequestTrigger::class);
 
         foreach (['cachedPayload' => null, 'alreadyFired' => false] as $name => $value) {
-            $property = $reflection->getProperty($name);
-            $property->setAccessible(true);
-            $property->setValue(null, $value);
+            $reflection->getProperty($name)->setValue(null, $value);
         }
     }
 
@@ -63,7 +60,7 @@ class CveRequestTriggerTest extends TestCase
         return new RequestTrigger($this->app['cache']->store('array'), new ComposerLockScanner(), $client);
     }
 
-    /** @test */
+    #[Test]
     public function it_does_nothing_when_the_feature_is_disabled()
     {
         $this->app['config']['larabug.cve.enabled'] = false;
@@ -74,7 +71,7 @@ class CveRequestTriggerTest extends TestCase
         $client->assertRequestsSent(0);
     }
 
-    /** @test */
+    #[Test]
     public function it_does_nothing_when_the_trigger_is_scheduled_only()
     {
         $this->app['config']['larabug.cve.trigger'] = 'schedule';
@@ -85,7 +82,7 @@ class CveRequestTriggerTest extends TestCase
         $client->assertRequestsSent(0);
     }
 
-    /** @test */
+    #[Test]
     public function it_sends_the_lockfile_payload_tagged_as_a_cve_scan()
     {
         $client = new CveClient();
@@ -100,7 +97,7 @@ class CveRequestTriggerTest extends TestCase
         $this->assertSame(64, strlen($sent['composer_lock']['content_hash']));
     }
 
-    /** @test */
+    #[Test]
     public function it_only_fires_once_per_process()
     {
         $client = new CveClient();
@@ -113,7 +110,7 @@ class CveRequestTriggerTest extends TestCase
         $client->assertRequestsSent(1);
     }
 
-    /** @test */
+    #[Test]
     public function it_stays_quiet_while_the_lockfile_is_unchanged_and_the_throttle_holds()
     {
         $first = new CveClient();
@@ -129,7 +126,7 @@ class CveRequestTriggerTest extends TestCase
         $second->assertRequestsSent(0);
     }
 
-    /** @test */
+    #[Test]
     public function it_fires_again_as_soon_as_the_lockfile_changes()
     {
         $first = new CveClient();
@@ -145,7 +142,7 @@ class CveRequestTriggerTest extends TestCase
         $second->assertRequestsSent(1);
     }
 
-    /** @test */
+    #[Test]
     public function it_fires_again_once_the_throttle_has_expired()
     {
         $first = new CveClient();
@@ -167,7 +164,7 @@ class CveRequestTriggerTest extends TestCase
         $second->assertRequestsSent(1);
     }
 
-    /** @test */
+    #[Test]
     public function it_remembers_a_scan_the_server_says_it_already_has()
     {
         $client = new CveClient(200, '{"skipped":"unchanged","snapshot_id":"snap-1"}');
@@ -176,11 +173,10 @@ class CveRequestTriggerTest extends TestCase
         $this->assertSame(64, strlen($this->app['cache']->store('array')->get('larabug.cve.last_sent_hash')));
     }
 
-    /** @test */
+    #[Test]
     public function it_does_not_remember_a_rejected_scan_as_a_success()
     {
-        // A 403 must not look like a delivered scan: the lockfile it describes
-        // has not been recorded, so nothing should claim it has.
+        // A 403 must not look like a delivered scan; nothing may claim its lockfile was recorded.
         $client = new CveClient(403, '{"error":"feature_disabled","feature":"cve"}');
         $this->trigger($client)->maybeTrigger();
 
@@ -188,11 +184,10 @@ class CveRequestTriggerTest extends TestCase
         $this->assertNull($this->app['cache']->store('array')->get('larabug.cve.last_sent_hash'));
     }
 
-    /** @test */
+    #[Test]
     public function it_is_on_for_a_config_that_predates_the_feature()
     {
-        // A config file published before CVE scanning existed has no cve.enabled
-        // key at all. Scanning is opt-out, so an absent key still scans.
+        // A config published before the feature has no cve.enabled key; scanning is opt-out, so an absent key still scans.
         $cve = $this->app['config']['larabug.cve'];
         unset($cve['enabled']);
         $this->app['config']['larabug.cve'] = $cve;
@@ -205,12 +200,10 @@ class CveRequestTriggerTest extends TestCase
         $client->assertRequestsSent(1);
     }
 
-    /** @test */
+    #[Test]
     public function it_backs_off_after_a_403_instead_of_asking_on_every_request()
     {
-        // Being on by default means most apps meet a project that has not
-        // enabled scanning. Without a backoff every request would post the
-        // lockfile again to collect the same 403.
+        // Without a backoff, every request would post the lockfile again to collect the same 403.
         $rejected = new CveClient(403, '{"error":"feature_disabled","feature":"cve"}');
         $this->trigger($rejected)->maybeTrigger();
         $rejected->assertRequestsSent(1);
@@ -224,7 +217,7 @@ class CveRequestTriggerTest extends TestCase
         }
     }
 
-    /** @test */
+    #[Test]
     public function it_tries_again_once_the_backoff_has_lapsed()
     {
         $rejected = new CveClient(403, '{"error":"feature_disabled","feature":"cve"}');
@@ -239,7 +232,7 @@ class CveRequestTriggerTest extends TestCase
         $retry->assertRequestsSent(1);
     }
 
-    /** @test */
+    #[Test]
     public function it_keeps_retrying_after_a_server_error_rather_than_backing_off()
     {
         // A 5xx is a blip, not an answer, so it must not trip the backoff.
@@ -255,7 +248,7 @@ class CveRequestTriggerTest extends TestCase
         $retry->assertRequestsSent(1);
     }
 
-    /** @test */
+    #[Test]
     public function it_does_nothing_when_there_is_no_lockfile_to_read()
     {
         $this->app['config']['larabug.cve.lock_path'] = '/tmp/larabug-no-such-file.lock';

@@ -11,14 +11,11 @@ use PHPUnit\Framework\Assert;
  */
 class CveClient extends \LaraBug\Http\Client
 {
-    /** @var array */
-    public $requests = [];
+    public array $requests = [];
 
-    /** @var int */
-    protected $status;
+    protected int $status;
 
-    /** @var string */
-    protected $body;
+    protected string $body;
 
     public function __construct(int $status = 202, string $body = '{"queued":true,"snapshot_id":"snap-1"}')
     {
@@ -28,20 +25,19 @@ class CveClient extends \LaraBug\Http\Client
         $this->body = $body;
     }
 
-    public function report($exception)
+    public function report($exception): Response
     {
         $this->requests[] = $exception;
 
         return new Response($this->status, [], $this->body);
     }
 
-    public function assertRequestsSent(int $expectedCount)
+    public function assertRequestsSent(int $expectedCount): void
     {
         Assert::assertCount($expectedCount, $this->requests);
     }
 
-    /** @return array|null */
-    public function lastRequest()
+    public function lastRequest(): ?array
     {
         return $this->requests ? end($this->requests) : null;
     }

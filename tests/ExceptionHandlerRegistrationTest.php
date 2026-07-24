@@ -3,8 +3,9 @@
 namespace LaraBug\Tests;
 
 use Exception;
-use Illuminate\Contracts\Debug\ExceptionHandler;
 use Throwable;
+use PHPUnit\Framework\Attributes\Test;
+use Illuminate\Contracts\Debug\ExceptionHandler;
 
 class ExceptionHandlerRegistrationTest extends TestCase
 {
@@ -12,15 +13,13 @@ class ExceptionHandlerRegistrationTest extends TestCase
     {
         parent::setUp();
 
-        // Laravel only started accepting reportable callbacks in 8.x. Below
-        // that the provider leaves the handler alone and an application keeps
-        // calling handle() itself.
+        // Below Laravel 8 the provider leaves the handler alone and an application calls handle() itself.
         if (! method_exists($this->app[ExceptionHandler::class], 'reportable')) {
             $this->markTestSkipped('The exception handler accepts reportable callbacks from Laravel 8 onwards.');
         }
     }
 
-    /** @test */
+    #[Test]
     public function it_reports_exceptions_through_the_applications_exception_handler()
     {
         $recorder = $this->swapLaraBugForRecorder();
@@ -31,15 +30,14 @@ class ExceptionHandlerRegistrationTest extends TestCase
         $this->assertSame('reported through the handler', $recorder->handled[0]->getMessage());
     }
 
-    /** @test */
+    #[Test]
     public function it_does_not_report_twice_when_the_same_handler_is_resolved_again()
     {
         $recorder = $this->swapLaraBugForRecorder();
 
         $handler = $this->app[ExceptionHandler::class];
 
-        // A wrapping handler, Collision's for one, causes the container to
-        // resolve the same handler a second time.
+        // A wrapping handler, Collision's for one, makes the container resolve the same handler twice.
         $this->app->forgetInstance(ExceptionHandler::class);
         $this->app->bind(ExceptionHandler::class, function () use ($handler) {
             return $handler;
@@ -53,16 +51,14 @@ class ExceptionHandlerRegistrationTest extends TestCase
 
     /**
      * Swap the container binding so reporting records instead of sending.
-     *
-     * @return object
      */
-    protected function swapLaraBugForRecorder()
+    protected function swapLaraBugForRecorder(): object
     {
-        $recorder = new class {
+        $recorder = new class () {
             /** @var array<int, Throwable> */
-            public $handled = [];
+            public array $handled = [];
 
-            public function handle(Throwable $exception, $fileType = 'php', array $customData = [])
+            public function handle(Throwable $exception, $fileType = 'php', array $customData = []): bool
             {
                 $this->handled[] = $exception;
 

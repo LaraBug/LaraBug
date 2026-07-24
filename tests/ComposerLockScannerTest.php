@@ -2,12 +2,12 @@
 
 namespace LaraBug\Tests;
 
+use PHPUnit\Framework\Attributes\Test;
 use LaraBug\Scanners\ComposerLockScanner;
 
 class ComposerLockScannerTest extends TestCase
 {
-    /** @var string */
-    protected $lockPath;
+    protected string $lockPath;
 
     public function setUp(): void
     {
@@ -26,14 +26,14 @@ class ComposerLockScannerTest extends TestCase
     }
 
     /** @return array<string, mixed>|null */
-    protected function scan(array $lock, bool $includeDev = false, ?string $environment = null)
+    protected function scan(array $lock, bool $includeDev = false, ?string $environment = null): ?array
     {
         file_put_contents($this->lockPath, json_encode($lock));
 
         return (new ComposerLockScanner())->scan($this->lockPath, $includeDev, $environment);
     }
 
-    /** @test */
+    #[Test]
     public function it_returns_null_when_the_lockfile_does_not_exist()
     {
         $scanner = new ComposerLockScanner();
@@ -41,7 +41,7 @@ class ComposerLockScannerTest extends TestCase
         $this->assertNull($scanner->scan('/tmp/a-lockfile-that-is-not-there.lock'));
     }
 
-    /** @test */
+    #[Test]
     public function it_returns_null_when_the_lockfile_is_not_json()
     {
         file_put_contents($this->lockPath, 'this is not json');
@@ -49,13 +49,13 @@ class ComposerLockScannerTest extends TestCase
         $this->assertNull((new ComposerLockScanner())->scan($this->lockPath));
     }
 
-    /** @test */
+    #[Test]
     public function it_returns_null_when_there_are_no_packages()
     {
         $this->assertNull($this->scan(['packages' => []]));
     }
 
-    /** @test */
+    #[Test]
     public function it_extracts_package_names_and_versions()
     {
         $result = $this->scan([
@@ -71,7 +71,7 @@ class ComposerLockScannerTest extends TestCase
         ], $result['packages']);
     }
 
-    /** @test */
+    #[Test]
     public function it_skips_packages_missing_a_name_or_version()
     {
         $result = $this->scan([
@@ -85,7 +85,7 @@ class ComposerLockScannerTest extends TestCase
         $this->assertSame(['laravel/framework' => 'v12.0.1'], $result['packages']);
     }
 
-    /** @test */
+    #[Test]
     public function it_ignores_dev_packages_unless_asked_for_them()
     {
         $lock = [
@@ -97,7 +97,7 @@ class ComposerLockScannerTest extends TestCase
         $this->assertArrayHasKey('phpunit/phpunit', $this->scan($lock, true)['packages']);
     }
 
-    /** @test */
+    #[Test]
     public function it_hashes_the_raw_lockfile_so_an_unchanged_lockfile_is_recognisable()
     {
         $lock = ['packages' => [['name' => 'laravel/framework', 'version' => 'v12.0.1']]];
@@ -111,7 +111,7 @@ class ComposerLockScannerTest extends TestCase
         $this->assertSame(64, strlen($first['content_hash']));
     }
 
-    /** @test */
+    #[Test]
     public function it_detects_the_framework_and_its_version()
     {
         $laravel = $this->scan(['packages' => [['name' => 'laravel/framework', 'version' => 'v12.0.1']]]);
@@ -129,7 +129,7 @@ class ComposerLockScannerTest extends TestCase
         $this->assertNull($neither['framework']);
     }
 
-    /** @test */
+    #[Test]
     public function it_prefers_the_php_version_the_lockfile_pins()
     {
         $pinned = $this->scan([
@@ -144,7 +144,7 @@ class ComposerLockScannerTest extends TestCase
         $this->assertSame(PHP_VERSION, $unpinned['php_version']);
     }
 
-    /** @test */
+    #[Test]
     public function it_takes_the_environment_it_is_given_over_the_configured_one()
     {
         $this->app['config']['app.env'] = 'local';
@@ -155,7 +155,7 @@ class ComposerLockScannerTest extends TestCase
         $this->assertSame('production', $this->scan($lock, false, 'production')['environment']);
     }
 
-    /** @test */
+    #[Test]
     public function it_never_sends_anything_beyond_names_versions_and_a_hash()
     {
         $result = $this->scan([
