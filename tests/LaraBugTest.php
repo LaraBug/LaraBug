@@ -149,7 +149,49 @@ class LaraBugTest extends TestCase
         $this->assertArrayHasKey('trace_id', $data);
         $this->assertNotSame('', $data['trace_id']);
 
-        $this->assertCount(14, $data);
+        $this->assertCount(15, $data);
+    }
+
+    /** @test */
+    public function it_collects_a_window_of_source_for_each_frame()
+    {
+        $data = $this->laraBug->getExceptionData(new Exception(
+            'it_collects_a_window_of_source_for_each_frame'
+        ));
+
+        $this->assertIsArray($data['frames']);
+        $this->assertNotEmpty($data['frames']);
+
+        // The throw site leads the trace and points at this file.
+        $this->assertSame(__FILE__, $data['frames'][0]['file']);
+        $this->assertNotEmpty($data['frames'][0]['code']);
+
+        // A code row is the shape executor already uses, and it is a list
+        // rather than a keyed object once encoded.
+        $row = $data['frames'][0]['code'][0];
+        $this->assertArrayHasKey('line_number', $row);
+        $this->assertArrayHasKey('line', $row);
+        $this->assertSame(array_values($data['frames'][0]['code']), $data['frames'][0]['code']);
+    }
+
+    /** @test */
+    public function it_caps_how_many_frames_carry_source()
+    {
+        $this->app['config']['larabug.max_code_frames'] = 1;
+
+        $data = $this->laraBug->getExceptionData(new Exception(
+            'it_caps_how_many_frames_carry_source'
+        ));
+
+        $framesWithCode = count(array_filter($data['frames'], function ($frame) {
+            return ! empty($frame['code']);
+        }));
+
+        $this->assertSame(1, $framesWithCode);
+
+        // The deeper frames still name where they were, only the source stops.
+        $this->assertGreaterThan(1, count($data['frames']));
+        $this->assertNotEmpty($data['frames'][1]['file']);
     }
 
     /** @test */

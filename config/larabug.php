@@ -86,6 +86,31 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Lines near each stack frame
+    |--------------------------------------------------------------------------
+    |
+    | How many lines of source to send around each frame of the stack trace,
+    | on both sides of the frame's own line. Smaller than lines_count on
+    | purpose, since this window is repeated per frame. Values above 25 fall
+    | back to 5.
+    |
+    */
+    'frame_lines_count' => 5,
+
+    /*
+    |--------------------------------------------------------------------------
+    | Frames carrying code
+    |--------------------------------------------------------------------------
+    |
+    | How many frames of the stack trace carry a window of source. Frames
+    | beyond this keep their file, line and function; only the source stops.
+    | Keeps the payload bounded on deep traces.
+    |
+    */
+    'max_code_frames' => 20,
+
+    /*
+    |--------------------------------------------------------------------------
     | Prevent duplicates
     |--------------------------------------------------------------------------
     |

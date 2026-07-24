@@ -136,6 +136,10 @@ class LaraBug
                 }
 
                 $data['executor'] = array_filter($data['executor']);
+
+                // The frames collected above walked the PHP wrapper's trace,
+                // which says nothing about where the JavaScript error was.
+                $data['frames'] = [];
             }
 
             $rawResponse = $this->logError($data);
@@ -285,6 +289,8 @@ class LaraBug
             $data['executor'] = array_filter($data['executor']);
         }
 
+        $data['frames'] = $this->getExceptionFrames($exception);
+
         // Get project version
         $data['project_version'] = config('larabug.project_version', null);
 
@@ -340,6 +346,93 @@ class LaraBug
     public function filterVariables($variables)
     {
         return $this->dataFilter->filterVariables($variables);
+    }
+
+    /**
+     * The stack as structured frames, each with a window of source around its
+     * line, the way Sentry and Flare capture one. The throw site leads, since
+     * getTrace() does not include it, followed by the trace's own frames.
+     *
+     * Bounded twice: frame_lines_count lines of source either side of a
+     * frame's line, and source for at most max_code_frames frames. Deeper
+     * frames keep their file, line and function so the trace stays whole;
+     * only the source windows stop. `error` and `executor` are untouched, so
+     * a server that does not know this field loses nothing.
+     *
+     * @param Throwable $exception
+     * @return array
+     */
+    private function getExceptionFrames(Throwable $exception)
+    {
+        $lineCount = (int) config('larabug.frame_lines_count', 5);
+
+        if ($lineCount > 25) {
+            $lineCount = 5;
+        }
+
+        $maxCodeFrames = (int) config('larabug.max_code_frames', 20);
+
+        $frames = [[
+            'file' => $exception->getFile(),
+            'line' => $exception->getLine(),
+            'function' => null,
+            'class' => null,
+            'type' => null,
+        ]];
+
+        foreach ($exception->getTrace() as $trace) {
+            $frames[] = [
+                'file' => $trace['file'] ?? null,
+                'line' => $trace['line'] ?? null,
+                'function' => $trace['function'] ?? null,
+                'class' => $trace['class'] ?? null,
+                'type' => $trace['type'] ?? null,
+            ];
+
+            // A runaway recursion dies hundreds of frames deep; past this
+            // point the frames say nothing the first two hundred did not.
+            if (count($frames) >= 200) {
+                break;
+            }
+        }
+
+        // Files repeat across frames constantly, so each is read once.
+        $fileCache = [];
+        $framesWithCode = 0;
+
+        foreach ($frames as $index => $frame) {
+            $frames[$index]['code'] = [];
+
+            if ($framesWithCode >= $maxCodeFrames || ! $frame['file'] || ! $frame['line']) {
+                continue;
+            }
+
+            if (! array_key_exists($frame['file'], $fileCache)) {
+                $fileCache[$frame['file']] = @file($frame['file']);
+            }
+
+            $lines = $fileCache[$frame['file']];
+
+            if ($lines === false) {
+                continue;
+            }
+
+            $code = [];
+
+            for ($i = -1 * abs($lineCount); $i <= abs($lineCount); $i++) {
+                $code[] = $this->getLineInfo($lines, $frame['line'], $i);
+            }
+
+            // Reindexed, or the filtered gaps make json_encode emit an
+            // object where the server expects a list.
+            $frames[$index]['code'] = array_values(array_filter($code));
+
+            if (count($frames[$index]['code'])) {
+                $framesWithCode++;
+            }
+        }
+
+        return $frames;
     }
 
     /**
