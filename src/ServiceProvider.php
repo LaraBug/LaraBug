@@ -2,52 +2,69 @@
 
 namespace LaraBug;
 
-use LaraBug\Queue\DispatchMacros;
+use Throwable;
 use Monolog\Logger;
-use LaraBug\Commands\HeartbeatCommand;
+use SplObjectStorage;
+use LaraBug\Http\Client;
+use LaraBug\Support\Dsn;
+use InvalidArgumentException;
+use LaraBug\Logger\LogBuffer;
+use LaraBug\Queue\JobMonitor;
+use LaraBug\Requests\Sampler;
+use Illuminate\Log\LogManager;
+use LaraBug\Cve\RequestTrigger;
 use LaraBug\Commands\ScanCommand;
 use LaraBug\Commands\TestCommand;
-use Illuminate\Console\Scheduling\Schedule;
-use Illuminate\Contracts\Debug\ExceptionHandler;
+use LaraBug\Queue\DispatchMacros;
+use LaraBug\Console\CommandBuffer;
+use LaraBug\Logger\LaraBugHandler;
+use LaraBug\Requests\RequestBuffer;
+use LaraBug\Requests\RequestMonitor;
+use Illuminate\Contracts\Http\Kernel;
 use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\Facades\Route;
+use LaraBug\Console\CommandListeners;
+use LaraBug\Logger\LaraBugLogHandler;
+use LaraBug\Queue\JobEventSubscriber;
+use Illuminate\Foundation\AliasLoader;
+use LaraBug\Commands\HeartbeatCommand;
+use LaraBug\Requests\RequestListeners;
+use Illuminate\Console\Scheduling\Event;
+use LaraBug\Console\ScheduledTaskBuffer;
+use Illuminate\Console\Scheduling\Schedule;
+use LaraBug\Console\ScheduledTaskListeners;
+use LaraBug\Http\Middleware\CaptureRequest;
+use Illuminate\Foundation\Bus\PendingDispatch;
+use Illuminate\Contracts\Debug\ExceptionHandler;
 use Illuminate\Support\ServiceProvider as BaseServiceProvider;
-use Throwable;
 
 class ServiceProvider extends BaseServiceProvider
 {
-    /**
-     * Bootstrap the application events.
-     */
-    public function boot()
+    /** Handlers that already carry our reportable callback. */
+    protected SplObjectStorage $handlersRegistered;
+
+    public function boot(): void
     {
-        // Publish configuration file
         if (function_exists('config_path')) {
             $this->publishes([
                 __DIR__ . '/../config/larabug.php' => config_path('larabug.php'),
             ]);
         }
 
-        // Register views
         $this->app['view']->addNamespace('larabug', __DIR__ . '/../resources/views');
 
-        // Register facade
-        if (class_exists(\Illuminate\Foundation\AliasLoader::class)) {
-            $loader = \Illuminate\Foundation\AliasLoader::getInstance();
-            $loader->alias('LaraBug', 'LaraBug\Facade');
+        if (class_exists(AliasLoader::class)) {
+            AliasLoader::getInstance()->alias('LaraBug', Facade::class);
         }
 
-        // Register commands
         $this->commands([
             TestCommand::class,
             ScanCommand::class,
             HeartbeatCommand::class,
         ]);
 
-        // Map any routes
         $this->mapLaraBugApiRoutes();
 
-        // Create an alias to the larabug-js-client.blade.php include
         Blade::include('larabug::larabug-js-client', 'larabugJavaScriptClient');
 
         // Report exceptions without every application having to wire LaraBug
@@ -73,8 +90,8 @@ class ServiceProvider extends BaseServiceProvider
         // this a request that logs less than one batch ships nothing, which is
         // most requests. Monolog's own close() covers the CLI case.
         $this->app->terminating(function () {
-            if ($this->app->resolved(\LaraBug\Logger\LogBuffer::class)) {
-                $this->app[\LaraBug\Logger\LogBuffer::class]->flush();
+            if ($this->app->resolved(LogBuffer::class)) {
+                $this->app[LogBuffer::class]->flush();
             }
         });
 
@@ -83,30 +100,28 @@ class ServiceProvider extends BaseServiceProvider
         // and running first would fold every other middleware into the action.
         if (config('larabug.requests.track_requests', false) && ! $this->app->runningInConsole()) {
             try {
-                $this->app->make(\Illuminate\Contracts\Http\Kernel::class)
-                    ->pushMiddleware(\LaraBug\Http\Middleware\CaptureRequest::class);
+                $this->app->make(Kernel::class)->pushMiddleware(CaptureRequest::class);
 
-                $this->app['events']->subscribe(\LaraBug\Requests\RequestListeners::class);
-            } catch (\Throwable $e) {
+                $this->app['events']->subscribe(RequestListeners::class);
+            } catch (Throwable) {
                 // An application with no HTTP kernel, or one that resolves it
                 // differently, simply does not get request monitoring.
             }
         }
 
-        // Register queue monitoring events
         if (config('larabug.jobs.track_jobs', true)) {
-            $this->app['events']->subscribe(\LaraBug\Queue\JobEventSubscriber::class);
+            $this->app['events']->subscribe(JobEventSubscriber::class);
         }
 
         // Command monitoring. The inverse of request monitoring: a command runs
         // in the console, so this is not gated behind runningInConsole.
         if (config('larabug.commands.track_commands', false)) {
-            $this->app['events']->subscribe(\LaraBug\Console\CommandListeners::class);
+            $this->app['events']->subscribe(CommandListeners::class);
         }
 
         // Scheduled task monitoring, the same context as commands.
         if (config('larabug.schedule.track_scheduled_tasks', false)) {
-            $this->app['events']->subscribe(\LaraBug\Console\ScheduledTaskListeners::class);
+            $this->app['events']->subscribe(ScheduledTaskListeners::class);
         }
 
         // The heartbeat only has a job to do where the scheduler runs, which is
@@ -125,7 +140,6 @@ class ServiceProvider extends BaseServiceProvider
             });
         }
 
-        // CVE triggers
         if (config('larabug.cve.enabled', false)) {
             $trigger = strtolower((string) config('larabug.cve.trigger', 'both'));
 
@@ -148,8 +162,8 @@ class ServiceProvider extends BaseServiceProvider
             if (in_array($trigger, ['request', 'both'], true) && ! $this->app->runningInConsole()) {
                 $this->app->terminating(function () {
                     try {
-                        $this->app->make(\LaraBug\Cve\RequestTrigger::class)->maybeTrigger();
-                    } catch (\Throwable $e) {
+                        $this->app->make(RequestTrigger::class)->maybeTrigger();
+                    } catch (Throwable) {
                         // Never let CVE scanning break the user's app.
                     }
                 });
@@ -157,61 +171,32 @@ class ServiceProvider extends BaseServiceProvider
         }
     }
 
-    /**
-     * switch, not match, for the same reason applyCadence below uses one: this
-     * package still supports PHP 7.4, where a match expression will not parse.
-     */
-    protected function applyHeartbeatCadence($event, string $cadence): void
+    protected function applyHeartbeatCadence(Event $event, string $cadence): void
     {
-        switch (strtolower($cadence)) {
-            case 'everytwominutes':
-                $event->everyTwoMinutes();
-                break;
-            case 'everyfiveminutes':
-                $event->everyFiveMinutes();
-                break;
-            case 'everytenminutes':
-                $event->everyTenMinutes();
-                break;
-            default:
-                $event->everyMinute();
-        }
+        match (strtolower($cadence)) {
+            'everytwominutes' => $event->everyTwoMinutes(),
+            'everyfiveminutes' => $event->everyFiveMinutes(),
+            'everytenminutes' => $event->everyTenMinutes(),
+            default => $event->everyMinute(),
+        };
     }
 
-    protected function applyCadence($event, string $cadence): void
+    protected function applyCadence(Event $event, string $cadence): void
     {
-        // switch, not match: this package still supports PHP 7.4, where a match
-        // expression is a parse error. The provider loads in every test, so it
-        // would take the whole suite down rather than just this path.
-        switch (strtolower($cadence)) {
-            case 'hourly':
-                $event->hourly();
-                break;
-            case 'twice-daily':
-            case 'twicedaily':
-                $event->twiceDaily();
-                break;
-            case 'daily':
-                $event->daily();
-                break;
-            default:
-                $event->cron($cadence);
-        }
+        match (strtolower($cadence)) {
+            'hourly' => $event->hourly(),
+            'twice-daily', 'twicedaily' => $event->twiceDaily(),
+            'daily' => $event->daily(),
+            default => $event->cron($cadence),
+        };
     }
-
-    /**
-     * Handlers that already carry our reportable callback.
-     *
-     * @var \SplObjectStorage
-     */
-    protected $handlersRegistered;
 
     /**
      * Report every reported exception to LaraBug.
      */
     protected function registerExceptionHandler(): void
     {
-        $this->handlersRegistered = new \SplObjectStorage();
+        $this->handlersRegistered = new SplObjectStorage();
 
         $this->callAfterResolving(ExceptionHandler::class, function ($handler) {
             // A handler that does not extend Laravel's own has no reportable(),
@@ -239,83 +224,64 @@ class ServiceProvider extends BaseServiceProvider
         });
     }
 
-    /**
-     * Register the service provider.
-     */
-    public function register()
+    public function register(): void
     {
         $this->mergeConfigFrom(__DIR__ . '/../config/larabug.php', 'larabug');
 
-        // Register the HTTP Client as a singleton
-        $this->app->singleton(\LaraBug\Http\Client::class, function ($app) {
-            // Check if DSN is configured and valid
+        $this->app->singleton(Client::class, function () {
             $dsn = config('larabug.dsn');
-            
-            if ($dsn && is_string($dsn) && trim($dsn) !== '' && \LaraBug\Support\Dsn::isValid($dsn)) {
-                try {
-                    $parsed = \LaraBug\Support\Dsn::make($dsn);
 
-                    // Override config values with DSN values
+            if ($dsn && is_string($dsn) && trim($dsn) !== '' && Dsn::isValid($dsn)) {
+                try {
+                    $parsed = Dsn::make($dsn);
+
+                    // The DSN wins over the individual config keys.
                     config(['larabug.login_key' => $parsed->getLoginKey()]);
                     config(['larabug.project_key' => $parsed->getProjectKey()]);
                     config(['larabug.server' => $parsed->getServer()]);
 
-                    return new \LaraBug\Http\Client(
+                    return new Client(
                         $parsed->getLoginKey(),
                         $parsed->getProjectKey()
                     );
-                } catch (\InvalidArgumentException $e) {
-                    // DSN parsing failed, fall back to individual config keys
+                } catch (InvalidArgumentException) {
+                    // DSN parsing failed, fall back to the individual config keys.
                 }
             }
 
-            // Fallback to individual config keys
-            return new \LaraBug\Http\Client(
+            return new Client(
                 config('larabug.login_key', 'login_key'),
                 config('larabug.project_key', 'project_key')
             );
         });
 
-        // Register the main LaraBug instance
-        $this->app->singleton('larabug', function ($app) {
-            return new LaraBug($app[\LaraBug\Http\Client::class]);
-        });
+        $this->app->singleton('larabug', fn ($app) => new LaraBug($app[Client::class]));
 
         // Log shipping buffer. Bound lazily, so an app that never adds the
         // channel never builds one.
-        $this->app->singleton(\LaraBug\Logger\LogBuffer::class, function ($app) {
-            return new \LaraBug\Logger\LogBuffer(
-                $app[\LaraBug\Http\Client::class],
-                $app['config']->get('larabug', [])
-            );
-        });
+        $this->app->singleton(LogBuffer::class, fn ($app) => new LogBuffer(
+            $app[Client::class],
+            $app['config']->get('larabug', [])
+        ));
 
-        if ($this->app['log'] instanceof \Illuminate\Log\LogManager) {
-            $this->app['log']->extend('larabug', function ($app, $config) {
-                $handler = new \LaraBug\Logger\LaraBugHandler(
-                    $app['larabug']
-                );
-
-                return new Logger('larabug', [$handler]);
-            });
+        if ($this->app['log'] instanceof LogManager) {
+            $this->app['log']->extend('larabug', fn ($app, $config) => new Logger('larabug', [
+                new LaraBugHandler($app['larabug']),
+            ]));
 
             $this->app['log']->extend('larabug-logs', function ($app, $config) {
                 $larabug = $app['config']->get('larabug', []);
 
-                $handler = new \LaraBug\Logger\LaraBugLogHandler(
-                    $app[\LaraBug\Logger\LogBuffer::class],
+                $handler = new LaraBugLogHandler(
+                    $app[LogBuffer::class],
                     [
-                        'logs' => isset($larabug['logs']) ? $larabug['logs'] : [],
+                        'logs' => $larabug['logs'] ?? [],
                         'environment' => $app['config']->get('app.env', ''),
-                        'release' => isset($larabug['logs']['release']) ? $larabug['logs']['release'] : '',
+                        'release' => $larabug['logs']['release'] ?? '',
                     ],
                     // The channel's own level wins, so a stack can ship warnings
                     // to us while writing everything to disk.
-                    Logger::toMonologLevel(
-                        isset($config['level'])
-                            ? $config['level']
-                            : (isset($larabug['logs']['level']) ? $larabug['logs']['level'] : 'info')
-                    )
+                    Logger::toMonologLevel($config['level'] ?? $larabug['logs']['level'] ?? 'info')
                 );
 
                 return new Logger('larabug-logs', [$handler]);
@@ -325,50 +291,42 @@ class ServiceProvider extends BaseServiceProvider
         // Request monitoring. One of each per execution: the monitor holds the
         // state of the request being served, the sampler holds the decision
         // made about it, and the buffer outlives both to flush on shutdown.
-        $this->app->singleton(\LaraBug\Requests\RequestMonitor::class);
-        $this->app->singleton(\LaraBug\Requests\Sampler::class);
+        $this->app->singleton(RequestMonitor::class);
+        $this->app->singleton(Sampler::class);
 
-        $this->app->singleton(\LaraBug\Requests\RequestBuffer::class, function ($app) {
-            return new \LaraBug\Requests\RequestBuffer(
-                $app->make(\LaraBug\Http\Client::class),
-                config('larabug')
-            );
-        });
+        $this->app->singleton(RequestBuffer::class, fn ($app) => new RequestBuffer(
+            $app->make(Client::class),
+            config('larabug')
+        ));
 
-        $this->app->singleton(\LaraBug\Console\CommandBuffer::class, function ($app) {
-            return new \LaraBug\Console\CommandBuffer(
-                $app->make(\LaraBug\Http\Client::class),
-                config('larabug')
-            );
-        });
+        $this->app->singleton(CommandBuffer::class, fn ($app) => new CommandBuffer(
+            $app->make(Client::class),
+            config('larabug')
+        ));
 
-        $this->app->singleton(\LaraBug\Console\ScheduledTaskBuffer::class, function ($app) {
-            return new \LaraBug\Console\ScheduledTaskBuffer(
-                $app->make(\LaraBug\Http\Client::class),
-                config('larabug')
-            );
-        });
+        $this->app->singleton(ScheduledTaskBuffer::class, fn ($app) => new ScheduledTaskBuffer(
+            $app->make(Client::class),
+            config('larabug')
+        ));
 
-        // Register queue monitoring singleton (always, will be lazy loaded)
-        $this->app->singleton(\LaraBug\Queue\JobMonitor::class, function ($app) {
-            return new \LaraBug\Queue\JobMonitor(
-                $app[\LaraBug\Http\Client::class],
-                $app['config']->get('larabug', [])
-            );
-        });
+        // Always bound; only built when job tracking first touches it.
+        $this->app->singleton(JobMonitor::class, fn ($app) => new JobMonitor(
+            $app[Client::class],
+            $app['config']->get('larabug', [])
+        ));
 
         // Only register macros if supported (Laravel < 11)
-        if (method_exists(\Illuminate\Foundation\Bus\PendingDispatch::class, 'macro')) {
+        if (method_exists(PendingDispatch::class, 'macro')) {
             DispatchMacros::register();
         }
     }
 
-    protected function mapLaraBugApiRoutes()
+    protected function mapLaraBugApiRoutes(): void
     {
         Route::group(
             [
                 'namespace' => '\LaraBug\Http\Controllers',
-                'prefix' => 'larabug-api'
+                'prefix' => 'larabug-api',
             ],
             function ($router) {
                 require __DIR__ . '/../routes/api.php';

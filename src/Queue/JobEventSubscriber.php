@@ -2,21 +2,23 @@
 
 namespace LaraBug\Queue;
 
-use Illuminate\Queue\Events\{JobProcessing, JobProcessed, JobFailed};
 use LaraBug\Requests\TraceContext;
+use Illuminate\Queue\Events\JobFailed;
+use Illuminate\Queue\Events\JobProcessed;
+use Illuminate\Queue\Events\JobProcessing;
+use Illuminate\Contracts\Events\Dispatcher;
 
 class JobEventSubscriber
 {
-    protected JobMonitor $monitor;
-
+    /** @var array<string, array{start: float, memory_start: int}> */
     protected array $timings = [];
 
-    public function __construct(JobMonitor $monitor)
-    {
-        $this->monitor = $monitor;
+    public function __construct(
+        protected readonly JobMonitor $monitor,
+    ) {
     }
 
-    public function subscribe($events): void
+    public function subscribe(Dispatcher $events): void
     {
         $events->listen(JobProcessing::class, [$this, 'handleJobProcessing']);
         $events->listen(JobProcessed::class, [$this, 'handleJobProcessed']);
@@ -25,9 +27,8 @@ class JobEventSubscriber
 
     public function handleJobProcessing(JobProcessing $event): void
     {
-        // Each job is its own unit of work, so each gets its own trace. A
-        // worker process is long lived and would otherwise stamp every job it
-        // ever ran with the id of the first one.
+        // Each job is its own unit of work, so each gets its own trace: a long
+        // lived worker would otherwise stamp every job with the first job's id.
         TraceContext::reset();
 
         $jobId = $event->job->getJobId() ?? spl_object_hash($event->job);

@@ -7,8 +7,7 @@ namespace LaraBug\Requests;
  *
  * Two things blow up query cardinality in practice, and both are cheap to
  * collapse: an IN list whose length follows the data, and a multi-row INSERT
- * whose tuple count follows the batch. Left alone, one logical query becomes
- * thousands of distinct strings and the grouped view is useless.
+ * whose tuple count follows the batch.
  *
  * Normalising here rather than on ingest means the server never parses SQL at
  * request volume, and the hash the grouping relies on cannot drift between the
@@ -28,10 +27,9 @@ class QueryNormaliser
     }
 
     /**
-     * md5, not xxh128: this package supports PHP 7.4 and xxh128 arrived in 8.1,
-     * so the faster algorithm would have thrown on half the versions we claim
-     * to run on. It is a grouping key, not a signature — collisions cost a
-     * merged row, not a vulnerability.
+     * md5 stays deliberately: it is a grouping key, not a signature —
+     * collisions cost a merged row — and changing the algorithm would split
+     * every existing group.
      */
     public static function hash(string $connection, string $normalisedSql): string
     {

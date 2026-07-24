@@ -2,52 +2,36 @@
 
 namespace LaraBug\Logger;
 
-use LaraBug\Http\Client;
 use Throwable;
+use LaraBug\Http\Client;
 
 /**
- * Buffers log records and ships them in batches.
- *
- * Mirrors Queue\EventBuffer, which solves the same problem for jobs: one HTTP
- * request per log line would cost far more in network than the line is worth,
- * and at log volume it would be the dominant cost in the request.
+ * Buffers log records and ships them in batches, mirroring Queue\EventBuffer:
+ * one HTTP request per log line would cost far more in network than the line
+ * is worth.
  *
  * Nothing in here may throw. Monolog rethrows whatever a handler throws, which
- * would surface at the user's Log::info() call site and break their
- * application, so every path out of this class swallows.
+ * would surface at the user's Log call site, so every path out of this class
+ * swallows.
  */
 class LogBuffer
 {
-    /** @var Client */
-    protected $client;
-
-    /** @var array */
-    protected $config;
-
-    /** @var array */
-    protected $buffer = [];
+    protected array $buffer = [];
 
     /**
-     * Guards against logging while shipping logs.
-     *
-     * Monolog's own cycle detection is per Logger instance, so it does not help
-     * when our HTTP client, or anything it touches, logs to a different channel
-     * that reaches us again.
-     *
-     * @var bool
+     * Guards against logging while shipping logs. Monolog's own cycle detection
+     * is per Logger instance, so it does not help when our HTTP client logs to
+     * a different channel that reaches us again.
      */
-    protected $sending = false;
+    protected bool $sending = false;
 
-    public function __construct(Client $client, array $config)
-    {
-        $this->client = $client;
-        $this->config = $config;
+    public function __construct(
+        protected readonly Client $client,
+        protected array $config,
+    ) {
     }
 
-    /**
-     * @param array $record
-     */
-    public function add(array $record)
+    public function add(array $record): void
     {
         if ($this->sending) {
             return;
@@ -60,7 +44,7 @@ class LogBuffer
         }
     }
 
-    public function flush()
+    public function flush(): void
     {
         if (empty($this->buffer) || $this->sending) {
             return;
@@ -72,11 +56,7 @@ class LogBuffer
         $this->send($records);
     }
 
-    /**
-     * @param array $records
-     * @param int $attempt
-     */
-    protected function send(array $records, $attempt = 1)
+    protected function send(array $records, int $attempt = 1): void
     {
         $this->sending = true;
 
@@ -120,31 +100,23 @@ class LogBuffer
     }
 
     /**
-     * Stop collecting for the rest of this process.
-     *
-     * The server has told us it does not want these, so the handler should stop
-     * asking rather than repeat the round trip on every request.
+     * Stop collecting for the rest of this process: the server has said it does
+     * not want these, so stop repeating the round trip on every request.
      */
-    protected function disable()
+    protected function disable(): void
     {
         $this->buffer = [];
         $this->config['logs']['enabled'] = false;
         $this->sending = false;
     }
 
-    /**
-     * @return bool
-     */
-    public function enabled()
+    public function enabled(): bool
     {
         return ! isset($this->config['logs']['enabled'])
             || $this->config['logs']['enabled'];
     }
 
-    /**
-     * @return int
-     */
-    protected function batchSize()
+    protected function batchSize(): int
     {
         $size = isset($this->config['logs']['batch_size'])
             ? (int) $this->config['logs']['batch_size']
@@ -153,14 +125,7 @@ class LogBuffer
         return $size > 0 ? $size : 50;
     }
 
-    /**
-     * A hard ceiling on what one process may hold, so a long running worker or
-     * a command emitting thousands of lines cannot grow the buffer unbounded
-     * between flushes.
-     *
-     * @return int
-     */
-    public function bufferedCount()
+    public function bufferedCount(): int
     {
         return count($this->buffer);
     }

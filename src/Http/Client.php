@@ -2,35 +2,26 @@
 
 namespace LaraBug\Http;
 
+use Exception;
 use GuzzleHttp\ClientInterface;
+use Psr\Http\Message\ResponseInterface;
+use GuzzleHttp\Exception\RequestException;
 
 class Client
 {
-    /** @var ClientInterface|null */
-    protected $client;
-
-    /** @var string */
-    protected $login;
-
-    /** @var string */
-    protected $project;
-
-    /**
-     * @param string $login
-     * @param string $project
-     * @param ClientInterface|null $client
-     */
-    public function __construct(string $login, string $project, ?ClientInterface $client = null)
-    {
-        $this->login = $login;
-        $this->project = $project;
-        $this->client = $client;
+    public function __construct(
+        protected readonly string $login,
+        protected readonly string $project,
+        protected ?ClientInterface $client = null,
+    ) {
     }
 
     /**
-     * @param array $exception
-     * @return \GuzzleHttp\Promise\PromiseInterface|\Psr\Http\Message\ResponseInterface|null
-     * @throws \GuzzleHttp\Exception\GuzzleException
+     * No native signature on purpose: test doubles override this method
+     * with a loose one.
+     *
+     * @param array<string, mixed> $exception
+     * @return ResponseInterface|null
      */
     public function report($exception)
     {
@@ -40,7 +31,7 @@ class Client
                     'Authorization' => 'Bearer '.$this->login,
                     'Content-Type' => 'application/json',
                     'Accept' => 'application/json',
-                    'User-Agent' => 'LaraBug-Package'
+                    'User-Agent' => 'LaraBug-Package',
                 ],
                 'json' => array_merge([
                     'project' => $this->project,
@@ -52,12 +43,12 @@ class Client
                     'strict' => true,  // Preserve POST method on redirects
                     'referer' => true,
                     'protocols' => ['http', 'https'],
-                    'track_redirects' => false
+                    'track_redirects' => false,
                 ],
             ]);
-        } catch (\GuzzleHttp\Exception\RequestException $e) {
+        } catch (RequestException $e) {
             return $e->getResponse();
-        } catch (\Exception $e) {
+        } catch (Exception) {
             return null;
         }
     }
@@ -65,15 +56,14 @@ class Client
     /**
      * Report a batch of served HTTP requests.
      *
-     * The same endpoint and the same envelope as everything else, told apart by
-     * type. Each record carries the queries that request ran, inline, because
-     * they are one execution: a request whose queries arrived separately could
-     * have half of itself stored.
+     * The same endpoint and envelope as everything else, told apart by type.
+     * Each record carries the queries it ran inline, because they are one
+     * execution: a request whose queries arrived separately could have half
+     * of itself stored.
      *
      * @param  array<int, array<string, mixed>>  $records
-     * @return \Psr\Http\Message\ResponseInterface|null
      */
-    public function reportRequests(array $records)
+    public function reportRequests(array $records): ?ResponseInterface
     {
         try {
             return $this->getGuzzleHttpClient()->request('POST', config('larabug.server'), [
@@ -94,9 +84,9 @@ class Client
                 // the worker is still held, so our slowness is their capacity.
                 'timeout' => 5,
             ]);
-        } catch (\GuzzleHttp\Exception\RequestException $e) {
+        } catch (RequestException $e) {
             return $e->getResponse();
-        } catch (\Exception $e) {
+        } catch (Exception) {
             return null;
         }
     }
@@ -104,7 +94,7 @@ class Client
     /**
      * @param  array<int, array<string, mixed>>  $records
      */
-    public function reportCommands(array $records)
+    public function reportCommands(array $records): ?ResponseInterface
     {
         try {
             return $this->getGuzzleHttpClient()->request('POST', config('larabug.server'), [
@@ -123,9 +113,9 @@ class Client
                 'verify' => config('larabug.verify_ssl'),
                 'timeout' => 5,
             ]);
-        } catch (\GuzzleHttp\Exception\RequestException $e) {
+        } catch (RequestException $e) {
             return $e->getResponse();
-        } catch (\Exception $e) {
+        } catch (Exception) {
             return null;
         }
     }
@@ -133,7 +123,7 @@ class Client
     /**
      * @param  array<int, array<string, mixed>>  $records
      */
-    public function reportScheduledTasks(array $records)
+    public function reportScheduledTasks(array $records): ?ResponseInterface
     {
         try {
             return $this->getGuzzleHttpClient()->request('POST', config('larabug.server'), [
@@ -152,9 +142,9 @@ class Client
                 'verify' => config('larabug.verify_ssl'),
                 'timeout' => 5,
             ]);
-        } catch (\GuzzleHttp\Exception\RequestException $e) {
+        } catch (RequestException $e) {
             return $e->getResponse();
-        } catch (\Exception $e) {
+        } catch (Exception) {
             return null;
         }
     }
@@ -165,11 +155,8 @@ class Client
      * Its own endpoint rather than a kind of report: this arrives on a schedule
      * whether or not anything happened, and the thing it proves is that the
      * sender is running at all.
-     *
-     * @param  array  $payload
-     * @return \Psr\Http\Message\ResponseInterface|null
      */
-    public function heartbeat(array $payload)
+    public function heartbeat(array $payload): ?ResponseInterface
     {
         try {
             return $this->getGuzzleHttpClient()->request('POST', $this->heartbeatUrl(), [
@@ -186,9 +173,9 @@ class Client
                 // schedule open behind it.
                 'timeout' => 5,
             ]);
-        } catch (\GuzzleHttp\Exception\RequestException $e) {
+        } catch (RequestException $e) {
             return $e->getResponse();
-        } catch (\Exception $e) {
+        } catch (Exception) {
             return null;
         }
     }
@@ -196,8 +183,6 @@ class Client
     /**
      * Follows the reporting server unless told otherwise, so a self-hosted
      * install does not have to configure the same host twice.
-     *
-     * @return string
      */
     protected function heartbeatUrl(): string
     {
@@ -209,32 +194,21 @@ class Client
 
         $server = (string) config('larabug.server');
 
-        if (substr($server, -8) === '/api/log') {
+        if (str_ends_with($server, '/api/log')) {
             return substr($server, 0, -8).'/api/heartbeat';
         }
 
         return rtrim($server, '/').'/heartbeat';
     }
 
-    /**
-     * @return \GuzzleHttp\Client
-     */
-    public function getGuzzleHttpClient()
+    public function getGuzzleHttpClient(): ClientInterface
     {
-        if (! isset($this->client)) {
-            $this->client = new \GuzzleHttp\Client([
-                'timeout' => 15,
-            ]);
-        }
-
-        return $this->client;
+        return $this->client ??= new \GuzzleHttp\Client([
+            'timeout' => 15,
+        ]);
     }
 
-    /**
-     * @param ClientInterface $client
-     * @return $this
-     */
-    public function setGuzzleHttpClient(ClientInterface $client)
+    public function setGuzzleHttpClient(ClientInterface $client): static
     {
         $this->client = $client;
 

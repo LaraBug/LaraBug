@@ -2,46 +2,32 @@
 
 namespace LaraBug\Logger;
 
-use DateTimeInterface;
+use Throwable;
+use ArrayAccess;
+use Monolog\Logger;
 use JsonSerializable;
+use DateTimeInterface;
 use LaraBug\Requests\TraceContext;
 use Monolog\Handler\AbstractProcessingHandler;
-use Monolog\Logger;
-use Throwable;
 
 /**
  * Ships log lines to LaraBug.
  *
- * Separate from LaraBugHandler on purpose. That one exists to turn a logged
- * Throwable into an exception report and sits at ERROR; this one is interested
- * in the ordinary lines around an error, so it runs at a much lower level and
- * must stay cheap enough to sit in a request's hot path.
+ * Separate from LaraBugHandler on purpose: that one turns a logged Throwable
+ * into an exception report at ERROR level, while this one ships the ordinary
+ * lines around an error and must stay cheap enough for a request's hot path.
  */
 class LaraBugLogHandler extends AbstractProcessingHandler
 {
-    /** @var LogBuffer */
-    protected $buffer;
-
-    /** @var array */
-    protected $config;
-
-    /**
-     * @param LogBuffer $buffer
-     * @param array $config
-     * @param int $level
-     * @param bool $bubble
-     */
-    public function __construct(LogBuffer $buffer, array $config = [], $level = Logger::DEBUG, bool $bubble = true)
-    {
-        $this->buffer = $buffer;
-        $this->config = $config;
-
+    public function __construct(
+        protected readonly LogBuffer $buffer,
+        protected readonly array $config = [],
+        $level = Logger::DEBUG,
+        bool $bubble = true,
+    ) {
         parent::__construct($level, $bubble);
     }
 
-    /**
-     * @param array $record
-     */
     protected function write($record): void
     {
         if (! $this->buffer->enabled()) {
@@ -59,17 +45,13 @@ class LaraBugLogHandler extends AbstractProcessingHandler
      * Monolog 3 hands over a LogRecord object rather than an array, but it
      * implements ArrayAccess over the same keys, so one accessor covers 1, 2
      * and 3 without branching on the version.
-     *
-     * @param array|\ArrayAccess $record
-     * @return array
      */
-    protected function toPayload($record): array
+    protected function toPayload(array|ArrayAccess $record): array
     {
         $context = $this->arrayValue($record, 'context');
 
-        // The exception object is what LaraBugHandler reports separately. Left
-        // in place it would be the single largest thing in the payload, and the
-        // interesting parts of it are already on the exception report.
+        // The exception object is what LaraBugHandler reports separately; left in
+        // place it would be the single largest thing in the payload.
         unset($context['exception']);
 
         return [
@@ -82,10 +64,8 @@ class LaraBugLogHandler extends AbstractProcessingHandler
             // not into context, so dropping it would lose most of what makes a
             // line useful.
             'extra' => $this->normalize($this->arrayValue($record, 'extra')),
-            // Falls back to the ambient trace rather than to nothing. An
-            // application that never sets one still gets its lines joined to
-            // the request or the job that wrote them, which is the entire
-            // reason the field exists.
+            // Falls back to the ambient trace so lines are joined to the request
+            // or job that wrote them even when the app never sets a trace id.
             'trace_id' => $this->traceId($record),
             'exception_id' => (string) $this->correlation($record, 'exception_id'),
             'environment' => (string) ($this->config['environment'] ?? ''),
@@ -94,11 +74,7 @@ class LaraBugLogHandler extends AbstractProcessingHandler
         ];
     }
 
-    /**
-     * @param array|\ArrayAccess $record
-     * @return string
-     */
-    protected function timestamp($record): string
+    protected function timestamp(array|ArrayAccess $record): string
     {
         $datetime = $this->value($record, 'datetime');
 
@@ -109,11 +85,7 @@ class LaraBugLogHandler extends AbstractProcessingHandler
         return date('Y-m-d\TH:i:s.000P');
     }
 
-    /**
-     * @param array|\ArrayAccess $record
-     * @return string
-     */
-    protected function level($record): string
+    protected function level(array|ArrayAccess $record): string
     {
         $name = $this->value($record, 'level_name');
 
@@ -127,19 +99,7 @@ class LaraBugLogHandler extends AbstractProcessingHandler
         return strtolower($name);
     }
 
-    /**
-     * Correlation ids travel in whichever bag the application happened to use,
-     * so both are checked rather than picking a side.
-     *
-     * @param array|\ArrayAccess $record
-     * @param string $key
-     * @return string
-     */
-    /**
-     * @param array|\ArrayAccess $record
-     * @return string
-     */
-    protected function traceId($record): string
+    protected function traceId(array|ArrayAccess $record): string
     {
         $supplied = $this->correlation($record, 'trace_id');
 
@@ -156,10 +116,10 @@ class LaraBugLogHandler extends AbstractProcessingHandler
     }
 
     /**
-     * @param array|\ArrayAccess $record
-     * @return string
+     * Correlation ids travel in whichever bag the application happened to use,
+     * so both are checked rather than picking a side.
      */
-    protected function correlation($record, string $key): string
+    protected function correlation(array|ArrayAccess $record, string $key): string
     {
         foreach (['context', 'extra'] as $bag) {
             $values = $this->arrayValue($record, $bag);
@@ -176,12 +136,7 @@ class LaraBugLogHandler extends AbstractProcessingHandler
      * Reduce a context bag to something that survives json_encode.
      *
      * Bounded on purpose: log context routinely holds whole models, and sending
-     * an object graph per line is how a logging integration turns into an
-     * outage.
-     *
-     * @param array $values
-     * @param int $depth
-     * @return array
+     * an object graph per line is how a logging integration turns into an outage.
      */
     protected function normalize(array $values, int $depth = 0): array
     {
@@ -193,6 +148,7 @@ class LaraBugLogHandler extends AbstractProcessingHandler
         foreach ($values as $key => $value) {
             if (count($normalized) >= $max) {
                 $normalized['_truncated'] = true;
+
                 break;
             }
 
@@ -202,12 +158,7 @@ class LaraBugLogHandler extends AbstractProcessingHandler
         return $normalized;
     }
 
-    /**
-     * @param mixed $value
-     * @param int $depth
-     * @return mixed
-     */
-    protected function normalizeValue($value, int $depth)
+    protected function normalizeValue(mixed $value, int $depth): mixed
     {
         if (is_scalar($value) || $value === null) {
             return is_string($value) ? $this->truncate($value) : $value;
@@ -227,9 +178,9 @@ class LaraBugLogHandler extends AbstractProcessingHandler
 
         if ($value instanceof Throwable) {
             return [
-                'class' => get_class($value),
+                'class' => $value::class,
                 'message' => $this->truncate($value->getMessage()),
-                'file' => $value->getFile().':'.$value->getLine(),
+                'file' => "{$value->getFile()}:{$value->getLine()}",
             ];
         }
 
@@ -243,7 +194,7 @@ class LaraBugLogHandler extends AbstractProcessingHandler
             try {
                 return $this->normalize((array) $value->toArray(), $depth + 1);
             } catch (Throwable $e) {
-                return get_class($value);
+                return $value::class;
             }
         }
 
@@ -251,13 +202,9 @@ class LaraBugLogHandler extends AbstractProcessingHandler
             return $this->truncate((string) $value);
         }
 
-        return is_object($value) ? get_class($value) : '[resource]';
+        return is_object($value) ? $value::class : '[resource]';
     }
 
-    /**
-     * @param string $value
-     * @return string
-     */
     protected function truncate(string $value): string
     {
         $limit = 2000;
@@ -265,31 +212,16 @@ class LaraBugLogHandler extends AbstractProcessingHandler
         return strlen($value) > $limit ? substr($value, 0, $limit).'…' : $value;
     }
 
-    /**
-     * @param array|\ArrayAccess $record
-     * @param string $key
-     * @param mixed $default
-     * @return mixed
-     */
-    protected function value($record, string $key, $default = null)
+    protected function value(array|ArrayAccess $record, string $key, mixed $default = null): mixed
     {
         if (is_array($record)) {
             return array_key_exists($key, $record) ? $record[$key] : $default;
         }
 
-        if ($record instanceof \ArrayAccess) {
-            return isset($record[$key]) ? $record[$key] : $default;
-        }
-
-        return $default;
+        return $record[$key] ?? $default;
     }
 
-    /**
-     * @param array|\ArrayAccess $record
-     * @param string $key
-     * @return array
-     */
-    protected function arrayValue($record, string $key): array
+    protected function arrayValue(array|ArrayAccess $record, string $key): array
     {
         $value = $this->value($record, $key, []);
 

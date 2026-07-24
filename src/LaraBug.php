@@ -5,39 +5,35 @@ namespace LaraBug;
 use Throwable;
 use LaraBug\Http\Client;
 use LaraBug\Filters\DataFilter;
+use LaraBug\Concerns\Larabugable;
 use LaraBug\Requests\TraceContext;
-use Illuminate\Support\Str;
 use Illuminate\Support\Facades\App;
+use LaraBug\Requests\RequestMonitor;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Foundation\Application;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Request;
 use Illuminate\Support\Facades\Session;
+use Psr\Http\Message\ResponseInterface;
 
 class LaraBug
 {
-    /** @var Client */
-    private $client;
+    private readonly Client $client;
 
-    /** @var DataFilter */
-    private $dataFilter;
+    private readonly DataFilter $dataFilter;
 
-    /** @var null|string */
-    private $lastExceptionId;
+    private ?string $lastExceptionId = null;
 
-    /** @var array */
-    private static $customContext = [];
+    /** @var array<string, mixed> */
+    private static array $customContext = [];
 
     /**
      * Re-entry guard. Set while handle() is executing so any exception
      * thrown *inside* the capture path (HTTP errors, serialization, etc.)
      * can't recursively trigger another capture and blow the stack.
-     *
-     * @var bool
      */
-    private static $capturing = false;
+    private static bool $capturing = false;
 
-    /**
-     * @param Client $client
-     */
     public function __construct(Client $client)
     {
         $this->client = $client;
@@ -45,32 +41,21 @@ class LaraBug
     }
 
     /**
-     * Set custom context data that will be sent with the next exception
-     * 
-     * @param array $context
-     * @return void
+     * Set custom context data that will be sent with the next exception.
+     *
+     * @param array<string, mixed> $context
      */
-    public static function context(array $context)
+    public static function context(array $context): void
     {
         self::$customContext = array_merge(self::$customContext, $context);
     }
 
-    /**
-     * Clear custom context data
-     * 
-     * @return void
-     */
-    public static function clearContext()
+    public static function clearContext(): void
     {
         self::$customContext = [];
     }
 
-    /**
-     * @param Throwable $exception
-     * @param string $fileType
-     * @return bool|mixed
-     */
-    public function handle(Throwable $exception, $fileType = 'php', array $customData = [])
+    public function handle(Throwable $exception, string $fileType = 'php', array $customData = []): mixed
     {
         // Drop any capture that re-enters while another capture is still in flight.
         // Without this, an error thrown inside logError() would be caught by
@@ -125,7 +110,7 @@ class LaraBug
 
                     $index = $currentLine - 1;
 
-                    if (!array_key_exists($index, $lines)) {
+                    if (! array_key_exists($index, $lines)) {
                         continue;
                     }
 
@@ -144,7 +129,7 @@ class LaraBug
 
             $rawResponse = $this->logError($data);
 
-            if (!$rawResponse) {
+            if (! $rawResponse) {
                 return false;
             }
 
@@ -180,10 +165,7 @@ class LaraBug
         return self::$capturing;
     }
 
-    /**
-     * @return bool
-     */
-    public function isSkipEnvironment()
+    public function isSkipEnvironment(): bool
     {
         if (count(config('larabug.environments', [])) == 0) {
             return true;
@@ -196,27 +178,19 @@ class LaraBug
         return true;
     }
 
-    /**
-     * @param string|null $id
-     */
-    private function setLastExceptionId(?string $id)
+    private function setLastExceptionId(?string $id): void
     {
         $this->lastExceptionId = $id;
     }
 
     /**
      * Get the last exception id given to us by the larabug API.
-     * @return string|null
      */
-    public function getLastExceptionId()
+    public function getLastExceptionId(): ?string
     {
         return $this->lastExceptionId;
     }
 
-    /**
-     * @param Throwable $exception
-     * @return array
-     */
     /**
      * Count this exception against the request that caused it, and stamp the
      * shared trace id onto the report.
@@ -232,13 +206,14 @@ class LaraBug
                 return;
             }
 
-            app(\LaraBug\Requests\RequestMonitor::class)->recordException();
-        } catch (Throwable $e) {
+            app(RequestMonitor::class)->recordException();
+        } catch (Throwable) {
             //
         }
     }
 
-    public function getExceptionData(Throwable $exception)
+    /** @return array<string, mixed> */
+    public function getExceptionData(Throwable $exception): array
     {
         $data = [];
 
@@ -250,7 +225,7 @@ class LaraBug
         $data['error'] = $exception->getTraceAsString();
         $data['line'] = $exception->getLine();
         $data['file'] = $exception->getFile();
-        $data['class'] = get_class($exception);
+        $data['class'] = $exception::class;
         $data['release'] = config('larabug.release', null);
         $data['storage'] = [
             'SERVER' => [
@@ -264,7 +239,7 @@ class LaraBug
             'COOKIE' => $this->filterVariables(Request::cookie()),
             'SESSION' => $this->filterVariables(Request::hasSession() ? Session::all() : []),
             'HEADERS' => $this->filterVariables(Request::header()),
-            'PARAMETERS' => $this->filterVariables($this->filterParameterValues(Request::all()))
+            'PARAMETERS' => $this->filterVariables($this->filterParameterValues(Request::all())),
         ];
 
         $data['storage'] = array_filter($data['storage']);
@@ -291,20 +266,16 @@ class LaraBug
 
         $data['frames'] = $this->getExceptionFrames($exception);
 
-        // Get project version
         $data['project_version'] = config('larabug.project_version', null);
 
-        // The trace this exception was thrown in. An exception thrown while
-        // serving a request carries that request's id (the middleware set it
-        // before routing), which is what lets the server join the failed
-        // request to the issue it caused. Outside a tracked request this is a
-        // fresh id that simply no request shares.
+        // An exception thrown while serving a tracked request carries that
+        // request's id (the middleware set it before routing), which is what
+        // lets the server join the failed request to the issue it caused.
+        // Outside a tracked request this is a fresh id no request shares.
         $data['trace_id'] = TraceContext::id();
 
-        // Add custom context data
-        if (!empty(self::$customContext)) {
+        if (! empty(self::$customContext)) {
             $data['custom_data'] = self::$customContext;
-            // Clear context after adding to exception
             self::$customContext = [];
         }
 
@@ -319,31 +290,17 @@ class LaraBug
         return $data;
     }
 
-    /**
-     * @param array $parameters
-     * @return array
-     */
-    public function filterParameterValues($parameters)
+    public function filterParameterValues(array $parameters): array
     {
         return $this->dataFilter->filterParameterValues($parameters);
     }
 
-    /**
-     * Determines whether the given parameter value should be filtered.
-     *
-     * @param mixed $value
-     * @return bool
-     */
-    public function shouldParameterValueBeFiltered($value)
+    public function shouldParameterValueBeFiltered(mixed $value): bool
     {
         return $this->dataFilter->shouldParameterValueBeFiltered($value);
     }
 
-    /**
-     * @param $variables
-     * @return array
-     */
-    public function filterVariables($variables)
+    public function filterVariables(mixed $variables): array
     {
         return $this->dataFilter->filterVariables($variables);
     }
@@ -351,18 +308,15 @@ class LaraBug
     /**
      * The stack as structured frames, each with a window of source around its
      * line, the way Sentry and Flare capture one. The throw site leads, since
-     * getTrace() does not include it, followed by the trace's own frames.
+     * getTrace() does not include it.
      *
      * Bounded twice: frame_lines_count lines of source either side of a
      * frame's line, and source for at most max_code_frames frames. Deeper
-     * frames keep their file, line and function so the trace stays whole;
-     * only the source windows stop. `error` and `executor` are untouched, so
-     * a server that does not know this field loses nothing.
+     * frames keep their file, line and function so the trace stays whole.
      *
-     * @param Throwable $exception
-     * @return array
+     * @return array<int, array<string, mixed>>
      */
-    private function getExceptionFrames(Throwable $exception)
+    private function getExceptionFrames(Throwable $exception): array
     {
         $lineCount = (int) config('larabug.frame_lines_count', 5);
 
@@ -435,23 +389,14 @@ class LaraBug
         return $frames;
     }
 
-    /**
-     * Gets information from the line.
-     *
-     * @param $lines
-     * @param $line
-     * @param $i
-     *
-     * @return array|void
-     */
-    private function getLineInfo($lines, $line, $i)
+    private function getLineInfo(array $lines, int $line, int $i): ?array
     {
         $currentLine = $line + $i;
 
         $index = $currentLine - 1;
 
-        if (!array_key_exists($index, $lines)) {
-            return;
+        if (! array_key_exists($index, $lines)) {
+            return null;
         }
 
         return [
@@ -460,20 +405,12 @@ class LaraBug
         ];
     }
 
-    /**
-     * @param $exceptionClass
-     * @return bool
-     */
-    public function isSkipException($exceptionClass)
+    public function isSkipException(mixed $exceptionClass): bool
     {
         return in_array($exceptionClass, config('larabug.except'));
     }
 
-    /**
-     * @param array $data
-     * @return bool
-     */
-    public function isSleepingException(array $data)
+    public function isSleepingException(array $data): bool
     {
         if (config('larabug.sleep', 0) == 0) {
             return false;
@@ -482,23 +419,15 @@ class LaraBug
         return Cache::has($this->createExceptionString($data));
     }
 
-    /**
-     * @param array $data
-     * @return string
-     */
-    private function createExceptionString(array $data)
+    private function createExceptionString(array $data): string
     {
-        $string = $data['host'] . '_' . $data['method'] . '_' . $data['exception'] . '_' . $data['line'] . '_' . $data['file'] . '_' . $data['class'];
-        
-        // Hash the string to ensure it never exceeds cache key length limits (255 chars for database driver)
-        return 'larabug.' . md5($string);
+        $string = "{$data['host']}_{$data['method']}_{$data['exception']}_{$data['line']}_{$data['file']}_{$data['class']}";
+
+        // Hashed so the key never exceeds cache key length limits (255 chars for the database driver).
+        return 'larabug.'.md5($string);
     }
 
-    /**
-     * @param $exception
-     * @return \GuzzleHttp\Promise\PromiseInterface|\Psr\Http\Message\ResponseInterface|null
-     */
-    private function logError($exception)
+    private function logError(array $exception): ?ResponseInterface
     {
         return $this->client->report([
             'exception' => $exception,
@@ -506,32 +435,34 @@ class LaraBug
         ]);
     }
 
-    /**
-     * @return array|null
-     */
-    public function getUser()
+    public function getUser(): ?array
     {
-        if (function_exists('auth') && (app() instanceof \Illuminate\Foundation\Application && auth()->check())) {
-            /** @var \Illuminate\Contracts\Auth\Authenticatable $user */
-            $user = auth()->user();
+        if (! function_exists('auth')) {
+            return null;
+        }
 
-            if ($user instanceof \LaraBug\Concerns\Larabugable) {
-                return $user->toLarabug();
-            }
+        if (! (app() instanceof Application)) {
+            return null;
+        }
 
-            if ($user instanceof \Illuminate\Database\Eloquent\Model) {
-                return $user->toArray();
-            }
+        if (! auth()->check()) {
+            return null;
+        }
+
+        $user = auth()->user();
+
+        if ($user instanceof Larabugable) {
+            return $user->toLarabug();
+        }
+
+        if ($user instanceof Model) {
+            return $user->toArray();
         }
 
         return null;
     }
 
-    /**
-     * @param array $data
-     * @return bool
-     */
-    public function addExceptionToSleep(array $data)
+    public function addExceptionToSleep(array $data): bool
     {
         $exceptionString = $this->createExceptionString($data);
 

@@ -2,8 +2,24 @@
 
 namespace LaraBug\Requests;
 
-use Illuminate\Contracts\Events\Dispatcher;
 use Throwable;
+use Illuminate\Mail\Mailable;
+use Illuminate\Cache\Events\CacheHit;
+use Illuminate\Queue\Events\JobQueued;
+use Illuminate\Cache\Events\KeyWritten;
+use Illuminate\Mail\Events\MessageSent;
+use Illuminate\Mail\SendQueuedMailable;
+use Illuminate\Cache\Events\CacheMissed;
+use Illuminate\Log\Events\MessageLogged;
+use Illuminate\Cache\Events\KeyForgotten;
+use Illuminate\Mail\Events\MessageSending;
+use Illuminate\Contracts\Events\Dispatcher;
+use Illuminate\Routing\Events\RouteMatched;
+use Illuminate\Database\Events\QueryExecuted;
+use Illuminate\Http\Client\Events\ConnectionFailed;
+use Illuminate\Http\Client\Events\ResponseReceived;
+use Illuminate\Notifications\Events\NotificationSent;
+use Illuminate\Notifications\Events\NotificationFailed;
 
 /**
  * The events that fill in a request record.
@@ -14,61 +30,44 @@ use Throwable;
  */
 class RequestListeners
 {
-    /** @var RequestMonitor */
-    protected $monitor;
-
-    /** @var Sampler */
-    protected $sampler;
-
     /** @var array<int, float> Send-start marks, in seconds, keyed by message. */
-    protected $mailStartedAt = [];
+    protected array $mailStartedAt = [];
 
-    public function __construct(RequestMonitor $monitor, Sampler $sampler)
-    {
-        $this->monitor = $monitor;
-        $this->sampler = $sampler;
+    public function __construct(
+        protected readonly RequestMonitor $monitor,
+        protected readonly Sampler $sampler,
+    ) {
     }
 
-    /**
-     * Registered one at a time rather than by returning a map, which the
-     * dispatcher only understands from Laravel 8. This package supports 6, and
-     * a subscriber that quietly listens to nothing is worse than one that fails
-     * loudly.
-     *
-     * Events that do not exist on older versions, such as JobQueued, are named
-     * as strings and simply never fire.
-     */
     public function subscribe(Dispatcher $events): void
     {
-        $events->listen('Illuminate\Routing\Events\RouteMatched', [$this, 'onRouteMatched']);
-        $events->listen('Illuminate\Database\Events\QueryExecuted', [$this, 'onQueryExecuted']);
-        $events->listen('Illuminate\Cache\Events\CacheHit', [$this, 'onCacheHit']);
-        $events->listen('Illuminate\Cache\Events\CacheMissed', [$this, 'onCacheMissed']);
-        $events->listen('Illuminate\Cache\Events\KeyWritten', [$this, 'onCacheWritten']);
-        $events->listen('Illuminate\Cache\Events\KeyForgotten', [$this, 'onCacheForgotten']);
-        $events->listen('Illuminate\Queue\Events\JobQueued', [$this, 'onJobQueued']);
+        $events->listen(RouteMatched::class, $this->onRouteMatched(...));
+        $events->listen(QueryExecuted::class, $this->onQueryExecuted(...));
+        $events->listen(CacheHit::class, $this->onCacheHit(...));
+        $events->listen(CacheMissed::class, $this->onCacheMissed(...));
+        $events->listen(KeyWritten::class, $this->onCacheWritten(...));
+        $events->listen(KeyForgotten::class, $this->onCacheForgotten(...));
+        $events->listen(JobQueued::class, $this->onJobQueued(...));
 
         // Paired: the sending event only starts a timer, the sent event is what
         // records the message. A send that throws never reaches sent and leaves
         // only a mark that the next send overwrites.
-        $events->listen('Illuminate\Mail\Events\MessageSending', [$this, 'onMailSending']);
-        $events->listen('Illuminate\Mail\Events\MessageSent', [$this, 'onMailSent']);
-        $events->listen('Illuminate\Notifications\Events\NotificationSent', [$this, 'onNotificationSent']);
-        $events->listen('Illuminate\Notifications\Events\NotificationFailed', [$this, 'onNotificationFailed']);
+        $events->listen(MessageSending::class, $this->onMailSending(...));
+        $events->listen(MessageSent::class, $this->onMailSent(...));
+        $events->listen(NotificationSent::class, $this->onNotificationSent(...));
+        $events->listen(NotificationFailed::class, $this->onNotificationFailed(...));
 
-        // Outgoing HTTP, via the client's own event rather than Guzzle
-        // middleware: the event exists from Laravel 8 and needs no handler
-        // stack to be pushed onto a client we do not own.
-        $events->listen('Illuminate\Http\Client\Events\ResponseReceived', [$this, 'onOutgoingRequest']);
-        $events->listen('Illuminate\Http\Client\Events\ConnectionFailed', [$this, 'onOutgoingRequest']);
+        // Outgoing HTTP via the client's own events: no handler stack has to be
+        // pushed onto a Guzzle client we do not own.
+        $events->listen(ResponseReceived::class, $this->onOutgoingRequest(...));
+        $events->listen(ConnectionFailed::class, $this->onOutgoingRequest(...));
 
-        // Every log line written while this request was being served. The
-        // counter is what makes "this endpoint logs forty lines a request"
+        // The counter is what makes "this endpoint logs forty lines a request"
         // visible without storing forty lines against it.
-        $events->listen('Illuminate\Log\Events\MessageLogged', [$this, 'onMessageLogged']);
+        $events->listen(MessageLogged::class, $this->onMessageLogged(...));
     }
 
-    public function onRouteMatched($event): void
+    public function onRouteMatched(object $event): void
     {
         $this->guard(function () use ($event) {
             $route = $event->route;
@@ -83,14 +82,14 @@ class RequestListeners
                 'methods' => $route->methods(),
             ]);
 
-            // The decision was made before routing, because a trace has to
+            // The sampling decision predates routing, because a trace has to
             // start before there is a route to reason about. Now that there is
             // one, the ignore list gets its say.
             $this->sampler->reconsider($path);
         });
     }
 
-    public function onQueryExecuted($event): void
+    public function onQueryExecuted(object $event): void
     {
         $this->guard(function () use ($event) {
             if (! $this->sampler->decided()) {
@@ -105,7 +104,7 @@ class RequestListeners
         });
     }
 
-    public function onCacheHit($event): void
+    public function onCacheHit(object $event): void
     {
         $this->guard(function () use ($event) {
             $this->monitor->increment('cache_hits');
@@ -113,7 +112,7 @@ class RequestListeners
         });
     }
 
-    public function onCacheMissed($event): void
+    public function onCacheMissed(object $event): void
     {
         $this->guard(function () use ($event) {
             $this->monitor->increment('cache_misses');
@@ -121,14 +120,14 @@ class RequestListeners
         });
     }
 
-    public function onCacheWritten($event): void
+    public function onCacheWritten(object $event): void
     {
         $this->guard(function () use ($event) {
             $this->recordCacheEvent('write', $event);
         });
     }
 
-    public function onCacheForgotten($event): void
+    public function onCacheForgotten(object $event): void
     {
         $this->guard(function () use ($event) {
             $this->recordCacheEvent('forget', $event);
@@ -136,12 +135,10 @@ class RequestListeners
     }
 
     /**
-     * Buffer one cache operation. The key is narrowed to a prefix unless the
-     * application opted the full keys in; the ttl is only meaningful on a write.
-     *
-     * @param  mixed  $event
+     * The key is narrowed to a prefix unless the application opted the full
+     * keys in; the ttl is only meaningful on a write.
      */
-    private function recordCacheEvent(string $op, $event): void
+    private function recordCacheEvent(string $op, object $event): void
     {
         $this->monitor->recordCacheEvent([
             'op' => $op,
@@ -152,12 +149,11 @@ class RequestListeners
     }
 
     /**
-     * A cache key narrowed to what is safe to keep. Laravel's keys are routinely
-     * "prefix:id", and the prefix is the diagnostic part while the id is customer
-     * data; the part up to the first colon keeps the former and drops the latter.
-     * A key with no colon is bounded to a fixed length. An application that has
-     * decided its keys are safe keeps them whole, the same shape the payload
-     * capture takes.
+     * Laravel's keys are routinely "prefix:id", and the prefix is the
+     * diagnostic part while the id is customer data: the part up to the first
+     * colon keeps the former and drops the latter. A key with no colon is
+     * bounded to a fixed length; an application that opted in keeps its keys
+     * whole.
      */
     private function cacheKey(string $key): string
     {
@@ -174,24 +170,23 @@ class RequestListeners
         return mb_substr($key, 0, 64);
     }
 
-    public function onJobQueued($event): void
+    public function onJobQueued(object $event): void
     {
         $this->guard(function () use ($event) {
             $this->monitor->increment('jobs_queued');
 
-            // A queued mailable is a job whose payload is the mailable itself,
-            // and its send happens a worker away where no request is being
-            // recorded. Caught here, at dispatch, it is counted against the
-            // request that queued it or it is never seen inside one at all.
+            // A queued mailable's send happens a worker away, where no request
+            // is being recorded. Counted at dispatch, it lands on the request
+            // that queued it — or is never seen inside one at all.
             $job = $event->job ?? null;
 
-            if ($job instanceof \Illuminate\Mail\SendQueuedMailable) {
+            if ($job instanceof SendQueuedMailable) {
                 $this->recordQueuedMail($job->mailable ?? null);
             }
         });
     }
 
-    public function onMailSending($event): void
+    public function onMailSending(object $event): void
     {
         $this->guard(function () use ($event) {
             if ($this->isNotificationMail($event)) {
@@ -208,12 +203,12 @@ class RequestListeners
         });
     }
 
-    public function onMailSent($event): void
+    public function onMailSent(object $event): void
     {
         $this->guard(function () use ($event) {
-            // A notification sent over mail fires this too, and the notification
-            // path already records it; bowing out here keeps it from counting as
-            // both a mail and a notification, the same split Nightwatch draws.
+            // A notification sent over mail fires this too, and the
+            // notification path already records it; bowing out keeps it from
+            // counting as both, the same split Nightwatch draws.
             if ($this->isNotificationMail($event)) {
                 return;
             }
@@ -246,19 +241,18 @@ class RequestListeners
     }
 
     /**
-     * The class of the mailable being sent, when there is one.
-     *
-     * Neither mail event carries it, so it is read off the call stack instead:
-     * a Mailable's send() is always a frame below the event that fires inside
-     * it. Empty for mail sent without a mailable — Mail::raw() and the like —
-     * where the subject is the only name a message has.
+     * Neither mail event carries the mailable, so it is read off the call
+     * stack instead: a Mailable's send() is always a frame below the event
+     * that fires inside it. Empty for mail sent without a mailable —
+     * Mail::raw() and the like — where the subject is the only name a
+     * message has.
      */
     private function mailableClass(): string
     {
         foreach (debug_backtrace(DEBUG_BACKTRACE_PROVIDE_OBJECT, 50) as $frame) {
             $object = $frame['object'] ?? null;
 
-            if ($object instanceof \Illuminate\Mail\Mailable) {
+            if ($object instanceof Mailable) {
                 return get_class($object);
             }
         }
@@ -266,7 +260,7 @@ class RequestListeners
         return '';
     }
 
-    private function mailSubject($message): string
+    private function mailSubject(object $message): string
     {
         if (! method_exists($message, 'getSubject')) {
             return '';
@@ -276,14 +270,14 @@ class RequestListeners
     }
 
     /**
-     * One address list off a message, across mail engines. Symfony's Email has
-     * the getters and returns Address objects; the older Swift message had the
-     * same getter names and returned an [address => name] map. A version without
-     * the getter simply contributes nobody.
+     * One address list off a message, across mail engines: Symfony's Email has
+     * the getters and returns Address objects, the older Swift message had the
+     * same getter names and returned an [address => name] map, and a message
+     * without the getter contributes nobody.
      *
      * @return array<int|string, mixed>
      */
-    private function recipients($message, string $getter): array
+    private function recipients(object $message, string $getter): array
     {
         if (! method_exists($message, $getter)) {
             return [];
@@ -293,8 +287,8 @@ class RequestListeners
     }
 
     /**
-     * The address strings in a recipient list, whichever engine produced it.
-     * Symfony hands over Address objects; Swift keyed the address and put the
+     * The address strings in a recipient list, whichever engine produced it:
+     * Symfony hands over Address objects, Swift keyed the address and put the
      * name in the value.
      *
      * @param  array<int|string, mixed>  $recipients
@@ -326,13 +320,11 @@ class RequestListeners
     }
 
     /**
-     * What is stored for who a message went to: the domains it reached, deduped,
-     * and never the addresses themselves. The domain is the diagnostic part — a
-     * bounce is a bounce to gmail.com, not to a person — and the local part is
-     * the customer data the whole request position rests on not keeping.
-     *
-     * An application that has decided its recipients are safe to store opts the
-     * full addresses in, the same shape the payload capture takes.
+     * Stored as the domains a message reached, deduped, never the addresses:
+     * a bounce is a bounce to gmail.com, not to a person, and the local part
+     * is the customer data the whole request position rests on not keeping.
+     * Opting in capture_mail_recipients keeps the full addresses, the same
+     * shape the payload capture takes.
      *
      * @param  array<int, string>  $addresses
      */
@@ -361,11 +353,10 @@ class RequestListeners
     }
 
     /**
-     * How long the send took, when the sending event was seen for this same
-     * message. Zero when it was not: a mailer that only fires sent, or a message
-     * whose sending threw before the mark was read back.
+     * Zero when the sending event was never seen for this message: a mailer
+     * that only fires sent, or a send that threw before the mark was read back.
      */
-    private function mailDuration($message): float
+    private function mailDuration(object $message): float
     {
         $key = spl_object_id($message);
 
@@ -381,17 +372,14 @@ class RequestListeners
     }
 
     /**
-     * Record a mailable that was queued rather than sent inline.
-     *
-     * Read off the mailable the job carries, not off a message: there is no
-     * message yet, the send is a worker away. Its recipients are already filled
-     * in by the time it is queued, so the counts and domains are known; the
-     * subject often is not, since an envelope resolves it at render, and the
-     * duration cannot be, so both are left for the send that is not ours to see.
-     *
-     * @param  mixed  $mailable
+     * Record a mailable that was queued rather than sent inline, read off the
+     * mailable the job carries: there is no message yet, the send is a worker
+     * away. Recipients are filled in by queue time, so counts and domains are
+     * known; the subject often is not, since an envelope resolves it at
+     * render, and the duration cannot be, so both are left for the send that
+     * is not ours to see.
      */
-    private function recordQueuedMail($mailable): void
+    private function recordQueuedMail(mixed $mailable): void
     {
         if (! is_object($mailable)) {
             return;
@@ -414,14 +402,13 @@ class RequestListeners
     }
 
     /**
-     * The addresses in one of a mailable's recipient lists. A Mailable holds its
-     * to, cc and bcc as public arrays of ['name' => ..., 'address' => ...], which
-     * is a different shape from the message getters a sent message exposes.
+     * The addresses in one of a mailable's recipient lists. A Mailable holds
+     * its to, cc and bcc as public arrays of ['name' => ..., 'address' => ...],
+     * a different shape from the getters a sent message exposes.
      *
-     * @param  mixed  $mailable
      * @return array<int, string>
      */
-    private function mailableAddresses($mailable, string $property): array
+    private function mailableAddresses(object $mailable, string $property): array
     {
         $recipients = $mailable->{$property} ?? [];
 
@@ -446,14 +433,14 @@ class RequestListeners
         return $addresses;
     }
 
-    public function onNotificationSent($event): void
+    public function onNotificationSent(object $event): void
     {
         $this->guard(function () use ($event) {
             $this->recordNotification($event, 1);
         });
     }
 
-    public function onNotificationFailed($event): void
+    public function onNotificationFailed(object $event): void
     {
         $this->guard(function () use ($event) {
             $this->recordNotification($event, 0);
@@ -462,10 +449,8 @@ class RequestListeners
 
     /**
      * Record one notification, one entry per channel.
-     *
-     * @param  mixed  $event
      */
-    private function recordNotification($event, int $success): void
+    private function recordNotification(object $event, int $success): void
     {
         $notification = $event->notification ?? null;
         $notifiable = $event->notifiable ?? null;
@@ -481,9 +466,9 @@ class RequestListeners
     }
 
     /**
-     * A class name with an anonymous marker trimmed off. An on-the-fly
-     * notification is an anonymous class, and get_class returns its file path
-     * after a null byte; the part before it is the only stable name it has.
+     * An on-the-fly notification is an anonymous class, and get_class returns
+     * its file path after a null byte; the part before it is the only stable
+     * name it has.
      */
     private function normalisedClass(string $class): string
     {
@@ -493,18 +478,16 @@ class RequestListeners
     }
 
     /**
-     * Whether a mail event is a notification going out over the mail channel.
+     * Whether a mail event is a notification going out over the mail channel:
      * Laravel stamps the notification on the event data, and the notification
      * path already records it, so the mail path leaves it alone.
-     *
-     * @param  mixed  $event
      */
-    private function isNotificationMail($event): bool
+    private function isNotificationMail(object $event): bool
     {
         return is_array($event->data ?? null) && isset($event->data['__laravel_notification']);
     }
 
-    public function onOutgoingRequest($event): void
+    public function onOutgoingRequest(object $event): void
     {
         $this->guard(function () use ($event) {
             $request = $event->request ?? null;
@@ -535,8 +518,8 @@ class RequestListeners
 
     /**
      * The url with its query values stripped, the names kept, the same stance
-     * the request path takes. Rebuilt rather than regexed so a value carrying an
-     * & or = of its own cannot smuggle itself back in.
+     * the request path takes. Rebuilt rather than regexed so a value carrying
+     * an & or = of its own cannot smuggle itself back in.
      */
     private function strippedUrl(string $url): string
     {
@@ -557,20 +540,16 @@ class RequestListeners
 
         parse_str($parts['query'], $params);
 
-        $names = implode('&', array_map(function ($key) {
-            return $key.'=';
-        }, array_keys($params)));
+        $names = implode('&', array_map(fn ($key) => $key.'=', array_keys($params)));
 
         return $names === '' ? $rebuilt : $rebuilt.'?'.$names;
     }
 
     /**
-     * The round trip in milliseconds, off Guzzle's transfer stats which the Http
-     * client hangs on the response. Zero when the call never got one.
-     *
-     * @param  mixed  $response
+     * The round trip in milliseconds, off Guzzle's transfer stats which the
+     * Http client hangs on the response. Zero when the call never got one.
      */
-    private function outgoingDuration($response): float
+    private function outgoingDuration(?object $response): float
     {
         if ($response === null) {
             return 0.0;
@@ -589,23 +568,21 @@ class RequestListeners
      * A short reason a call failed, for the ones that never got a response.
      * ConnectionFailed grew an exception in later Laravel; older versions carry
      * only the request, so a generic marker is the most that can be said.
-     *
-     * @param  mixed  $event
      */
-    private function outgoingError($event, bool $failed): string
+    private function outgoingError(object $event, bool $failed): string
     {
         if (! $failed) {
             return '';
         }
 
-        if (isset($event->exception) && $event->exception instanceof \Throwable) {
+        if (isset($event->exception) && $event->exception instanceof Throwable) {
             return mb_substr($event->exception->getMessage(), 0, 255);
         }
 
         return 'Connection failed';
     }
 
-    public function onMessageLogged($event): void
+    public function onMessageLogged(object $event): void
     {
         $this->guard(function () {
             $this->monitor->recordLog();
@@ -616,7 +593,7 @@ class RequestListeners
     {
         try {
             $callback();
-        } catch (Throwable $e) {
+        } catch (Throwable) {
             // Never let instrumentation surface in the application's own stack.
         }
     }

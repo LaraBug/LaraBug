@@ -28,18 +28,20 @@ class ComposerLockScanner
         }
 
         $raw = file_get_contents($path);
+
         if ($raw === false) {
             return null;
         }
 
         $data = json_decode($raw, true);
+
         if (! is_array($data)) {
             return null;
         }
 
         $packages = $this->extractPackages($data, $includeDev);
 
-        if (empty($packages)) {
+        if ($packages === []) {
             return null;
         }
 
@@ -54,6 +56,7 @@ class ComposerLockScanner
     }
 
     /**
+     * @param  array<string, mixed>  $lock
      * @return array<string, string>
      */
     protected function extractPackages(array $lock, bool $includeDev): array
@@ -77,6 +80,9 @@ class ComposerLockScanner
         return $packages;
     }
 
+    /**
+     * @param  array<string, mixed>  $lock
+     */
     protected function extractPhpVersion(array $lock): ?string
     {
         $platform = $lock['platform'] ?? [];
@@ -85,11 +91,7 @@ class ComposerLockScanner
             return (string) $platform['php'];
         }
 
-        if (defined('PHP_VERSION')) {
-            return PHP_VERSION;
-        }
-
-        return null;
+        return PHP_VERSION;
     }
 
     /**

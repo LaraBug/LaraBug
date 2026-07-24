@@ -2,61 +2,50 @@
 
 namespace LaraBug\Console;
 
-use Illuminate\Contracts\Events\Dispatcher;
-use LaraBug\Requests\TraceContext;
 use Throwable;
+use LaraBug\Requests\TraceContext;
+use Illuminate\Contracts\Events\Dispatcher;
+use Illuminate\Console\Events\CommandFinished;
+use Illuminate\Console\Events\CommandStarting;
 
 /**
  * The events that fill in a command record.
  *
- * Subscribed only when command tracking is on. A command is its own execution
- * context, neither a request nor a job, so it carries its own trace and its own
- * buffer. The handlers are stacked rather than keyed on a single current
- * command, because a command can call another (Artisan::call), and a finish has
- * to match the start it belongs to.
+ * Subscribed only when command tracking is on. The handlers are stacked rather
+ * than keyed on a single current command, because a command can call another
+ * (Artisan::call) and a finish has to match the start it belongs to.
  */
 class CommandListeners
 {
-    /** @var CommandBuffer */
-    protected $buffer;
-
     /** @var array<int, array<string, mixed>|null> The commands in flight. */
-    protected $stack = [];
+    protected array $stack = [];
 
-    public function __construct(CommandBuffer $buffer)
+    public function __construct(protected readonly CommandBuffer $buffer)
     {
-        $this->buffer = $buffer;
     }
 
-    /**
-     * Registered one at a time rather than by returning a map, the same as the
-     * request listeners: this package supports Laravel 6, whose dispatcher does
-     * not read a subscribe map.
-     */
     public function subscribe(Dispatcher $events): void
     {
-        $events->listen('Illuminate\Console\Events\CommandStarting', [$this, 'onCommandStarting']);
-        $events->listen('Illuminate\Console\Events\CommandFinished', [$this, 'onCommandFinished']);
+        $events->listen(CommandStarting::class, $this->onCommandStarting(...));
+        $events->listen(CommandFinished::class, $this->onCommandFinished(...));
     }
 
-    public function onCommandStarting($event): void
+    public function onCommandStarting(object $event): void
     {
         $this->guard(function () use ($event) {
             $command = (string) ($event->command ?? '');
 
-            // A command run by the scheduler in the same process belongs to the
-            // schedule, not to commands: the scheduled task listener counts it,
-            // and counting it here too would double it. A null frame keeps the
-            // finish handler's stack balanced without recording it.
+            // A command the scheduler runs in-process belongs to the schedule,
+            // not to commands; a null frame keeps the finish handler's stack
+            // balanced without recording it twice.
             if ($command === '' || $this->ignored($command) || ScheduledTaskListeners::$inFlight > 0) {
                 $this->stack[] = null;
 
                 return;
             }
 
-            // Each command is its own unit of work, so each gets its own trace,
-            // the same as a queued job. A console process that runs several in a
-            // row would otherwise stamp them all with the first one's id.
+            // Each command is its own unit of work, so it gets its own trace,
+            // the same as a queued job.
             TraceContext::reset();
 
             $this->stack[] = [
@@ -68,7 +57,7 @@ class CommandListeners
         });
     }
 
-    public function onCommandFinished($event): void
+    public function onCommandFinished(object $event): void
     {
         $this->guard(function () use ($event) {
             if ($this->stack === []) {
@@ -87,8 +76,7 @@ class CommandListeners
                 'duration_ms' => round((microtime(true) - $frame['start']) * 1000, 3),
                 'memory_peak_kb' => (int) round(memory_get_peak_usage(true) / 1024),
 
-                // The same id any log lines and exceptions from this command
-                // carry, which is the whole reason to keep it.
+                // The same id this command's log lines and exceptions carry.
                 'trace_id' => $frame['trace_id'],
 
                 'arguments' => $this->arguments($event->input ?? null),
@@ -113,20 +101,18 @@ class CommandListeners
     }
 
     /**
-     * The arguments and options a command was given, as JSON, with the sensitive
-     * ones replaced by a marker. Read off the input and guarded: the input is a
-     * Symfony contract whose getters throw when the definition is not bound, and
-     * a command that could not be detailed is still worth counting.
-     *
-     * @param  mixed  $input
+     * The arguments and options a command was given, as JSON, with sensitive
+     * ones replaced by a marker. Guarded because the Symfony input getters
+     * throw when the definition is not bound, and a command that could not be
+     * detailed is still worth counting.
      */
-    protected function arguments($input): string
+    protected function arguments(mixed $input): string
     {
         if (! is_object($input)) {
             return '';
         }
 
-        $redact = array_map('strtolower', (array) config('larabug.commands.redact', []));
+        $redact = array_map(strtolower(...), (array) config('larabug.commands.redact', []));
 
         $bag = [];
 
@@ -147,7 +133,7 @@ class CommandListeners
                     $bag['options'][$name] = $this->redactValue((string) $name, $value, $redact);
                 }
             }
-        } catch (Throwable $e) {
+        } catch (Throwable) {
             return '';
         }
 
@@ -155,16 +141,14 @@ class CommandListeners
     }
 
     /**
-     * @param  mixed  $value
      * @param  array<int, string>  $redact  lowercased needles
-     * @return mixed
      */
-    protected function redactValue(string $name, $value, array $redact)
+    protected function redactValue(string $name, mixed $value, array $redact): mixed
     {
         $lower = strtolower($name);
 
         foreach ($redact as $needle) {
-            if ($needle !== '' && strpos($lower, $needle) !== false) {
+            if ($needle !== '' && str_contains($lower, $needle)) {
                 return '[redacted]';
             }
         }
@@ -176,7 +160,7 @@ class CommandListeners
     {
         try {
             $callback();
-        } catch (Throwable $e) {
+        } catch (Throwable) {
             // Never let instrumentation surface in the application's own output.
         }
     }

@@ -1,15 +1,15 @@
 <?php
 
-if (!function_exists('dispatch_tracked')) {
+use Illuminate\Foundation\Bus\PendingDispatch;
+
+if (! function_exists('dispatch_tracked')) {
     /**
-     * Dispatch a job with LaraBug tracking enabled
-     * 
-     * @param object $job
-     * @return \Illuminate\Foundation\Bus\PendingDispatch
+     * Dispatch a job with LaraBug tracking enabled.
      */
-    function dispatch_tracked($job)
+    function dispatch_tracked(object $job): PendingDispatch
     {
         $job->trackInLaraBug = true;
+
         return dispatch($job);
     }
 }

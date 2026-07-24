@@ -2,48 +2,38 @@
 
 namespace LaraBug\Cve;
 
-use Illuminate\Contracts\Cache\Repository as CacheRepository;
 use LaraBug\Http\Client;
 use LaraBug\Scanners\ComposerLockScanner;
+use Illuminate\Contracts\Cache\Repository as CacheRepository;
 
 /**
  * Request-piggyback trigger for CVE scans.
  *
  * Wired up via `app()->terminating(...)` from the ServiceProvider, so it runs
  * after the response is sent to the user — zero perceptible latency. Cached
- * heavily so the hot path is a single Cache::get on most requests:
- *
- *   - The lockfile hash is computed once per process (it doesn't change at runtime).
- *   - The "last sent hash" is cached for `request_throttle_hours`. A request only
- *     does work when (a) the hash changes (deploy), or (b) the throttle expires.
- *   - A short-lived cache lock prevents a thundering herd of concurrent requests
- *     all triggering scans simultaneously.
+ * heavily so the hot path is a single Cache::get on most requests: the
+ * lockfile payload is memoized per process, the last sent hash is cached for
+ * `request_throttle_hours`, and a short-lived cache lock prevents a thundering
+ * herd of concurrent requests all triggering scans simultaneously.
  */
 class RequestTrigger
 {
-    protected const CACHE_KEY_HASH = 'larabug.cve.last_sent_hash';
-    protected const CACHE_KEY_TIMESTAMP = 'larabug.cve.last_sent_at';
-    protected const CACHE_KEY_BACKOFF = 'larabug.cve.backoff_until';
-    protected const LOCK_KEY = 'larabug.cve.trigger_lock';
-    protected const LOCK_SECONDS = 60;
-    protected const BACKOFF_SECONDS = 3600;
-
-    /** Memoized lockfile payload for this process. */
+    /** @var array<string, mixed>|null Memoized lockfile payload for this process. */
     protected static ?array $cachedPayload = null;
+
     protected static bool $alreadyFired = false;
 
-    protected CacheRepository $cache;
-    protected ComposerLockScanner $scanner;
-    protected Client $client;
+    private string $lastSentHashCacheKey = 'larabug.cve.last_sent_hash';
 
-    // Written out rather than promoted: promotion and the trailing comma in a
-    // parameter list are both PHP 8.0+, and this package still supports 7.4.
-    // Typed properties are fine, those landed in 7.4.
-    public function __construct(CacheRepository $cache, ComposerLockScanner $scanner, Client $client)
-    {
-        $this->cache = $cache;
-        $this->scanner = $scanner;
-        $this->client = $client;
+    private string $lastSentAtCacheKey = 'larabug.cve.last_sent_at';
+
+    private string $backoffCacheKey = 'larabug.cve.backoff_until';
+
+    public function __construct(
+        protected readonly CacheRepository $cache,
+        protected readonly ComposerLockScanner $scanner,
+        protected readonly Client $client,
+    ) {
     }
 
     public function maybeTrigger(): void
@@ -53,6 +43,7 @@ class RequestTrigger
         }
 
         $trigger = strtolower((string) config('larabug.cve.trigger', 'both'));
+
         if (! in_array($trigger, ['request', 'both'], true)) {
             return;
         }
@@ -61,9 +52,11 @@ class RequestTrigger
         if (self::$alreadyFired) {
             return;
         }
+
         self::$alreadyFired = true;
 
         $payload = $this->payload();
+
         if ($payload === null) {
             return;
         }
@@ -73,7 +66,7 @@ class RequestTrigger
         }
 
         $lock = method_exists($this->cache, 'lock')
-            ? $this->cache->lock(self::LOCK_KEY, self::LOCK_SECONDS)
+            ? $this->cache->lock('larabug.cve.trigger_lock', 60)
             : null;
 
         if ($lock && ! $lock->get()) {
@@ -84,10 +77,13 @@ class RequestTrigger
         try {
             $this->send($payload);
         } finally {
-            optional($lock)->release();
+            $lock?->release();
         }
     }
 
+    /**
+     * @return array<string, mixed>|null
+     */
     protected function payload(): ?array
     {
         if (self::$cachedPayload !== null) {
@@ -112,22 +108,25 @@ class RequestTrigger
         // The server has told us it does not want these yet. Without this the
         // scan is enabled by default but the project is not, so every single
         // request would post the lockfile and collect another 403.
-        if ($this->cache->get(self::CACHE_KEY_BACKOFF)) {
+        if ($this->cache->get($this->backoffCacheKey)) {
             return false;
         }
 
-        $lastHash = $this->cache->get(self::CACHE_KEY_HASH);
+        $lastHash = $this->cache->get($this->lastSentHashCacheKey);
 
         if ($lastHash !== $currentHash) {
             return true;
         }
 
-        $lastSentAt = (int) $this->cache->get(self::CACHE_KEY_TIMESTAMP, 0);
+        $lastSentAt = (int) $this->cache->get($this->lastSentAtCacheKey, 0);
         $throttleSeconds = max(1, (int) config('larabug.cve.request_throttle_hours', 24)) * 3600;
 
         return (time() - $lastSentAt) >= $throttleSeconds;
     }
 
+    /**
+     * @param  array<string, mixed>  $payload
+     */
     protected function send(array $payload): void
     {
         $response = $this->client->report([
@@ -148,18 +147,19 @@ class RequestTrigger
         // Only 2xx and "skipped" count as the scan having landed.
         if (($status >= 200 && $status < 300) || $unchanged) {
             $ttl = max(1, (int) config('larabug.cve.request_throttle_hours', 24)) * 3600;
-            $this->cache->put(self::CACHE_KEY_HASH, $payload['content_hash'], $ttl);
-            $this->cache->put(self::CACHE_KEY_TIMESTAMP, time(), $ttl);
+            $this->cache->put($this->lastSentHashCacheKey, $payload['content_hash'], $ttl);
+            $this->cache->put($this->lastSentAtCacheKey, time(), $ttl);
 
             return;
         }
 
         // 403 is the server saying this project has not turned CVE scanning on.
         // That is a settled answer, not a blip, so back off rather than asking
-        // again on the very next request. Short enough that enabling it in the
-        // panel starts working without waiting out the full throttle window.
+        // again on the very next request. An hour is short enough that enabling
+        // it in the panel starts working without waiting out the full throttle
+        // window.
         if ($status === 403) {
-            $this->cache->put(self::CACHE_KEY_BACKOFF, time(), self::BACKOFF_SECONDS);
+            $this->cache->put($this->backoffCacheKey, time(), 3600);
         }
 
         // Anything else (a 5xx, a timeout) leaves the cache untouched, so the

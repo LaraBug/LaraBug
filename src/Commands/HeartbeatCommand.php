@@ -2,9 +2,9 @@
 
 namespace LaraBug\Commands;
 
-use Illuminate\Console\Command;
 use LaraBug\Http\Client;
 use LaraBug\Queue\Heartbeat;
+use Illuminate\Console\Command;
 
 class HeartbeatCommand extends Command
 {
@@ -12,7 +12,7 @@ class HeartbeatCommand extends Command
 
     protected $description = 'Report that this app\'s queue workers are alive';
 
-    public function handle()
+    public function handle(): int
     {
         $payload = app(Heartbeat::class)->payload();
 
@@ -22,17 +22,18 @@ class HeartbeatCommand extends Command
             return 0;
         }
 
-        if (! in_array(config('app.env'), (array) config('larabug.environments'), true)) {
-            $this->info('[LaraBug] Environment ('.config('app.env').') is not configured to report, nothing sent');
+        $environment = config('app.env');
+
+        if (! in_array($environment, (array) config('larabug.environments'), true)) {
+            $this->info("[LaraBug] Environment ({$environment}) is not configured to report, nothing sent");
 
             return 0;
         }
 
         $response = app(Client::class)->heartbeat($payload);
 
-        // A heartbeat is worth nothing if sending it can break the scheduler, so
-        // a failure is reported and swallowed. The panel's own view of a missing
-        // heartbeat is the same either way: nothing arrived.
+        // A heartbeat is worth nothing if sending it can break the scheduler,
+        // so a failure is reported and swallowed: every path exits 0.
         if ($response === null) {
             $this->error('✗ [LaraBug] Could not reach the server');
 
@@ -47,7 +48,7 @@ class HeartbeatCommand extends Command
             return 0;
         }
 
-        $this->error('✗ [LaraBug] Server answered '.$status);
+        $this->error("✗ [LaraBug] Server answered {$status}");
 
         return 0;
     }

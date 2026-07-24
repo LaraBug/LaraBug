@@ -5,10 +5,15 @@ namespace LaraBug\Queue;
 class LoadMonitor
 {
     protected array $recentJobs = [];
-    protected int $highLoadThreshold;
-    protected int $lowLoadThreshold;
-    protected int $cooldownMinutes;
+
+    protected readonly int $highLoadThreshold;
+
+    protected readonly int $lowLoadThreshold;
+
+    protected readonly int $cooldownMinutes;
+
     protected ?int $batchingEnabledAt = null;
+
     protected bool $isEnabled = false;
 
     public function __construct()
@@ -19,52 +24,47 @@ class LoadMonitor
     }
 
     /**
-     * Record a job dispatch and check if batching should be enabled
+     * Record a job dispatch and report whether batching should be enabled.
      */
     public function recordJob(): bool
     {
         $now = time();
-        
-        // Add current job
+
         $this->recentJobs[] = $now;
-        
-        // Clean old jobs (older than 60 seconds)
-        $this->recentJobs = array_filter($this->recentJobs, function ($timestamp) use ($now) {
-            return $timestamp > ($now - 60);
-        });
-        
-        // Calculate current rate (jobs per minute)
+
+        $this->recentJobs = array_filter(
+            $this->recentJobs,
+            fn ($timestamp) => $timestamp > ($now - 60)
+        );
+
         $currentRate = count($this->recentJobs);
-        
-        // Check if we should enable batching
-        if (!$this->isEnabled && $currentRate >= $this->highLoadThreshold) {
+
+        if (! $this->isEnabled && $currentRate >= $this->highLoadThreshold) {
             $this->isEnabled = true;
             $this->batchingEnabledAt = $now;
         }
-        
-        // Check if we should disable batching (cooldown period passed)
+
+        // Disable only after the cooldown has passed, so batching does not flap
+        // around the threshold.
         if ($this->isEnabled && $currentRate < $this->lowLoadThreshold) {
             $enabledDuration = $now - $this->batchingEnabledAt;
-            
+
             if ($enabledDuration >= ($this->cooldownMinutes * 60)) {
                 $this->isEnabled = false;
                 $this->batchingEnabledAt = null;
             }
         }
-        
+
         return $this->isEnabled;
     }
 
-    /**
-     * Check if batching is currently enabled
-     */
     public function isBatchingEnabled(): bool
     {
         return $this->isEnabled;
     }
 
     /**
-     * Get current job rate (jobs per minute)
+     * Current job rate in jobs per minute.
      */
     public function getCurrentRate(): int
     {
@@ -72,7 +72,7 @@ class LoadMonitor
     }
 
     /**
-     * Get stats for monitoring
+     * @return array<string, mixed>
      */
     public function getStats(): array
     {
