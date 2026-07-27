@@ -4,10 +4,13 @@ namespace LaraBug\Tests;
 
 use LaraBug\LaraBug;
 use LaraBug\Tests\Mocks\LaraBugClient;
+use PHPUnit\Framework\Attributes\Test;
 
 class TestCommandTest extends TestCase
 {
-    /** @test */
+    protected LaraBugClient $client;
+
+    #[Test]
     public function it_detects_if_the_login_key_is_set()
     {
         $this->app['config']['larabug.login_key'] = '';
@@ -23,7 +26,7 @@ class TestCommandTest extends TestCase
             ->assertExitCode(0);
     }
 
-    /** @test */
+    #[Test]
     public function it_detects_if_the_project_key_is_set()
     {
         $this->app['config']['larabug.project_key'] = '';
@@ -39,7 +42,7 @@ class TestCommandTest extends TestCase
             ->assertExitCode(0);
     }
 
-    /** @test */
+    #[Test]
     public function it_detects_that_its_running_in_the_correct_environment()
     {
         $this->app['config']['app.env'] = 'production';
@@ -56,7 +59,7 @@ class TestCommandTest extends TestCase
             ->assertExitCode(0);
     }
 
-    /** @test */
+    #[Test]
     public function it_detects_that_it_fails_to_send_to_larabug()
     {
         $this->artisan('larabug:test')

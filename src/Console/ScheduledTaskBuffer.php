@@ -3,37 +3,37 @@
 namespace LaraBug\Console;
 
 use Countable;
-use LaraBug\Http\Client;
 use Throwable;
+use LaraBug\Http\Client;
 
 /**
  * Batches finished scheduled task records.
  *
- * Its own buffer rather than the command one, because the two are told apart on
- * the way out by which sender they use: a task ships as a scheduled_tasks_batch,
- * a command as a commands_batch. The scheduler runs inside a single schedule:run
- * process, so this flushes on shutdown like the command buffer.
+ * Its own buffer rather than the command one, because the two are told apart
+ * on the way out by which sender they use: a task ships as a
+ * scheduled_tasks_batch, a command as a commands_batch. Flushes on shutdown
+ * like the command buffer, since the scheduler runs inside a single
+ * schedule:run process.
  */
 class ScheduledTaskBuffer implements Countable
 {
     /** @var array<int, array<string, mixed>> */
-    protected $buffer = [];
+    protected array $buffer = [];
 
-    /** @var Client */
-    protected $client;
+    protected readonly Client $client;
 
     /** @var array<string, mixed> */
-    protected $config;
+    protected readonly array $config;
 
-    /** @var int */
-    protected $batchSize;
+    protected readonly int $batchSize;
 
-    /** @var int */
-    protected $maxRetries;
+    protected readonly int $maxRetries;
 
-    /** @var bool */
-    protected $shutdownRegistered = false;
+    protected bool $shutdownRegistered = false;
 
+    /**
+     * @param  array<string, mixed>  $config
+     */
     public function __construct(Client $client, array $config)
     {
         $this->client = $client;
@@ -75,7 +75,7 @@ class ScheduledTaskBuffer implements Countable
     {
         try {
             $this->client->reportScheduledTasks($records);
-        } catch (Throwable $e) {
+        } catch (Throwable) {
             if ($attempt <= $this->maxRetries) {
                 usleep(100000 * $attempt);
 
@@ -97,9 +97,7 @@ class ScheduledTaskBuffer implements Countable
 
         $this->shutdownRegistered = true;
 
-        register_shutdown_function(function () {
-            $this->flush();
-        });
+        register_shutdown_function($this->flush(...));
     }
 
     public function count(): int

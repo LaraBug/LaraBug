@@ -519,7 +519,7 @@ return [
         | Dynamic Batching (Automatic Load-Based)
         |--------------------------------------------------------------------------
         |
-        | Batching automatically activates when job dispatch rate exceeds a 
+        | Batching automatically activates when job dispatch rate exceeds a
         | threshold. During low traffic, events are sent immediately (no delay).
         | During high traffic, events are buffered and sent in batches.
         |
@@ -623,7 +623,7 @@ return [
         | 0.5 = track 50% of successful jobs
         | 0.1 = track 10% of successful jobs
         | 0.0 = don't track successful jobs
-        | 
+        |
         | Note: Failures are ALWAYS tracked at 100% regardless of this setting
         */
         'sample_rate' => env('LB_SAMPLE_RATE', 1.0),

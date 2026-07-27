@@ -2,21 +2,15 @@
 
 namespace LaraBug\Queue;
 
+use Throwable;
 use Illuminate\Support\Facades\Queue;
 
 /**
  * A periodic "the workers are alive" report.
  *
- * Everything else this package sends is a report about something that happened:
- * an exception, a job that ran. None of that can distinguish a queue with no
- * work from a queue with no workers, because both send nothing at all. This is
- * the one message that says a worker exists, which is why it is sent on a
- * schedule rather than in response to anything.
- *
- * Where Horizon is installed it is asked directly, since it already knows its
- * supervisors, their process counts and how long each queue has been waiting.
- * Without it the queue driver is asked how much is waiting, which is less but
- * is still measured rather than guessed.
+ * Every other message this package sends reports something that happened, and
+ * none of that can distinguish a queue with no work from a queue with no
+ * workers — both send nothing — so this one is sent on a schedule instead.
  */
 class Heartbeat
 {
@@ -36,9 +30,9 @@ class Heartbeat
     /**
      * What Horizon says about itself, or that it is not here.
      *
-     * Every repository call is guarded: Horizon can be installed and its Redis
-     * connection be down, and a heartbeat that throws is a heartbeat that never
-     * arrives, which the panel would read as the workers being gone.
+     * Every repository call is guarded: Horizon can be installed with its Redis
+     * connection down, and a heartbeat that throws never arrives, which the
+     * panel would read as the workers being gone.
      *
      * @return array<string, mixed>
      */
@@ -61,11 +55,10 @@ class Heartbeat
 
             $report['masters'] = count($masters);
 
-            // Horizon reports per master. One paused master is the whole thing
-            // paused as far as a queue is concerned, so the least healthy status
-            // wins rather than the first one read.
+            // One paused master is the whole thing paused as far as a queue is
+            // concerned, so the least healthy status wins.
             foreach ($masters as $master) {
-                $status = isset($master->status) ? $master->status : null;
+                $status = $master->status ?? null;
 
                 if ($report['status'] === null || $status === 'paused') {
                     $report['status'] = $status;
@@ -75,7 +68,7 @@ class Heartbeat
             if ($report['masters'] === 0) {
                 $report['status'] = 'inactive';
             }
-        } catch (\Throwable $e) {
+        } catch (Throwable $e) {
             $report['status'] = 'unknown';
         }
 
@@ -91,19 +84,19 @@ class Heartbeat
 
                 $options = isset($supervisor->options) ? (array) $supervisor->options : [];
 
-                // The two figures Horizon's own overview shows as "default" when
-                // the supervisor has not been given them.
+                // The figures Horizon's own overview shows as "default" when the
+                // supervisor has not been given them.
                 $report['supervisor_options'][] = [
-                    'name' => isset($supervisor->name) ? $supervisor->name : null,
-                    'max_processes' => isset($options['maxProcesses']) ? $options['maxProcesses'] : null,
-                    'max_runtime' => isset($options['maxTime']) ? $options['maxTime'] : null,
-                    'max_throughput' => isset($options['maxJobs']) ? $options['maxJobs'] : null,
-                    'balance' => isset($options['balance']) ? $options['balance'] : null,
+                    'name' => $supervisor->name ?? null,
+                    'max_processes' => $options['maxProcesses'] ?? null,
+                    'max_runtime' => $options['maxTime'] ?? null,
+                    'max_throughput' => $options['maxJobs'] ?? null,
+                    'balance' => $options['balance'] ?? null,
                 ];
             }
-        } catch (\Throwable $e) {
-            // Leave the counts at zero: the master status above is the part that
-            // says whether anything is running.
+        } catch (Throwable $e) {
+            // Leave the counts at zero: the master status above already says
+            // whether anything is running.
         }
 
         return $report;
@@ -112,9 +105,8 @@ class Heartbeat
     /**
      * How much is waiting on each queue, and how long it has been waiting.
      *
-     * Horizon's workload already answers both per queue, including the wait it
-     * measures itself. Without Horizon only the depth is available, and the
-     * panel is left to work out the age from the jobs it has been sent.
+     * Horizon's workload answers both per queue; without it only the depth is
+     * available and the panel works out the age from the jobs it has been sent.
      *
      * @return array<int, array<string, mixed>>
      */
@@ -133,10 +125,9 @@ class Heartbeat
 
             try {
                 $size = Queue::connection($entry['connection'])->size($entry['queue']);
-            } catch (\Throwable $e) {
-                // A driver that cannot be counted, such as sync, or a broker
-                // that is unreachable. Reporting null says "not measured",
-                // which is not the same as reporting nothing waiting.
+            } catch (Throwable $e) {
+                // A driver that cannot be counted (sync) or an unreachable broker.
+                // Null says "not measured", which is not the same as nothing waiting.
             }
 
             $queues[] = [
@@ -162,7 +153,7 @@ class Heartbeat
 
         try {
             $workload = app('\Laravel\Horizon\Contracts\WorkloadRepository')->get();
-        } catch (\Throwable $e) {
+        } catch (Throwable $e) {
             return null;
         }
 
@@ -172,12 +163,10 @@ class Heartbeat
             $entry = (array) $entry;
 
             $queues[] = [
-                // Horizon names a queue by the connection's queues joined with
-                // commas when a supervisor watches several; it is passed through
-                // as reported rather than split, since that string is what its
-                // own dashboard shows.
-                'connection' => isset($entry['connection']) ? $entry['connection'] : null,
-                'queue' => isset($entry['name']) ? $entry['name'] : null,
+                // Horizon joins a supervisor's queues with commas; passed through
+                // as reported, since that string is what its own dashboard shows.
+                'connection' => $entry['connection'] ?? null,
+                'queue' => $entry['name'] ?? null,
                 'size' => isset($entry['length']) ? (int) $entry['length'] : null,
                 // Seconds in Horizon, milliseconds everywhere in this payload.
                 'wait' => isset($entry['wait']) ? (int) round($entry['wait'] * 1000) : null,
@@ -189,10 +178,8 @@ class Heartbeat
     }
 
     /**
-     * The queues to measure when there is no Horizon to ask.
-     *
-     * Configured explicitly, or the default connection's own queue, which is
-     * the one an app that has never thought about this is using.
+     * The queues to measure when there is no Horizon to ask: configured
+     * explicitly, or the default connection's own queue.
      *
      * @return array<int, array<string, string>>
      */
@@ -211,8 +198,8 @@ class Heartbeat
                 }
 
                 $queues[] = [
-                    'connection' => isset($entry['connection']) ? $entry['connection'] : config('queue.default'),
-                    'queue' => isset($entry['queue']) ? $entry['queue'] : 'default',
+                    'connection' => $entry['connection'] ?? config('queue.default'),
+                    'queue' => $entry['queue'] ?? 'default',
                 ];
             }
 
@@ -223,7 +210,7 @@ class Heartbeat
 
         return [[
             'connection' => $connection,
-            'queue' => config('queue.connections.'.$connection.'.queue', 'default'),
+            'queue' => config("queue.connections.{$connection}.queue", 'default'),
         ]];
     }
 }

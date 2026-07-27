@@ -4,6 +4,7 @@ namespace LaraBug\Tests;
 
 use LaraBug\Console\CommandBuffer;
 use LaraBug\Console\CommandListeners;
+use PHPUnit\Framework\Attributes\Test;
 use LaraBug\Console\ScheduledTaskBuffer;
 use LaraBug\Console\ScheduledTaskListeners;
 
@@ -11,14 +12,13 @@ class ScheduledTaskMonitoringTest extends TestCase
 {
     protected function tearDown(): void
     {
-        // The in-flight counter is static, so an unbalanced test would leak into
-        // the next one.
+        // The in-flight counter is static, so an unbalanced test would leak into the next one.
         ScheduledTaskListeners::$inFlight = 0;
 
         parent::tearDown();
     }
 
-    /** @test */
+    #[Test]
     public function it_records_a_task_that_ran_with_its_expression_and_duration()
     {
         $buffer = $this->taskBuffer();
@@ -38,7 +38,7 @@ class ScheduledTaskMonitoringTest extends TestCase
         $this->assertNotSame('', $record['trace_id']);
     }
 
-    /** @test */
+    #[Test]
     public function it_records_a_failed_task()
     {
         $buffer = $this->taskBuffer();
@@ -52,7 +52,7 @@ class ScheduledTaskMonitoringTest extends TestCase
         $this->assertSame('failed', $buffer->records[0]['status']);
     }
 
-    /** @test */
+    #[Test]
     public function it_records_a_skipped_task()
     {
         $buffer = $this->taskBuffer();
@@ -66,7 +66,7 @@ class ScheduledTaskMonitoringTest extends TestCase
         $this->assertSame(0.0, $record['duration_ms']);
     }
 
-    /** @test */
+    #[Test]
     public function a_command_run_while_a_task_is_in_flight_is_attributed_to_the_schedule()
     {
         $taskBuffer = $this->taskBuffer();
@@ -77,8 +77,7 @@ class ScheduledTaskMonitoringTest extends TestCase
 
         $task = $this->fakeTask('suite:command-ok');
 
-        // The scheduler starts the task, then runs the command in the same
-        // process, then the task finishes.
+        // The scheduler starts the task, runs the command in the same process, then the task finishes.
         $tasks->onScheduledTaskStarting($this->taskEvent($task));
 
         $input = $this->fakeInput();
@@ -87,16 +86,14 @@ class ScheduledTaskMonitoringTest extends TestCase
 
         $tasks->onScheduledTaskFinished($this->taskEvent($task, 0.1));
 
-        // Counted once, against the schedule: no command record, one task record.
         $this->assertCount(0, $commandBuffer->records);
         $this->assertCount(1, $taskBuffer->records);
         $this->assertSame('suite:command-ok', $taskBuffer->records[0]['task']);
     }
 
-    /** @test */
+    #[Test]
     public function a_standalone_command_is_still_recorded()
     {
-        // With no task in flight, the same command is a command as usual.
         $commandBuffer = $this->commandBuffer();
         $commands = new CommandListeners($commandBuffer);
         $input = $this->fakeInput();
@@ -109,9 +106,9 @@ class ScheduledTaskMonitoringTest extends TestCase
 
     private function taskBuffer(): ScheduledTaskBuffer
     {
-        return new class extends ScheduledTaskBuffer {
+        return new class () extends ScheduledTaskBuffer {
             /** @var array<int, array<string, mixed>> */
-            public $records = [];
+            public array $records = [];
 
             public function __construct()
             {
@@ -126,9 +123,9 @@ class ScheduledTaskMonitoringTest extends TestCase
 
     private function commandBuffer(): CommandBuffer
     {
-        return new class extends CommandBuffer {
+        return new class () extends CommandBuffer {
             /** @var array<int, array<string, mixed>> */
-            public $records = [];
+            public array $records = [];
 
             public function __construct()
             {
@@ -143,21 +140,16 @@ class ScheduledTaskMonitoringTest extends TestCase
 
     private function fakeTask(string $summary, string $expression = '* * * * *'): object
     {
-        return new class($summary, $expression) {
-            /** @var string */
-            public $expression;
+        return new class ($summary, $expression) {
+            public string $expression;
 
-            /** @var string */
-            public $description;
+            public string $description;
 
-            /** @var string|null */
-            public $command = null;
+            public ?string $command = null;
 
-            /** @var bool */
-            public $withoutOverlapping = false;
+            public bool $withoutOverlapping = false;
 
-            /** @var string */
-            private $summary;
+            private string $summary;
 
             public function __construct(string $summary, string $expression)
             {
@@ -200,7 +192,7 @@ class ScheduledTaskMonitoringTest extends TestCase
 
     private function fakeInput(): object
     {
-        return new class {
+        return new class () {
             /** @return array<string, mixed> */
             public function getArguments(): array
             {

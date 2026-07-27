@@ -3,12 +3,12 @@
 namespace LaraBug\Http\Middleware;
 
 use Closure;
+use Throwable;
 use Illuminate\Http\Request;
-use LaraBug\Requests\RequestBuffer;
-use LaraBug\Requests\RequestMonitor;
 use LaraBug\Requests\Sampler;
 use LaraBug\Requests\TraceContext;
-use Throwable;
+use LaraBug\Requests\RequestBuffer;
+use LaraBug\Requests\RequestMonitor;
 
 /**
  * Where a request's stage boundaries are marked, and where its record is

@@ -8,16 +8,16 @@ use LaraBug\LaraBug;
 use GuzzleHttp\Client;
 use GuzzleHttp\Psr7\Response;
 use GuzzleHttp\Handler\MockHandler;
+use LaraBug\Http\Client as HttpClient;
 use LaraBug\Tests\Mocks\LaraBugClient;
+use PHPUnit\Framework\Attributes\Test;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 class LaraBugTest extends TestCase
 {
-    /** @var LaraBug */
-    protected $laraBug;
+    protected LaraBug $laraBug;
 
-    /** @var Mocks\LaraBugClient */
-    protected $client;
+    protected HttpClient $client;
 
     public function setUp(): void
     {
@@ -29,15 +29,14 @@ class LaraBugTest extends TestCase
         ));
     }
 
-    /** @test */
+    #[Test]
     public function is_will_not_crash_if_larabug_returns_error_bad_response_exception()
     {
-        $this->laraBug = new LaraBug($this->client = new \LaraBug\Http\Client(
+        $this->laraBug = new LaraBug($this->client = new HttpClient(
             'login_key',
             'project_key'
         ));
 
-        //
         $this->app['config']['larabug.environments'] = ['testing'];
 
         $this->client->setGuzzleHttpClient(new Client([
@@ -49,15 +48,14 @@ class LaraBugTest extends TestCase
         $this->assertInstanceOf(get_class(new \stdClass()), $this->laraBug->handle(new Exception('is_will_not_crash_if_larabug_returns_error_bad_response_exception')));
     }
 
-    /** @test */
+    #[Test]
     public function is_will_not_crash_if_larabug_returns_normal_exception()
     {
-        $this->laraBug = new LaraBug($this->client = new \LaraBug\Http\Client(
+        $this->laraBug = new LaraBug($this->client = new HttpClient(
             'login_key',
             'project_key'
         ));
 
-        //
         $this->app['config']['larabug.environments'] = ['testing'];
 
         $this->client->setGuzzleHttpClient(new Client([
@@ -69,7 +67,7 @@ class LaraBugTest extends TestCase
         $this->assertFalse($this->laraBug->handle(new Exception('is_will_not_crash_if_larabug_returns_normal_exception')));
     }
 
-    /** @test */
+    #[Test]
     public function it_can_skip_exceptions_based_on_class()
     {
         $this->app['config']['larabug.except'] = [];
@@ -83,7 +81,7 @@ class LaraBugTest extends TestCase
         $this->assertTrue($this->laraBug->isSkipException(NotFoundHttpException::class));
     }
 
-    /** @test */
+    #[Test]
     public function it_can_skip_exceptions_based_on_environment()
     {
         $this->app['config']['larabug.environments'] = [];
@@ -99,7 +97,7 @@ class LaraBugTest extends TestCase
         $this->assertFalse($this->laraBug->isSkipEnvironment());
     }
 
-    /** @test */
+    #[Test]
     public function it_will_return_false_for_sleeping_cache_exception_if_disabled()
     {
         $this->app['config']['larabug.sleep'] = 0;
@@ -107,7 +105,7 @@ class LaraBugTest extends TestCase
         $this->assertFalse($this->laraBug->isSleepingException([]));
     }
 
-    /** @test */
+    #[Test]
     public function it_can_check_if_is_a_sleeping_cache_exception()
     {
         $data = ['host' => 'localhost', 'method' => 'GET', 'exception' => 'it_can_check_if_is_a_sleeping_cache_exception', 'line' => 2, 'file' => '/tmp/Larabug/tests/LaraBugTest.php', 'class' => 'Exception'];
@@ -131,7 +129,7 @@ class LaraBugTest extends TestCase
         $this->assertFalse($this->laraBug->isSleepingException($data));
     }
 
-    /** @test */
+    #[Test]
     public function it_can_get_formatted_exception_data()
     {
         $data = $this->laraBug->getExceptionData(new Exception(
@@ -144,15 +142,14 @@ class LaraBugTest extends TestCase
         $this->assertSame('http://localhost', $data['fullUrl']);
         $this->assertSame('it_can_get_formatted_exception_data', $data['exception']);
 
-        // The trace the exception was thrown in, so the server can join it to
-        // the request that failed.
+        // trace_id lets the server join the exception to the request that failed.
         $this->assertArrayHasKey('trace_id', $data);
         $this->assertNotSame('', $data['trace_id']);
 
         $this->assertCount(15, $data);
     }
 
-    /** @test */
+    #[Test]
     public function it_collects_a_window_of_source_for_each_frame()
     {
         $data = $this->laraBug->getExceptionData(new Exception(
@@ -162,19 +159,17 @@ class LaraBugTest extends TestCase
         $this->assertIsArray($data['frames']);
         $this->assertNotEmpty($data['frames']);
 
-        // The throw site leads the trace and points at this file.
         $this->assertSame(__FILE__, $data['frames'][0]['file']);
         $this->assertNotEmpty($data['frames'][0]['code']);
 
-        // A code row is the shape executor already uses, and it is a list
-        // rather than a keyed object once encoded.
+        // Code rows must stay a list so they encode as a JSON array, not a keyed object.
         $row = $data['frames'][0]['code'][0];
         $this->assertArrayHasKey('line_number', $row);
         $this->assertArrayHasKey('line', $row);
         $this->assertSame(array_values($data['frames'][0]['code']), $data['frames'][0]['code']);
     }
 
-    /** @test */
+    #[Test]
     public function it_caps_how_many_frames_carry_source()
     {
         $this->app['config']['larabug.max_code_frames'] = 1;
@@ -189,12 +184,11 @@ class LaraBugTest extends TestCase
 
         $this->assertSame(1, $framesWithCode);
 
-        // The deeper frames still name where they were, only the source stops.
         $this->assertGreaterThan(1, count($data['frames']));
         $this->assertNotEmpty($data['frames'][1]['file']);
     }
 
-    /** @test */
+    #[Test]
     public function it_filters_the_data_based_on_the_configuration()
     {
         $this->assertContains('*password*', $this->app['config']['larabug.blacklist']);
@@ -213,15 +207,10 @@ class LaraBugTest extends TestCase
             'Password' => 'testing',
         ];
 
-
         $this->assertContains('***', $this->laraBug->filterVariables($data));
-//        $this->assertArrayHasKey('not_password', $this->laraBug->filterVariables($data));
-//        $this->assertArrayNotHasKey('password', $this->laraBug->filterVariables($data)['not_password2']);
-//        $this->assertArrayNotHasKey('password', $this->laraBug->filterVariables($data)['not_password_3']['nah']);
-//        $this->assertArrayNotHasKey('Password', $this->laraBug->filterVariables($data));
     }
 
-    /** @test */
+    #[Test]
     public function it_can_report_an_exception_to_larabug()
     {
         $this->app['config']['larabug.environments'] = ['testing'];

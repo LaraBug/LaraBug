@@ -2,55 +2,52 @@
 
 namespace LaraBug\Console;
 
-use Illuminate\Contracts\Events\Dispatcher;
-use LaraBug\Requests\TraceContext;
 use Throwable;
+use LaraBug\Requests\TraceContext;
+use Illuminate\Contracts\Events\Dispatcher;
+use Illuminate\Console\Events\ScheduledTaskFailed;
+use Illuminate\Console\Events\ScheduledTaskSkipped;
+use Illuminate\Console\Events\ScheduledTaskFinished;
+use Illuminate\Console\Events\ScheduledTaskStarting;
 
 /**
  * The events that fill in a scheduled task record.
  *
- * Subscribed only when scheduled task tracking is on. A scheduled task is its
- * own execution context, and a scheduled command run is attributed here rather
- * than to commands: the in-flight counter this keeps is what the command
- * listener reads to bow out while a task is running, so the run is counted once.
+ * Subscribed only when scheduled task tracking is on. The in-flight counter it
+ * keeps is what the command listener reads to bow out while a task is running,
+ * so a scheduled command run is counted once, against the schedule.
  */
 class ScheduledTaskListeners
 {
     /**
-     * How many scheduled tasks are running right now. The command listener reads
-     * this to attribute a scheduled command run to the schedule rather than to
-     * commands. A counter, not a flag, because a task can, in principle, run
-     * inside another.
-     *
-     * @var int
+     * How many scheduled tasks are running right now. The command listener
+     * reads this to attribute a scheduled command run to the schedule rather
+     * than to commands. A counter, not a flag, because a task can, in
+     * principle, run inside another.
      */
-    public static $inFlight = 0;
+    public static int $inFlight = 0;
 
-    /** @var ScheduledTaskBuffer */
-    protected $buffer;
+    /** @var array<int, float> Start marks, keyed by task object id. */
+    protected array $startedAt = [];
 
-    /** @var array<int, float> Start marks, keyed by the task object. */
-    protected $startedAt = [];
-
-    public function __construct(ScheduledTaskBuffer $buffer)
+    public function __construct(protected readonly ScheduledTaskBuffer $buffer)
     {
-        $this->buffer = $buffer;
     }
 
     public function subscribe(Dispatcher $events): void
     {
-        $events->listen('Illuminate\Console\Events\ScheduledTaskStarting', [$this, 'onScheduledTaskStarting']);
-        $events->listen('Illuminate\Console\Events\ScheduledTaskFinished', [$this, 'onScheduledTaskFinished']);
-        $events->listen('Illuminate\Console\Events\ScheduledTaskFailed', [$this, 'onScheduledTaskFailed']);
-        $events->listen('Illuminate\Console\Events\ScheduledTaskSkipped', [$this, 'onScheduledTaskSkipped']);
+        $events->listen(ScheduledTaskStarting::class, $this->onScheduledTaskStarting(...));
+        $events->listen(ScheduledTaskFinished::class, $this->onScheduledTaskFinished(...));
+        $events->listen(ScheduledTaskFailed::class, $this->onScheduledTaskFailed(...));
+        $events->listen(ScheduledTaskSkipped::class, $this->onScheduledTaskSkipped(...));
     }
 
-    public function onScheduledTaskStarting($event): void
+    public function onScheduledTaskStarting(object $event): void
     {
         $this->guard(function () use ($event) {
             self::$inFlight++;
 
-            // Each task is its own unit of work, so each gets its own trace, the
+            // Each task is its own unit of work, so it gets its own trace, the
             // same as a queued job or a command.
             TraceContext::reset();
 
@@ -62,17 +59,17 @@ class ScheduledTaskListeners
         });
     }
 
-    public function onScheduledTaskFinished($event): void
+    public function onScheduledTaskFinished(object $event): void
     {
         $this->record($event, 'ran');
     }
 
-    public function onScheduledTaskFailed($event): void
+    public function onScheduledTaskFailed(object $event): void
     {
         $this->record($event, 'failed');
     }
 
-    public function onScheduledTaskSkipped($event): void
+    public function onScheduledTaskSkipped(object $event): void
     {
         // A skipped task never started, so the in-flight counter was not raised
         // for it and nothing needs releasing here.
@@ -81,10 +78,7 @@ class ScheduledTaskListeners
         });
     }
 
-    /**
-     * @param  mixed  $event
-     */
-    protected function record($event, string $status): void
+    protected function record(object $event, string $status): void
     {
         $this->guard(function () use ($event, $status) {
             if (self::$inFlight > 0) {
@@ -99,10 +93,9 @@ class ScheduledTaskListeners
     }
 
     /**
-     * @param  mixed  $task
      * @return array<string, mixed>
      */
-    protected function toRecord($task, string $status, float $duration): array
+    protected function toRecord(mixed $task, string $status, float $duration): array
     {
         return [
             'task' => $this->taskName($task),
@@ -119,14 +112,11 @@ class ScheduledTaskListeners
     }
 
     /**
-     * How long the task ran, from the mark its starting left. The finished event
-     * also carries a runtime, but a start mark works for failed too, which does
-     * not.
-     *
-     * @param  mixed  $task
-     * @param  mixed  $event
+     * How long the task ran, from the mark its starting left. The finished
+     * event also carries a runtime, but a start mark works for failed too,
+     * which does not.
      */
-    protected function duration($task, $event): float
+    protected function duration(mixed $task, object $event): float
     {
         if (is_object($task)) {
             $key = spl_object_id($task);
@@ -141,7 +131,7 @@ class ScheduledTaskListeners
         }
 
         // A finished event carries the runtime in seconds; fall back to it.
-        if (is_object($event) && isset($event->runtime)) {
+        if (isset($event->runtime)) {
             return (float) $event->runtime * 1000;
         }
 
@@ -149,12 +139,10 @@ class ScheduledTaskListeners
     }
 
     /**
-     * A readable name for a task. A scheduled command has its command string, a
-     * closure has its description or nothing worth a name.
-     *
-     * @param  mixed  $task
+     * A readable name for a task: a scheduled command has its command string,
+     * a closure its description or nothing worth a name.
      */
-    protected function taskName($task): string
+    protected function taskName(mixed $task): string
     {
         if (! is_object($task)) {
             return '';
@@ -196,7 +184,7 @@ class ScheduledTaskListeners
     {
         try {
             $callback();
-        } catch (Throwable $e) {
+        } catch (Throwable) {
             // Never let instrumentation surface in the application's own output.
         }
     }

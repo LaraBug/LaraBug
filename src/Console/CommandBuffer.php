@@ -3,39 +3,36 @@
 namespace LaraBug\Console;
 
 use Countable;
-use LaraBug\Http\Client;
 use Throwable;
+use LaraBug\Http\Client;
 
 /**
  * Batches finished command records.
  *
  * The console counterpart to RequestBuffer. A console process runs one command
  * and then exits, so the flush happens on shutdown as well as on size: without
- * it the record of the command that just finished would be lost at the moment it
- * completed. A long-running worker that this package does not ignore would flush
- * on size instead, but those are on the ignore list precisely because they never
- * finish.
+ * it the record of the command that just finished would be lost at the moment
+ * it completed.
  */
 class CommandBuffer implements Countable
 {
     /** @var array<int, array<string, mixed>> */
-    protected $buffer = [];
+    protected array $buffer = [];
 
-    /** @var Client */
-    protected $client;
+    protected readonly Client $client;
 
     /** @var array<string, mixed> */
-    protected $config;
+    protected readonly array $config;
 
-    /** @var int */
-    protected $batchSize;
+    protected readonly int $batchSize;
 
-    /** @var int */
-    protected $maxRetries;
+    protected readonly int $maxRetries;
 
-    /** @var bool */
-    protected $shutdownRegistered = false;
+    protected bool $shutdownRegistered = false;
 
+    /**
+     * @param  array<string, mixed>  $config
+     */
     public function __construct(Client $client, array $config)
     {
         $this->client = $client;
@@ -77,7 +74,7 @@ class CommandBuffer implements Countable
     {
         try {
             $this->client->reportCommands($records);
-        } catch (Throwable $e) {
+        } catch (Throwable) {
             if ($attempt <= $this->maxRetries) {
                 usleep(100000 * $attempt);
 
@@ -99,9 +96,7 @@ class CommandBuffer implements Countable
 
         $this->shutdownRegistered = true;
 
-        register_shutdown_function(function () {
-            $this->flush();
-        });
+        register_shutdown_function($this->flush(...));
     }
 
     public function count(): int

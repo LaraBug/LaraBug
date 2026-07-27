@@ -4,11 +4,11 @@ namespace LaraBug\Tests;
 
 use LaraBug\Http\Client;
 use LaraBug\Tests\Mocks\CveClient;
+use PHPUnit\Framework\Attributes\Test;
 
 class CveScanCommandTest extends TestCase
 {
-    /** @var string */
-    protected $lockPath;
+    protected string $lockPath;
 
     public function setUp(): void
     {
@@ -42,7 +42,7 @@ class CveScanCommandTest extends TestCase
         return $client;
     }
 
-    /** @test */
+    #[Test]
     public function it_refuses_to_run_while_the_feature_is_disabled()
     {
         $this->app['config']['larabug.cve.enabled'] = false;
@@ -56,7 +56,7 @@ class CveScanCommandTest extends TestCase
         $client->assertRequestsSent(0);
     }
 
-    /** @test */
+    #[Test]
     public function it_reports_a_lockfile_it_cannot_read()
     {
         $this->bindClient(new CveClient());
@@ -66,7 +66,7 @@ class CveScanCommandTest extends TestCase
             ->assertExitCode(1);
     }
 
-    /** @test */
+    #[Test]
     public function it_reports_a_queued_scan_with_its_snapshot_id()
     {
         $this->bindClient(new CveClient(202, '{"queued":true,"snapshot_id":"snap-42"}'));
@@ -77,7 +77,7 @@ class CveScanCommandTest extends TestCase
             ->assertExitCode(0);
     }
 
-    /** @test */
+    #[Test]
     public function it_reports_an_unchanged_lockfile_as_skipped()
     {
         $this->bindClient(new CveClient(200, '{"skipped":"unchanged","snapshot_id":"snap-1"}'));
@@ -87,7 +87,7 @@ class CveScanCommandTest extends TestCase
             ->assertExitCode(0);
     }
 
-    /** @test */
+    #[Test]
     public function it_explains_a_403_as_the_feature_being_off_for_the_project()
     {
         $this->bindClient(new CveClient(403, '{"error":"feature_disabled","feature":"cve"}'));
@@ -97,7 +97,7 @@ class CveScanCommandTest extends TestCase
             ->assertExitCode(1);
     }
 
-    /** @test */
+    #[Test]
     public function it_surfaces_any_other_server_error()
     {
         $this->bindClient(new CveClient(503, 'service unavailable'));
@@ -107,7 +107,7 @@ class CveScanCommandTest extends TestCase
             ->assertExitCode(1);
     }
 
-    /** @test */
+    #[Test]
     public function it_only_includes_dev_packages_when_told_to()
     {
         file_put_contents($this->lockPath, json_encode([

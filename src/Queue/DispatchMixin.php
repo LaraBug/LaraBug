@@ -2,11 +2,11 @@
 
 namespace LaraBug\Queue;
 
+use Closure;
+
 /**
- * Mixin for all Laravel dispatch classes
- * 
- * This provides IDE autocomplete support for ->track() method
- * 
+ * Mixin for Laravel's dispatch classes, providing IDE autocomplete for ->track().
+ *
  * @mixin \Illuminate\Foundation\Bus\PendingDispatch
  * @mixin \Illuminate\Foundation\Bus\PendingChain
  * @mixin \Illuminate\Foundation\Bus\PendingClosureDispatch
@@ -14,19 +14,12 @@ namespace LaraBug\Queue;
 class DispatchMixin
 {
     /**
-     * Enable LaraBug tracking for this specific job or chain
-     *
-     * @param bool $track
-     * @return \Closure|DispatchMixin
+     * Enable LaraBug tracking for this specific job or chain.
      */
-    public function track()
+    public function track(): Closure
     {
         return function (bool $track = true) {
-            if (property_exists($this->job, 'trackInLaraBug')) {
-                $this->job->trackInLaraBug = $track;
-            } else {
-                $this->job->trackInLaraBug = $track;
-            }
+            $this->job->trackInLaraBug = $track;
 
             return $this;
         };

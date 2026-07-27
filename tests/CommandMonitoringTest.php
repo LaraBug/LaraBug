@@ -4,10 +4,11 @@ namespace LaraBug\Tests;
 
 use LaraBug\Console\CommandBuffer;
 use LaraBug\Console\CommandListeners;
+use PHPUnit\Framework\Attributes\Test;
 
 class CommandMonitoringTest extends TestCase
 {
-    /** @test */
+    #[Test]
     public function it_records_a_finished_command_with_its_exit_code_and_arguments()
     {
         config(['larabug.commands.redact' => ['password']]);
@@ -32,12 +33,11 @@ class CommandMonitoringTest extends TestCase
         // The command name is the record's own column, not an argument.
         $this->assertArrayNotHasKey('command', $arguments['arguments']);
         $this->assertSame('mysql', $arguments['arguments']['connection']);
-        // The password option is replaced with a marker.
         $this->assertSame('[redacted]', $arguments['options']['password']);
         $this->assertTrue($arguments['options']['force']);
     }
 
-    /** @test */
+    #[Test]
     public function it_does_not_record_an_ignored_command()
     {
         config(['larabug.commands.ignore' => ['queue:work', 'horizon:*']]);
@@ -52,7 +52,7 @@ class CommandMonitoringTest extends TestCase
         $this->assertCount(0, $buffer->records);
     }
 
-    /** @test */
+    #[Test]
     public function a_failing_command_carries_its_non_zero_exit_code()
     {
         $buffer = $this->recordingBuffer();
@@ -65,15 +65,14 @@ class CommandMonitoringTest extends TestCase
         $this->assertSame(1, $buffer->records[0]['exit_code']);
     }
 
-    /** @test */
+    #[Test]
     public function nested_commands_each_get_their_own_record()
     {
         $buffer = $this->recordingBuffer();
         $listeners = new CommandListeners($buffer);
         $input = $this->fakeInput([], []);
 
-        // An outer command calls an inner one: starting, starting, finished,
-        // finished. Each finish must match the start it belongs to.
+        // Starting, starting, finished, finished: each finish must match the start it belongs to.
         $listeners->onCommandStarting($this->startingEvent('app:outer', $input));
         $listeners->onCommandStarting($this->startingEvent('app:inner', $input));
         $listeners->onCommandFinished($this->finishedEvent('app:inner', 0, $input));
@@ -84,12 +83,10 @@ class CommandMonitoringTest extends TestCase
 
     private function recordingBuffer(): CommandBuffer
     {
-        // A buffer that records rather than sends. It skips the parent
-        // constructor, so no shutdown flush is registered and no client is
-        // needed for a test that only cares what was buffered.
-        return new class extends CommandBuffer {
+        // Skips the parent constructor, so no shutdown flush is registered and no client is needed.
+        return new class () extends CommandBuffer {
             /** @var array<int, array<string, mixed>> */
-            public $records = [];
+            public array $records = [];
 
             public function __construct()
             {
@@ -130,17 +127,11 @@ class CommandMonitoringTest extends TestCase
      */
     private function fakeInput(array $arguments, array $options): object
     {
-        return new class($arguments, $options) {
-            /** @var array<string, mixed> */
-            private $arguments;
-
-            /** @var array<string, mixed> */
-            private $options;
-
-            public function __construct(array $arguments, array $options)
-            {
-                $this->arguments = $arguments;
-                $this->options = $options;
+        return new class ($arguments, $options) {
+            public function __construct(
+                private array $arguments,
+                private array $options,
+            ) {
             }
 
             /** @return array<string, mixed> */

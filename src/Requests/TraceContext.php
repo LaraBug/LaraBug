@@ -15,27 +15,15 @@ namespace LaraBug\Requests;
  */
 class TraceContext
 {
-    /** @var string|null */
-    protected static $traceId = null;
+    protected static ?string $traceId = null;
 
     public static function id(): string
     {
-        if (self::$traceId === null) {
-            self::$traceId = self::generate();
-        }
-
-        return self::$traceId;
+        return self::$traceId ??= self::generate();
     }
 
     /**
-     * A time-ordered id, built here rather than taken from Str::orderedUuid().
-     *
-     * The framework helper routes through ramsey/uuid's COMB generator, which
-     * on the versions Laravel 6 and 7 resolve to needs moontoast/math to
-     * convert a 128 bit integer. This package supports those releases and is
-     * not going to add a dependency to make an id.
-     *
-     * The layout is the same bargain orderedUuid strikes: 48 bits of
+     * The layout is the same bargain Str::orderedUuid() strikes: 48 bits of
      * millisecond timestamp in front, random after, so ids sort by creation
      * and a range scan stays possible later.
      */

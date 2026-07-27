@@ -2,6 +2,7 @@
 
 namespace LaraBug\Requests;
 
+use Throwable;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
 use Symfony\Component\HttpFoundation\Response;
@@ -22,10 +23,10 @@ use Symfony\Component\HttpFoundation\Response;
 class RequestMonitor
 {
     /** @var array<string, float> Wall-clock marks, in seconds. */
-    protected $marks = [];
+    protected array $marks = [];
 
     /** @var array<string, int> */
-    protected $counters = [
+    protected array $counters = [
         'queries' => 0,
         'cache_hits' => 0,
         'cache_misses' => 0,
@@ -38,43 +39,34 @@ class RequestMonitor
     ];
 
     /** @var array<int, array<string, mixed>> */
-    protected $queries = [];
+    protected array $queries = [];
 
     /** @var array<int, array<string, mixed>> */
-    protected $outgoing = [];
+    protected array $outgoing = [];
 
     /** @var array<int, array<string, mixed>> */
-    protected $mail = [];
+    protected array $mail = [];
 
     /** @var array<int, array<string, mixed>> */
-    protected $notifications = [];
+    protected array $notifications = [];
 
     /** @var array<int, array<string, mixed>> */
-    protected $cache = [];
+    protected array $cache = [];
 
     /** @var array<string, mixed>|null */
-    protected $route = null;
+    protected ?array $route = null;
 
-    /** @var string */
-    protected $exceptionId = '';
+    protected string $exceptionId = '';
 
-    /** @var array<string, mixed>|null */
-    protected $payload = null;
+    protected readonly int $maxQueries;
 
-    /** @var int */
-    protected $maxQueries;
+    protected readonly int $maxOutgoing;
 
-    /** @var int */
-    protected $maxOutgoing;
+    protected readonly int $maxMail;
 
-    /** @var int */
-    protected $maxMail;
+    protected readonly int $maxNotifications;
 
-    /** @var int */
-    protected $maxNotifications;
-
-    /** @var int */
-    protected $maxCacheEvents;
+    protected readonly int $maxCacheEvents;
 
     public function __construct()
     {
@@ -86,8 +78,7 @@ class RequestMonitor
 
         // LARAVEL_START is set in public/index.php before the framework boots,
         // so it is the only honest answer to "when did this request begin".
-        // Without it the earliest we can see is our own service provider, and
-        // bootstrap would report as nothing.
+        // Without it bootstrap would report as nothing.
         $this->marks['start'] = defined('LARAVEL_START') ? LARAVEL_START : microtime(true);
     }
 
@@ -122,11 +113,9 @@ class RequestMonitor
     }
 
     /**
-     * The exception this request threw, if the SDK reported one.
-     *
-     * Set from the report path rather than guessed from the status code: a 500
-     * can be returned deliberately, and an exception can be reported on a
-     * request that still answers 200.
+     * The exception this request threw, set from the report path rather than
+     * guessed from the status code: a 500 can be returned deliberately, and an
+     * exception can be reported on a request that still answers 200.
      */
     public function recordException(string $exceptionId = ''): void
     {
@@ -143,20 +132,18 @@ class RequestMonitor
     }
 
     /**
-     * Record one query.
-     *
      * The statement is kept with its placeholders and the bindings are dropped
-     * on the floor here rather than filtered later: a value in a WHERE clause is
-     * customer data, and the safest place to not send it is the place it would
+     * here rather than filtered later: a value in a WHERE clause is customer
+     * data, and the safest place to not send it is the place it would
      * otherwise be collected.
      */
     public function recordQuery(string $sql, string $connection, float $durationMs): void
     {
         $this->counters['queries']++;
 
-        // The counter keeps counting past the cap. A request running ten
-        // thousand queries is worth knowing about, and the reason to look at it
-        // is the number rather than the ten thousandth statement.
+        // The counter keeps counting past the cap: a request running ten
+        // thousand queries is worth knowing about, and the reason to look at
+        // it is the number rather than the ten thousandth statement.
         if (count($this->queries) >= $this->maxQueries) {
             return;
         }
@@ -172,13 +159,10 @@ class RequestMonitor
     }
 
     /**
-     * Record one outbound HTTP call.
-     *
-     * The counter keeps counting past the cap, the same as queries: a request
-     * that fans out to a hundred services is worth knowing about, and the number
-     * is what says so. The url arrives with its query values already stripped by
-     * the listener, the same stance the request path takes: a token in a
-     * callback url is customer data we have no business storing.
+     * Record one outbound HTTP call. The counter keeps counting past the cap,
+     * the same as queries. The url arrives with its query values already
+     * stripped by the listener: a token in a callback url is customer data we
+     * have no business storing.
      *
      * @param  array<string, mixed>  $call
      */
@@ -194,13 +178,10 @@ class RequestMonitor
     }
 
     /**
-     * Record one message sent.
-     *
-     * Carries the counter the same way recordOutgoing does, so the mail_sent
-     * tile still counts every message even on a request that sends more than the
-     * cap keeps. The recipients arrive as domains rather than addresses unless
-     * the application opted the full ones in: who a request emailed is personal
-     * data, and which service it emailed is the diagnostic part.
+     * Record one message sent. The counter keeps counting past the cap. The
+     * recipients arrive as domains rather than addresses unless the
+     * application opted the full ones in: who a request emailed is personal
+     * data, which service it emailed is the diagnostic part.
      *
      * @param  array<string, mixed>  $message
      */
@@ -216,12 +197,10 @@ class RequestMonitor
     }
 
     /**
-     * Record one notification sent.
-     *
-     * Carries the counter like recordMail does, one entry per channel: a
-     * notification going out over mail and database is two sends, which is what
-     * the notifiable actually receives. The notifiable is kept as its class,
-     * never its id: which model type gets notified is diagnostic, and which row
+     * Record one notification sent, one entry per channel: a notification
+     * going out over mail and database is two sends, which is what the
+     * notifiable actually receives. The notifiable is kept as its class,
+     * never its id: which model type gets notified is diagnostic, which row
      * is personal data.
      *
      * @param  array<string, mixed>  $notification
@@ -238,14 +217,10 @@ class RequestMonitor
     }
 
     /**
-     * Record one cache operation.
-     *
-     * The hit and miss counters are kept by their own listeners, so this only
-     * buffers the detail and is capped on its own: a request that reads the cache
-     * a thousand times is common, and the first hundred operations are enough to
-     * see its shape. The key arrives already narrowed to a prefix unless the
-     * application opted the full keys in, the same stance the query bindings take:
-     * a cache key routinely carries an id, which is customer data.
+     * Record one cache operation. The hit and miss counters are kept by their
+     * own listeners, so this only buffers the detail and is capped on its own:
+     * a request that reads the cache a thousand times is common, and the first
+     * hundred operations are enough to see its shape.
      *
      * @param  array<string, mixed>  $event
      */
@@ -281,8 +256,7 @@ class RequestMonitor
 
             // The path, and the names of the query parameters. Never their
             // values: password reset tokens, signed url signatures and invite
-            // tokens all live in a query string, and a customer who learns we
-            // stored one learns it too late.
+            // tokens all live in a query string.
             'path' => '/'.ltrim($request->path(), '/'),
             'query_keys' => implode(',', array_keys($request->query())),
 
@@ -328,10 +302,9 @@ class RequestMonitor
     }
 
     /**
-     * Request headers, minus the ones that are credentials.
-     *
-     * An allow-by-default list with an explicit deny, rather than the reverse:
-     * a header nobody thought about is usually diagnostic, and the handful that
+     * Request headers, minus the ones that are credentials. An
+     * allow-by-default list with an explicit deny, rather than the reverse: a
+     * header nobody thought about is usually diagnostic, and the handful that
      * are not are well known.
      *
      * @return string JSON
@@ -342,10 +315,10 @@ class RequestMonitor
             return '';
         }
 
-        // The fallback matters more than it looks. An application that
-        // published its config before these keys existed reads nothing from
-        // the file, and an empty list here would mean its Authorization header
-        // was stored in full. The default is the list, not the absence of one.
+        // The fallback matters: an application that published its config
+        // before these keys existed reads nothing from the file, and an empty
+        // list here would store its Authorization header in full. The default
+        // is the list, not the absence of one.
         $redact = array_map('strtolower', (array) config('larabug.requests.redact_headers', [
             'authorization',
             'cookie',
@@ -370,11 +343,9 @@ class RequestMonitor
     }
 
     /**
-     * The request body, on failure only.
-     *
-     * Nightwatch's bargain, and the right one: the body is what you need to
-     * reproduce the request that broke, and what you have no reason to hold for
-     * the thousands that did not.
+     * The request body, on failure only: the body is what you need to
+     * reproduce the request that broke, and what you have no reason to hold
+     * for the thousands that did not.
      */
     protected function payload(Request $request, Response $response): string
     {
@@ -404,12 +375,10 @@ class RequestMonitor
     }
 
     /**
-     * Replace sensitive values anywhere in a body.
-     *
-     * Depth-first and by substring, because the field that matters is rarely at
-     * the top level under exactly the name the config lists: a checkout posts
-     * card[cvv], a registration posts user.password_confirmation, and a rule
-     * that only reads the outermost keys would store both.
+     * Replace sensitive values anywhere in a body. Depth-first and by
+     * substring, because the field that matters is rarely at the top level
+     * under exactly the name the config lists: a checkout posts card[cvv], a
+     * registration posts user.password_confirmation.
      *
      * @param  array<int|string, mixed>  $input
      * @param  array<int, string>  $redact  lowercased needles
@@ -418,18 +387,17 @@ class RequestMonitor
     protected function redact(array $input, array $redact): array
     {
         foreach ($input as $key => $value) {
-            // The key is judged before the value is walked into. A matching key
-            // takes its whole branch with it: 'card' has to remove
-            // card[number] as well as card[cvv], and recursing first would only
-            // have caught the one that happened to be named in the list.
+            // The key is judged before the value is walked into: a matching
+            // key takes its whole branch with it, so 'card' removes
+            // card[number] as well as card[cvv].
             if ($this->isSensitive($key, $redact)) {
                 $input[$key] = '[redacted]';
 
                 continue;
             }
 
-            // An upload is a file handle, not data. It has no JSON form worth
-            // sending and its contents are not ours to hold, so it is described
+            // An upload is a file handle, not data: no JSON form worth sending
+            // and contents that are not ours to hold, so it is described
             // rather than serialised.
             if ($value instanceof UploadedFile) {
                 $input[$key] = '[file: '.$value->getClientOriginalName().']';
@@ -449,12 +417,12 @@ class RequestMonitor
      * @param  int|string  $key
      * @param  array<int, string>  $redact  lowercased needles
      */
-    protected function isSensitive($key, array $redact): bool
+    protected function isSensitive(int|string $key, array $redact): bool
     {
         $name = strtolower((string) $key);
 
         foreach ($redact as $needle) {
-            if ($needle !== '' && strpos($name, $needle) !== false) {
+            if ($needle !== '' && str_contains($name, $needle)) {
                 return true;
             }
         }
@@ -463,12 +431,11 @@ class RequestMonitor
     }
 
     /**
-     * The seven stages, in the order a request passes through them.
-     *
-     * Each is the gap between two marks, and a mark that was never set closes
-     * its stage at zero rather than borrowing from its neighbour: a request
-     * that threw in middleware never reached render, and reporting render time
-     * for it would be inventing a number.
+     * The seven stages, in the order a request passes through them. Each is
+     * the gap between two marks, and a mark that was never set closes its
+     * stage at zero rather than borrowing from its neighbour: a request that
+     * threw in middleware never reached render, and reporting render time for
+     * it would be inventing a number.
      *
      * @return array<string, float>
      */
@@ -487,7 +454,7 @@ class RequestMonitor
         $stages = [];
 
         foreach ($order as $stage => $pair) {
-            list($from, $to) = $pair;
+            [$from, $to] = $pair;
 
             $stages[$stage] = isset($this->marks[$from], $this->marks[$to])
                 ? round(max(0, ($this->marks[$to] - $this->marks[$from]) * 1000), 3)
@@ -498,11 +465,10 @@ class RequestMonitor
     }
 
     /**
-     * The rollup key, hashed here rather than on ingest.
-     *
-     * Sorted methods, domain and route path, which is Nightwatch's key and the
-     * right one: it groups by what the application defines rather than by what
-     * the client typed, so /users/1 and /users/2 are one row.
+     * The rollup key, hashed here rather than on ingest. Sorted methods,
+     * domain and route path, which is Nightwatch's key and the right one: it
+     * groups by what the application defines rather than by what the client
+     * typed, so /users/1 and /users/2 are one row.
      */
     protected function group(Request $request): string
     {
@@ -514,15 +480,12 @@ class RequestMonitor
 
         sort($methods);
 
-        // md5 for the same reason QueryNormaliser uses it: xxh128 is PHP 8.1+
-        // and this package still supports 7.4.
+        // md5 for the same reason QueryNormaliser keeps it: a stable grouping
+        // key, not a signature.
         return md5(implode('|', $methods).','.$this->routeValue('domain', '').','.$this->routeValue('path', ''));
     }
 
-    /**
-     * @return mixed
-     */
-    protected function routeValue(string $key, $default)
+    protected function routeValue(string $key, mixed $default): mixed
     {
         if ($this->route === null || ! array_key_exists($key, $this->route)) {
             return $default;
@@ -539,7 +502,7 @@ class RequestMonitor
 
         try {
             $user = auth()->user();
-        } catch (\Throwable $e) {
+        } catch (Throwable) {
             return '';
         }
 

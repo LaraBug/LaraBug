@@ -8,32 +8,29 @@ use Illuminate\Contracts\Queue\Job;
 
 class JobMonitor
 {
-    protected Client $client;
+    protected readonly Client $client;
 
-    protected array $config;
+    protected readonly array $config;
 
-    protected JobDataCollector $collector;
-    
-    protected ?EventBuffer $buffer = null;
+    protected readonly JobDataCollector $collector;
+
+    protected readonly ?EventBuffer $buffer;
 
     public function __construct(Client $client, array $config)
     {
         $this->client = $client;
         $this->config = $config;
         $this->collector = new JobDataCollector($config);
-        
-        // Initialize buffer for dynamic batching
         $this->buffer = new EventBuffer($client, $config);
     }
 
     public function trackJobStarted(Job $job, string $connectionName): void
     {
-        if (!$this->shouldTrack($job)) {
+        if (! $this->shouldTrack($job)) {
             return;
         }
-        
-        // Check if we should track processing events
-        if (!($this->config['jobs']['track_processing'] ?? false)) {
+
+        if (! ($this->config['jobs']['track_processing'] ?? false)) {
             return;
         }
 
@@ -44,17 +41,15 @@ class JobMonitor
 
     public function trackJobCompleted(Job $job, string $connectionName, ?float $durationMs, ?int $memoryUsed): void
     {
-        if (!$this->shouldTrack($job)) {
+        if (! $this->shouldTrack($job)) {
             return;
         }
-        
-        // Check if we should track completed events
-        if (!($this->config['jobs']['track_completed'] ?? true)) {
+
+        if (! ($this->config['jobs']['track_completed'] ?? true)) {
             return;
         }
-        
-        // Apply sampling rate
-        if (!$this->shouldSample()) {
+
+        if (! $this->shouldSample()) {
             return;
         }
 
@@ -68,11 +63,14 @@ class JobMonitor
 
     public function trackJobFailed(Job $job, string $connectionName, Throwable $exception, ?float $durationMs): void
     {
-        if (!$this->shouldTrack($job)) {
+        if (! $this->shouldTrack($job)) {
             return;
         }
-        
-        // Build storage data similar to regular exceptions
+
+        if (! ($this->config['jobs']['track_failed'] ?? true)) {
+            return;
+        }
+
         $storage = [
             'SERVER' => [
                 'USER' => $_SERVER['USER'] ?? null,
@@ -83,22 +81,17 @@ class JobMonitor
             ],
             'HEADERS' => getallheaders() ?: [],
         ];
-        
-        // ALWAYS track failures (unless explicitly disabled)
-        if (!($this->config['jobs']['track_failed'] ?? true)) {
-            return;
-        }
-        
+
         $data = $this->collector->collect($job, $connectionName, 'failed', [
             'duration_ms' => $durationMs,
             'exception' => [
-                'class' => get_class($exception),
+                'class' => $exception::class,
                 'message' => $exception->getMessage(),
                 'code' => $exception->getCode(),
                 'file' => $exception->getFile(),
                 'line' => $exception->getLine(),
-                'error' => $exception->getTraceAsString(), // Stack trace goes in error field
-                'storage' => array_filter($storage), // Server/headers data goes in storage field
+                'error' => $exception->getTraceAsString(), // Stack trace goes in the error field
+                'storage' => array_filter($storage), // Server/headers data goes in the storage field
                 'environment' => config('app.env', 'production'),
             ],
         ]);
@@ -106,29 +99,23 @@ class JobMonitor
         $this->send($data);
     }
 
-    /**
-     * Check if job should be tracked based on filters and configuration
-     */
     protected function shouldTrack(Job $job): bool
     {
-        // Check if tracking is globally disabled
-        if (!($this->config['jobs']['track_jobs'] ?? true)) {
+        if (! ($this->config['jobs']['track_jobs'] ?? true)) {
             return false;
         }
 
         // Don't track queue events while a regular exception capture is in flight —
-        // prevents the queue tracking path from re-entering the send pipeline
-        // while it is already being used by LaraBug::handle().
+        // prevents re-entering the send pipeline while LaraBug::handle() is using it.
         if (\LaraBug\LaraBug::isCapturing()) {
             return false;
         }
 
         $jobClass = $job->resolveName();
 
-        // Never track SDK-internal jobs. This is a hard-coded safety rail on top
-        // of the user-configurable ignore list below: when the LaraBug package is
-        // installed inside the LaraBug SaaS itself (dogfooding), we never want the
-        // ingest queue jobs shipping themselves back to the server.
+        // Hard-coded safety rail on top of the user-configurable ignore list: when
+        // the SDK is dogfooded inside the LaraBug SaaS itself, the ingest queue jobs
+        // must never ship themselves back to the server.
         if (is_string($jobClass) && (
             str_starts_with($jobClass, 'LaraBug\\')
             || str_starts_with($jobClass, 'Larabug\\')
@@ -136,19 +123,17 @@ class JobMonitor
             return false;
         }
 
-        // Check ignore list
         foreach ($this->config['jobs']['ignore_jobs'] ?? [] as $ignoredJob) {
             if ($jobClass === $ignoredJob || is_subclass_of($jobClass, $ignoredJob)) {
                 return false;
             }
         }
 
-        // Check queue filters
         $jobQueue = $job->getQueue();
         $onlyQueues = $this->config['jobs']['only_queues'] ?? [];
         $ignoreQueues = $this->config['jobs']['ignore_queues'] ?? [];
 
-        if (!empty($onlyQueues) && !in_array($jobQueue, $onlyQueues)) {
+        if (! empty($onlyQueues) && ! in_array($jobQueue, $onlyQueues)) {
             return false;
         }
 
@@ -162,51 +147,41 @@ class JobMonitor
     protected function send(array $data): void
     {
         try {
-            // Use buffer for dynamic batching
             if ($this->buffer) {
                 $this->buffer->add($data);
+
                 return;
             }
-            
-            // Fall back to direct sending if buffer not initialized
+
+            // Fall back to direct sending if the buffer was never initialized.
             $payload = [
                 'type' => 'queue_job',
                 'project' => $this->config['project_key'],
                 'job' => $data,
             ];
-            
+
             $this->client->report($payload);
         } catch (Throwable $e) {
-            // Silent fail - never break user's jobs
-            // But report the error if configured
+            // Silent fail — never break the user's jobs.
             $this->reportError($e);
         }
     }
-    
-    /**
-     * Apply sampling rate for successful job completions
-     */
+
     protected function shouldSample(): bool
     {
         $sampleRate = $this->config['jobs']['sample_rate'] ?? 1.0;
-        
-        // Always sample at 100%
+
         if ($sampleRate >= 1.0) {
             return true;
         }
-        
-        // Never sample
+
         if ($sampleRate <= 0.0) {
             return false;
         }
-        
-        // Random sampling
+
         return (mt_rand() / mt_getrandmax()) <= $sampleRate;
     }
-    
-    /**
-     * Report SDK errors (for debugging)
-     */
+
     protected function reportError(Throwable $e): void
     {
         try {
@@ -214,7 +189,7 @@ class JobMonitor
                 $this->client->report([
                     'type' => 'sdk_error',
                     'exception' => [
-                        'class' => get_class($e),
+                        'class' => $e::class,
                         'message' => $e->getMessage(),
                         'file' => $e->getFile(),
                         'line' => $e->getLine(),
@@ -222,17 +197,15 @@ class JobMonitor
                 ]);
             }
         } catch (Throwable $ignored) {
-            // Never let error reporting break the app
+            // Never let error reporting break the app.
         }
     }
-    
+
     /**
-     * Manually flush the buffer (useful for testing or long-running processes)
+     * Manually flush the buffer (useful for testing or long-running processes).
      */
     public function flush(): void
     {
-        if ($this->buffer) {
-            $this->buffer->flush();
-        }
+        $this->buffer?->flush();
     }
 }

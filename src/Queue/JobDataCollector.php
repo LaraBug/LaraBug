@@ -2,20 +2,25 @@
 
 namespace LaraBug\Queue;
 
+use Exception;
+use Carbon\Carbon;
 use LaraBug\Filters\DataFilter;
 use Illuminate\Contracts\Queue\Job;
 
 class JobDataCollector
 {
-    protected array $config;
+    protected readonly array $config;
 
-    protected DataFilter $filterer;
+    protected readonly DataFilter $filterer;
 
     /**
-     * Cache of timestamps by job_id
-     * Persists for the lifetime of the worker process
+     * Timestamps by job id, cached for the lifetime of the worker process.
+     *
+     * @var array<string, string>
      */
     protected static array $reservedAtCache = [];
+
+    /** @var array<string, string> */
     protected static array $availableAtCache = [];
 
     public function __construct(array $config)
@@ -30,8 +35,7 @@ class JobDataCollector
     public function collect(Job $job, string $connectionName, string $status, array $extra = []): array
     {
         $payload = json_decode($job->getRawBody(), true) ?? [];
-        
-        // Use UUID from payload if available, otherwise fall back to job ID
+
         $jobId = $payload['uuid'] ?? $job->getJobId();
 
         $data = [
@@ -49,43 +53,38 @@ class JobDataCollector
             'created_at' => now()->toIso8601String(),
         ];
 
-        // Add timestamps based on status
-        // Set timestamps on first event (processing)
-        if ($status === 'processing' && !isset(static::$reservedAtCache[$jobId])) {
+        // available_at (when the job was pushed) and reserved_at (when a worker
+        // picked it up) are set on the first processing event and cached, so
+        // completed/failed events report the same values.
+        if ($status === 'processing' && ! isset(static::$reservedAtCache[$jobId])) {
             $now = now();
-            
-            // available_at: When job was pushed to queue (use pushedAt from payload if available)
-            $availableAt = isset($payload['pushedAt']) 
+
+            $availableAt = isset($payload['pushedAt'])
                 ? $this->convertTimestamp($payload['pushedAt'])
                 : $now->toIso8601String();
-            
-            // reserved_at: When worker picked up the job (now)
+
             $reservedAt = $now->toIso8601String();
-            
-            // Cache both timestamps
+
             static::$availableAtCache[$jobId] = $availableAt;
             static::$reservedAtCache[$jobId] = $reservedAt;
-            
+
             $data['available_at'] = $availableAt;
             $data['reserved_at'] = $reservedAt;
         } elseif (isset(static::$reservedAtCache[$jobId])) {
-            // Use cached timestamps for completed/failed states
             $data['available_at'] = static::$availableAtCache[$jobId] ?? null;
             $data['reserved_at'] = static::$reservedAtCache[$jobId];
         }
 
-        // completed_at: When job finished successfully
         if ($status === 'completed') {
             $data['completed_at'] = now()->toIso8601String();
-            // Clean up cache
+
             unset(static::$reservedAtCache[$jobId]);
             unset(static::$availableAtCache[$jobId]);
         }
 
-        // failed_at: When job failed
         if ($status === 'failed') {
             $data['failed_at'] = now()->toIso8601String();
-            // Clean up cache
+
             unset(static::$reservedAtCache[$jobId]);
             unset(static::$availableAtCache[$jobId]);
         }
@@ -93,24 +92,19 @@ class JobDataCollector
         return array_merge($data, $extra);
     }
 
-    /**
-     * Convert timestamp to ISO8601 string format
-     */
-    protected function convertTimestamp($timestamp): ?string
+    protected function convertTimestamp(mixed $timestamp): ?string
     {
         if ($timestamp === null) {
             return null;
         }
 
-        // If it's already a timestamp integer
         if (is_numeric($timestamp)) {
-            return \Carbon\Carbon::createFromTimestamp($timestamp)->toIso8601String();
+            return Carbon::createFromTimestamp($timestamp)->toIso8601String();
         }
 
-        // If it's a date string, try to parse it
         try {
-            return \Carbon\Carbon::parse($timestamp)->toIso8601String();
-        } catch (\Exception $e) {
+            return Carbon::parse($timestamp)->toIso8601String();
+        } catch (Exception $e) {
             return null;
         }
     }

@@ -4,17 +4,18 @@ namespace LaraBug\Tests;
 
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
-use LaraBug\Http\Middleware\CaptureRequest;
-use LaraBug\Requests\QueryNormaliser;
-use LaraBug\Requests\RequestBuffer;
-use LaraBug\Requests\RequestListeners;
-use LaraBug\Requests\RequestMonitor;
 use LaraBug\Requests\Sampler;
 use LaraBug\Requests\TraceContext;
+use LaraBug\Requests\RequestBuffer;
+use LaraBug\Requests\RequestMonitor;
+use LaraBug\Requests\QueryNormaliser;
+use LaraBug\Requests\RequestListeners;
+use PHPUnit\Framework\Attributes\Test;
+use LaraBug\Http\Middleware\CaptureRequest;
 
 class RequestMonitoringTest extends TestCase
 {
-    /** @test */
+    #[Test]
     public function it_collapses_in_lists_so_one_query_is_one_group()
     {
         $a = QueryNormaliser::normalise('select * from users where id in (1, 2, 3)');
@@ -27,7 +28,7 @@ class RequestMonitoringTest extends TestCase
         );
     }
 
-    /** @test */
+    #[Test]
     public function it_collapses_multi_row_inserts()
     {
         $a = QueryNormaliser::normalise('insert into logs (a, b) values (1, 2), (3, 4)');
@@ -36,7 +37,7 @@ class RequestMonitoringTest extends TestCase
         $this->assertSame($a, $b);
     }
 
-    /** @test */
+    #[Test]
     public function queries_on_different_connections_do_not_group_together()
     {
         $sql = QueryNormaliser::normalise('select * from users');
@@ -47,7 +48,7 @@ class RequestMonitoringTest extends TestCase
         );
     }
 
-    /** @test */
+    #[Test]
     public function it_never_samples_an_ignored_path()
     {
         config([
@@ -62,7 +63,7 @@ class RequestMonitoringTest extends TestCase
         ));
     }
 
-    /** @test */
+    #[Test]
     public function a_route_learned_after_the_decision_can_still_drop_it()
     {
         config([
@@ -79,7 +80,7 @@ class RequestMonitoringTest extends TestCase
         $this->assertFalse($sampler->reconsider('/admin/reports'));
     }
 
-    /** @test */
+    #[Test]
     public function a_failure_reconsiders_a_request_that_was_not_sampled()
     {
         config([
@@ -93,7 +94,7 @@ class RequestMonitoringTest extends TestCase
         $this->assertTrue($sampler->reconsiderForException());
     }
 
-    /** @test */
+    #[Test]
     public function the_rate_it_reports_is_bounded()
     {
         config(['larabug.requests.sample_rate' => 0]);
@@ -106,7 +107,7 @@ class RequestMonitoringTest extends TestCase
         $this->assertSame(0.25, (new Sampler())->rate());
     }
 
-    /** @test */
+    #[Test]
     public function it_replaces_credential_headers_with_a_marker()
     {
         $request = Request::create('/orders', 'GET');
@@ -118,17 +119,14 @@ class RequestMonitoringTest extends TestCase
 
         $this->assertSame('[redacted]', $headers['authorization']);
         $this->assertSame('[redacted]', $headers['cookie']);
-        // Everything not on the list survives: a header nobody thought about
-        // is usually diagnostic.
+        // Headers not on the list survive: an unanticipated header is usually diagnostic.
         $this->assertSame('application/json', $headers['accept']);
     }
 
-    /** @test */
+    #[Test]
     public function it_redacts_headers_even_when_the_published_config_predates_the_key()
     {
-        // The shape an application upgrading into this feature is actually in.
-        // mergeConfigFrom is shallow, so a published file that predates these
-        // keys replaces the whole requests array and the key is simply absent.
+        // mergeConfigFrom is shallow, so a published config predating these keys replaces the whole requests array.
         $requests = config('larabug.requests');
         unset($requests['redact_headers']);
         config(['larabug.requests' => $requests]);
@@ -139,7 +137,7 @@ class RequestMonitoringTest extends TestCase
         $this->assertSame('[redacted]', $this->headersFor($request)['authorization']);
     }
 
-    /** @test */
+    #[Test]
     public function a_body_is_kept_only_when_the_request_failed()
     {
         config(['larabug.requests.capture_payload_on_error' => true]);
@@ -148,14 +146,13 @@ class RequestMonitoringTest extends TestCase
 
         $this->assertSame('', $this->payloadFor(Request::create('/orders', 'POST', $body), 200));
         $this->assertSame('', $this->payloadFor(Request::create('/orders', 'POST', $body), 422));
-        // A GET has no body worth keeping, and its parameters are in the query
-        // string, which is never stored.
+        // A GET's parameters live in the query string, which is never stored.
         $this->assertSame('', $this->payloadFor(Request::create('/orders', 'GET', $body), 500));
 
         $this->assertNotSame('', $this->payloadFor(Request::create('/orders', 'POST', $body), 500));
     }
 
-    /** @test */
+    #[Test]
     public function a_kept_body_carries_no_secrets_at_any_depth()
     {
         config(['larabug.requests.capture_payload_on_error' => true]);
@@ -171,18 +168,16 @@ class RequestMonitoringTest extends TestCase
         $payload = json_decode($this->payloadFor($request, 500), true);
 
         $this->assertSame('[redacted]', $payload['password']);
-        // Matched as a substring, because the field that matters is rarely
-        // named exactly what the list says.
+        // Matched as a substring, because the field that matters is rarely named exactly what the list says.
         $this->assertSame('[redacted]', $payload['password_confirmation']);
         // The whole branch goes, because its parent key matched.
         $this->assertSame('[redacted]', $payload['card']);
 
-        // And the rest survives, or there would be nothing left worth storing.
         $this->assertSame('a@b.c', $payload['email']);
         $this->assertSame('SUITE-1001', $payload['order_reference']);
     }
 
-    /** @test */
+    #[Test]
     public function everything_in_one_execution_shares_a_trace_id()
     {
         TraceContext::reset();
@@ -196,7 +191,7 @@ class RequestMonitoringTest extends TestCase
         $this->assertNotSame($first, TraceContext::id());
     }
 
-    /** @test */
+    #[Test]
     public function an_exception_counts_against_the_request_that_threw_it()
     {
         $monitor = new RequestMonitor();
@@ -207,12 +202,11 @@ class RequestMonitoringTest extends TestCase
         $record = $monitor->toArray(Request::create('/orders', 'GET'), new Response('', 500), 1.0);
 
         $this->assertSame(2, $record['exceptions']);
-        // The first id reported wins: it is the one that caused the failure,
-        // and later ones are usually the handler's own noise.
+        // The first id wins: it caused the failure, later ones are usually the handler's own noise.
         $this->assertSame('exc-1', $record['exception_id']);
     }
 
-    /** @test */
+    #[Test]
     public function a_failed_request_that_was_not_sampled_is_kept_at_the_exception_rate()
     {
         config([
@@ -223,7 +217,7 @@ class RequestMonitoringTest extends TestCase
         $this->assertCount(1, $this->recordsForFailedRequest());
     }
 
-    /** @test */
+    #[Test]
     public function a_failed_request_is_dropped_when_the_exception_rate_is_zero()
     {
         config([
@@ -234,7 +228,7 @@ class RequestMonitoringTest extends TestCase
         $this->assertCount(0, $this->recordsForFailedRequest());
     }
 
-    /** @test */
+    #[Test]
     public function a_kept_failure_carries_its_effective_rate_not_the_head_rate()
     {
         config([
@@ -249,7 +243,7 @@ class RequestMonitoringTest extends TestCase
         $this->assertSame(1.0, $records[0]['sample_rate']);
     }
 
-    /** @test */
+    #[Test]
     public function it_records_an_outgoing_call_with_its_query_values_stripped()
     {
         if (! class_exists(\Illuminate\Http\Client\Request::class)) {
@@ -279,7 +273,7 @@ class RequestMonitoringTest extends TestCase
         $this->assertSame('https://api.example.com/v1/users?token=&page=', $call['url']);
     }
 
-    /** @test */
+    #[Test]
     public function it_marks_an_outgoing_call_that_never_got_a_response()
     {
         if (! class_exists(\Illuminate\Http\Client\Request::class)) {
@@ -299,7 +293,7 @@ class RequestMonitoringTest extends TestCase
         $this->assertNotSame('', $call['error']);
     }
 
-    /** @test */
+    #[Test]
     public function the_outgoing_counter_keeps_counting_past_the_cap()
     {
         config(['larabug.requests.max_outgoing' => 2]);
@@ -315,12 +309,11 @@ class RequestMonitoringTest extends TestCase
 
         $record = $monitor->toArray(Request::create('/orders', 'GET'), new Response('', 200), 1.0);
 
-        // All five counted, only two kept.
         $this->assertSame(5, $record['outgoing_requests']);
         $this->assertCount(2, $record['outgoing']);
     }
 
-    /** @test */
+    #[Test]
     public function it_records_a_message_with_its_recipient_domains_and_not_the_addresses()
     {
         $monitor = new RequestMonitor();
@@ -342,12 +335,11 @@ class RequestMonitoringTest extends TestCase
         $this->assertSame(2, $message['to_count']);
         $this->assertSame(1, $message['cc_count']);
         $this->assertSame(0, $message['bcc_count']);
-        // Deduped domains, in recipient order, and never a local part.
         $this->assertSame('example.com,other.test', $message['recipient_domains']);
         $this->assertStringNotContainsString('alice', $message['recipient_domains']);
     }
 
-    /** @test */
+    #[Test]
     public function it_keeps_the_full_recipient_addresses_only_when_they_are_opted_in()
     {
         config(['larabug.requests.capture_mail_recipients' => true]);
@@ -362,7 +354,7 @@ class RequestMonitoringTest extends TestCase
         $this->assertSame('alice@example.com', $message['recipient_domains']);
     }
 
-    /** @test */
+    #[Test]
     public function it_resolves_the_mailable_class_from_the_call_stack()
     {
         $monitor = new RequestMonitor();
@@ -370,9 +362,8 @@ class RequestMonitoringTest extends TestCase
 
         $event = $this->mailEvent($this->mailMessage('Hi', ['a@b.test']));
 
-        // The resolver walks the stack for a Mailable frame; firing the event
-        // from inside one is what a real send does.
-        $mailable = new class extends \Illuminate\Mail\Mailable {
+        // The resolver walks the stack for a Mailable frame, so fire the event from inside one.
+        $mailable = new class () extends \Illuminate\Mail\Mailable {
             public function fire(RequestListeners $listeners, object $event): void
             {
                 $listeners->onMailSent($event);
@@ -386,7 +377,7 @@ class RequestMonitoringTest extends TestCase
         $this->assertSame(get_class($mailable), $message['mailable']);
     }
 
-    /** @test */
+    #[Test]
     public function mail_sent_without_a_mailable_carries_an_empty_class()
     {
         $monitor = new RequestMonitor();
@@ -397,7 +388,7 @@ class RequestMonitoringTest extends TestCase
         $this->assertSame('', $monitor->toArray(Request::create('/x', 'GET'), new Response('', 200), 1.0)['mail'][0]['mailable']);
     }
 
-    /** @test */
+    #[Test]
     public function it_times_a_send_from_its_sending_event()
     {
         $monitor = new RequestMonitor();
@@ -411,12 +402,11 @@ class RequestMonitoringTest extends TestCase
 
         $message = $monitor->toArray(Request::create('/x', 'GET'), new Response('', 200), 1.0)['mail'][0];
 
-        // Paired with its sending event, so a real duration rather than the zero
-        // a sent-only mailer leaves.
+        // Paired with its sending event, so a real duration rather than a sent-only mailer's zero.
         $this->assertGreaterThan(0, $message['duration_ms']);
     }
 
-    /** @test */
+    #[Test]
     public function the_mail_counter_keeps_counting_past_the_cap()
     {
         config(['larabug.requests.max_mail' => 2]);
@@ -432,12 +422,11 @@ class RequestMonitoringTest extends TestCase
 
         $record = $monitor->toArray(Request::create('/x', 'GET'), new Response('', 200), 1.0);
 
-        // All five counted, only two kept.
         $this->assertSame(5, $record['mail_sent']);
         $this->assertCount(2, $record['mail']);
     }
 
-    /** @test */
+    #[Test]
     public function it_records_a_notification_with_its_channel_and_notifiable_type()
     {
         $monitor = new RequestMonitor();
@@ -462,7 +451,7 @@ class RequestMonitoringTest extends TestCase
         $this->assertSame(1, $notification['success']);
     }
 
-    /** @test */
+    #[Test]
     public function it_marks_a_failed_notification()
     {
         $monitor = new RequestMonitor();
@@ -479,15 +468,14 @@ class RequestMonitoringTest extends TestCase
         $this->assertSame(0, $notification['success']);
     }
 
-    /** @test */
+    #[Test]
     public function a_notification_sent_over_mail_is_not_also_counted_as_mail()
     {
         $monitor = new RequestMonitor();
         $listeners = new RequestListeners($monitor, new Sampler());
 
         $event = $this->mailEvent($this->mailMessage('Reset your password', ['a@b.test']));
-        // The stamp Laravel puts on a notification's mail: the notification path
-        // already records it, so the mail path must leave it alone.
+        // Laravel's stamp on a notification's mail: the notification path records it, the mail path must leave it alone.
         $event->data = ['__laravel_notification' => FakeNotification::class];
 
         $listeners->onMailSent($event);
@@ -498,7 +486,7 @@ class RequestMonitoringTest extends TestCase
         $this->assertSame([], $record['mail']);
     }
 
-    /** @test */
+    #[Test]
     public function the_notification_counter_keeps_counting_past_the_cap()
     {
         config(['larabug.requests.max_notifications' => 2]);
@@ -514,12 +502,11 @@ class RequestMonitoringTest extends TestCase
 
         $record = $monitor->toArray(Request::create('/x', 'GET'), new Response('', 200), 1.0);
 
-        // All five counted, only two kept.
         $this->assertSame(5, $record['notifications_sent']);
         $this->assertCount(2, $record['notifications']);
     }
 
-    /** @test */
+    #[Test]
     public function it_records_cache_operations_with_the_key_narrowed_to_a_prefix()
     {
         $monitor = new RequestMonitor();
@@ -532,7 +519,6 @@ class RequestMonitoringTest extends TestCase
 
         $record = $monitor->toArray(Request::create('/x', 'GET'), new Response('', 200), 1.0);
 
-        // The hit and miss counters still track their totals.
         $this->assertSame(1, $record['cache_hits']);
         $this->assertSame(1, $record['cache_misses']);
 
@@ -540,7 +526,6 @@ class RequestMonitoringTest extends TestCase
         $this->assertSame(['hit', 'miss', 'write', 'forget'], array_column($record['cache'], 'op'));
 
         $hit = $record['cache'][0];
-        // The prefix up to the first colon; the id after it is dropped.
         $this->assertSame('user', $hit['key_prefix']);
         $this->assertSame('redis', $hit['store']);
 
@@ -549,7 +534,7 @@ class RequestMonitoringTest extends TestCase
         $this->assertSame(0, $record['cache'][0]['ttl']);
     }
 
-    /** @test */
+    #[Test]
     public function it_keeps_the_full_cache_key_only_when_opted_in()
     {
         config(['larabug.requests.capture_cache_keys' => true]);
@@ -564,7 +549,7 @@ class RequestMonitoringTest extends TestCase
         $this->assertSame('user:42:profile', $event['key_prefix']);
     }
 
-    /** @test */
+    #[Test]
     public function the_cache_buffer_is_capped()
     {
         config(['larabug.requests.max_cache_events' => 2]);
@@ -593,13 +578,13 @@ class RequestMonitoringTest extends TestCase
         return $event;
     }
 
-    /** @test */
+    #[Test]
     public function it_records_a_queued_mailable_at_dispatch_marked_queued()
     {
         $monitor = new RequestMonitor();
         $listeners = new RequestListeners($monitor, new Sampler());
 
-        $mailable = new class extends \Illuminate\Mail\Mailable {};
+        $mailable = new class () extends \Illuminate\Mail\Mailable {};
         $mailable->to('alice@example.com')->cc('team@other.test');
 
         $event = new \stdClass();
@@ -622,7 +607,7 @@ class RequestMonitoringTest extends TestCase
         $this->assertSame(1, $message['queued']);
     }
 
-    /** @test */
+    #[Test]
     public function a_queued_job_that_is_not_a_mailable_records_no_mail()
     {
         $monitor = new RequestMonitor();
@@ -650,13 +635,9 @@ class RequestMonitoringTest extends TestCase
      */
     private function mailMessage(string $subject, array $to, array $cc = [], array $bcc = []): object
     {
-        $address = fn (string $email): object => new class($email) {
-            /** @var string */
-            private $email;
-
-            public function __construct(string $email)
+        $address = fn (string $email): object => new class ($email) {
+            public function __construct(private string $email)
             {
-                $this->email = $email;
             }
 
             public function getAddress(): string
@@ -665,25 +646,13 @@ class RequestMonitoringTest extends TestCase
             }
         };
 
-        return new class($subject, array_map($address, $to), array_map($address, $cc), array_map($address, $bcc)) {
-            /** @var string */
-            public $subject;
-
-            /** @var array<int, object> */
-            public $to;
-
-            /** @var array<int, object> */
-            public $cc;
-
-            /** @var array<int, object> */
-            public $bcc;
-
-            public function __construct(string $subject, array $to, array $cc, array $bcc)
-            {
-                $this->subject = $subject;
-                $this->to = $to;
-                $this->cc = $cc;
-                $this->bcc = $bcc;
+        return new class ($subject, array_map($address, $to), array_map($address, $cc), array_map($address, $bcc)) {
+            public function __construct(
+                public string $subject,
+                public array $to,
+                public array $cc,
+                public array $bcc,
+            ) {
             }
 
             public function getSubject(): string
@@ -737,10 +706,8 @@ class RequestMonitoringTest extends TestCase
      * A stand-in for an Http client event: the handler reads only ->request and
      * ->response, so a plain object with those is enough and sidesteps the
      * event constructors that changed shape between Laravel versions.
-     *
-     * @param  \Illuminate\Http\Client\Response|null  $response
      */
-    private function outgoingEvent(string $method, string $url, $response): object
+    private function outgoingEvent(string $method, string $url, ?\Illuminate\Http\Client\Response $response): object
     {
         $event = new \stdClass();
         $event->request = new \Illuminate\Http\Client\Request(
@@ -761,12 +728,10 @@ class RequestMonitoringTest extends TestCase
      */
     private function recordsForFailedRequest(): array
     {
-        // A buffer that records rather than sends. It skips the parent
-        // constructor, so no shutdown flush is registered and no client is
-        // needed for a test that only cares whether the record was kept.
-        $buffer = new class extends RequestBuffer {
+        // Skips the parent constructor, so no shutdown flush is registered and no client is needed.
+        $buffer = new class () extends RequestBuffer {
             /** @var array<int, array<string, mixed>> */
-            public $records = [];
+            public array $records = [];
 
             public function __construct()
             {
@@ -794,14 +759,14 @@ class RequestMonitoringTest extends TestCase
     /**
      * @return array<string, string>
      */
-    private function headersFor(Request $request)
+    private function headersFor(Request $request): array
     {
         $record = (new RequestMonitor())->toArray($request, new Response('', 200), 1.0);
 
         return json_decode($record['headers'], true);
     }
 
-    private function payloadFor(Request $request, int $status)
+    private function payloadFor(Request $request, int $status): string
     {
         $record = (new RequestMonitor())->toArray($request, new Response('', $status), 1.0);
 

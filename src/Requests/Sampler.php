@@ -22,17 +22,14 @@ use Illuminate\Http\Request;
  */
 class Sampler
 {
-    /** @var float */
-    protected $rate;
+    protected readonly float $rate;
 
-    /** @var float */
-    protected $exceptionRate;
+    protected readonly float $exceptionRate;
 
     /** @var array<int, string> */
-    protected $ignore;
+    protected readonly array $ignore;
 
-    /** @var bool|null */
-    protected $decision = null;
+    protected ?bool $decision = null;
 
     public function __construct()
     {
@@ -96,9 +93,9 @@ class Sampler
      * A 5xx is kept far more often than head sampling implies: whatever the
      * coin did on arrival, it re-rolls at the exception rate, so at the default
      * 1.0 every failure is kept. Dividing by the head rate would then weight a
-     * failure by ten while it was really kept every time, counting ten failures
-     * where there was one and wrecking the error rate. Its true keep-chance is
-     * "head-sampled, or not and the exception re-roll kept it".
+     * failure by ten while it was really kept every time, wrecking the error
+     * rate. Its true keep-chance is "head-sampled, or not and the exception
+     * re-roll kept it".
      */
     public function rateForException(): float
     {

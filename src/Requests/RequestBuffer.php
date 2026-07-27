@@ -3,16 +3,15 @@
 namespace LaraBug\Requests;
 
 use Countable;
-use LaraBug\Http\Client;
 use Throwable;
+use LaraBug\Http\Client;
 
 /**
  * Batches finished request records.
  *
  * A duplicate of EventBuffer rather than a generalisation of it, deliberately:
  * that buffer is in production carrying queue jobs, and the way to find out
- * whether one abstraction serves both is to run the second one first. They can
- * be merged once this is live.
+ * whether one abstraction serves both is to run the second one first.
  *
  * The flush happens on shutdown as well as on size, because a web process
  * serves one request and then exits: without it, every batch below the
@@ -21,27 +20,21 @@ use Throwable;
 class RequestBuffer implements Countable
 {
     /** @var array<int, array<string, mixed>> */
-    protected $buffer = [];
+    protected array $buffer = [];
 
-    /** @var Client */
-    protected $client;
+    protected readonly int $batchSize;
 
-    /** @var array<string, mixed> */
-    protected $config;
+    protected readonly int $maxRetries;
 
-    /** @var int */
-    protected $batchSize;
+    protected bool $shutdownRegistered = false;
 
-    /** @var int */
-    protected $maxRetries;
-
-    /** @var bool */
-    protected $shutdownRegistered = false;
-
-    public function __construct(Client $client, array $config)
-    {
-        $this->client = $client;
-        $this->config = $config;
+    /**
+     * @param  array<string, mixed>  $config
+     */
+    public function __construct(
+        protected readonly Client $client,
+        protected readonly array $config,
+    ) {
         $this->batchSize = (int) ($config['requests']['batch_size'] ?? 20);
         $this->maxRetries = (int) ($config['requests']['max_retries'] ?? 2);
 
@@ -79,12 +72,11 @@ class RequestBuffer implements Countable
     {
         try {
             $this->client->reportRequests($records);
-        } catch (Throwable $e) {
+        } catch (Throwable) {
             if ($attempt <= $this->maxRetries) {
-                // Linear, not exponential. This runs on shutdown, after the
-                // response has been sent but while the worker is still held, so
-                // a doubling backoff spends the customer's capacity on our
-                // outage.
+                // Linear, not exponential: this runs on shutdown while the
+                // worker is still held, and a doubling backoff spends the
+                // customer's capacity on our outage.
                 usleep(100000 * $attempt);
 
                 $this->send($records, $attempt + 1);
@@ -105,9 +97,7 @@ class RequestBuffer implements Countable
 
         $this->shutdownRegistered = true;
 
-        register_shutdown_function(function () {
-            $this->flush();
-        });
+        register_shutdown_function($this->flush(...));
     }
 
     public function count(): int
