@@ -50,11 +50,12 @@ That's it. Every unhandled exception, and every failed queue job, now reports to
 
 ## Documentation
 
-Full documentation — configuration, exception capturing, queue and job monitoring, user context, testing, and troubleshooting — lives at **[larabug.com/docs](https://www.larabug.com/docs)**.
+Full documentation (configuration, exception capturing, queue and job monitoring, user context, testing, and troubleshooting) lives at **[larabug.com/docs](https://www.larabug.com/docs)**.
 
 ## Related
 
-- [LaraBug JavaScript SDK](https://github.com/LaraBug/larabug-js) — frontend error tracking for Vanilla JavaScript, React, Vue 3, and Inertia.js.
+- [LaraBug JavaScript SDK](https://github.com/LaraBug/larabug-js). Frontend error tracking for vanilla JavaScript, React, Vue 3, and Inertia.js.
+- [LaraBug Mobile](https://github.com/LaraBug/larabug-mobile). The iOS and Android app.
 
 ## License
 
