@@ -88,6 +88,32 @@ class RequestMonitor
     }
 
     /**
+     * How far into the request we are, in milliseconds.
+     */
+    protected function elapsedMs(): float
+    {
+        return (microtime(true) - $this->marks['start']) * 1000;
+    }
+
+    /**
+     * Where an event that has just finished began, as an offset from the start
+     * of the request.
+     *
+     * Every recorder below is called on completion: a query is reported by
+     * QueryExecuted once it has run, a message by MessageSent once it is away.
+     * So the offset is not where we are now, it is where we are now less
+     * however long the thing took. A point event passes no duration and lands
+     * on the moment it happened.
+     *
+     * Floored at zero, because a clock that stepped backwards mid-request is
+     * not worth a bar that starts before the request did.
+     */
+    protected function startedAtMs(float $durationMs = 0.0): float
+    {
+        return max(0.0, round($this->elapsedMs() - $durationMs, 3));
+    }
+
+    /**
      * Whether the middleware got as far as marking where the action began. A
      * terminate that runs after a handle that could not started nothing worth
      * recording, and has no failure to promote.
@@ -155,6 +181,7 @@ class RequestMonitor
             'hash' => QueryNormaliser::hash($connection, $normalised),
             'connection' => $connection,
             'duration_ms' => round($durationMs, 3),
+            'start_ms' => $this->startedAtMs($durationMs),
         ];
     }
 
@@ -174,6 +201,11 @@ class RequestMonitor
             return;
         }
 
+        // Stamped here rather than in the listener that built it: the
+        // offset is only meaningful against this request's start, and this
+        // is the object that holds it.
+        $call['start_ms'] = $this->startedAtMs((float) ($call['duration_ms'] ?? 0));
+
         $this->outgoing[] = $call;
     }
 
@@ -192,6 +224,11 @@ class RequestMonitor
         if (count($this->mail) >= $this->maxMail) {
             return;
         }
+
+        // Stamped here rather than in the listener that built it: the
+        // offset is only meaningful against this request's start, and this
+        // is the object that holds it.
+        $message['start_ms'] = $this->startedAtMs((float) ($message['duration_ms'] ?? 0));
 
         $this->mail[] = $message;
     }
@@ -213,6 +250,11 @@ class RequestMonitor
             return;
         }
 
+        // Stamped here rather than in the listener that built it: the
+        // offset is only meaningful against this request's start, and this
+        // is the object that holds it.
+        $notification['start_ms'] = $this->startedAtMs((float) ($notification['duration_ms'] ?? 0));
+
         $this->notifications[] = $notification;
     }
 
@@ -229,6 +271,11 @@ class RequestMonitor
         if (count($this->cache) >= $this->maxCacheEvents) {
             return;
         }
+
+        // Stamped here rather than in the listener that built it: the
+        // offset is only meaningful against this request's start, and this
+        // is the object that holds it.
+        $event['start_ms'] = $this->startedAtMs((float) ($event['duration_ms'] ?? 0));
 
         $this->cache[] = $event;
     }

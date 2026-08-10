@@ -766,6 +766,54 @@ class RequestMonitoringTest extends TestCase
         return json_decode($record['headers'], true);
     }
 
+    #[Test]
+    public function every_event_carries_where_it_started_in_the_request()
+    {
+        $monitor = new RequestMonitor();
+
+        // The recorders all run on completion, so a 5ms query reported now
+        // began 5ms ago. Sleeping first puts real distance between the
+        // request's start and the event, so an offset of zero cannot pass by
+        // accident.
+        usleep(20000);
+
+        $monitor->recordQuery('select * from users where id = 1', 'mysql', 5.0);
+        $monitor->recordOutgoing(['method' => 'GET', 'host' => 'x', 'url' => 'https://x', 'status_code' => 200, 'duration_ms' => 4.0, 'failed' => 0, 'error' => '']);
+        $monitor->recordMail(['mailable' => 'App\\Mail\\Welcome', 'duration_ms' => 3.0]);
+        $monitor->recordNotification(['notification' => 'App\\Notifications\\Shipped', 'channel' => 'mail']);
+        $monitor->recordCacheEvent(['op' => 'hit', 'key' => 'users:1', 'store' => 'redis']);
+
+        $record = $monitor->toArray(Request::create('/orders', 'GET'), new Response('', 200), 1.0);
+
+        foreach (['sql', 'outgoing', 'mail', 'notifications', 'cache'] as $stream) {
+            $this->assertGreaterThan(0, $record[$stream][0]['start_ms'], "{$stream} carries no offset");
+        }
+
+        // A span starts before it ends. Twenty milliseconds passed before the
+        // query was reported and the query itself took five, so it began
+        // around fifteen in. The floor is loose because a sleep is a lower
+        // bound on elapsed time, never an exact one.
+        $this->assertGreaterThanOrEqual(14.0, $record['sql'][0]['start_ms']);
+
+        // The point event has no duration to subtract, so it sits at or past
+        // the span that was recorded before it.
+        $this->assertGreaterThanOrEqual($record['sql'][0]['start_ms'], $record['cache'][0]['start_ms']);
+    }
+
+    #[Test]
+    public function an_offset_never_lands_before_the_request_began()
+    {
+        $monitor = new RequestMonitor();
+
+        // A duration longer than the request has been alive: the subtraction
+        // goes negative and the floor catches it.
+        $monitor->recordQuery('select 1', 'mysql', 60000.0);
+
+        $record = $monitor->toArray(Request::create('/orders', 'GET'), new Response('', 200), 1.0);
+
+        $this->assertSame(0.0, $record['sql'][0]['start_ms']);
+    }
+
     private function payloadFor(Request $request, int $status): string
     {
         $record = (new RequestMonitor())->toArray($request, new Response('', $status), 1.0);
