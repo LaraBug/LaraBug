@@ -5,6 +5,7 @@ namespace LaraBug\Requests;
 use Countable;
 use Throwable;
 use LaraBug\Http\Client;
+use LaraBug\Support\AllowanceBackoff;
 
 /**
  * Batches finished request records.
@@ -46,6 +47,12 @@ class RequestBuffer implements Countable
      */
     public function add(array $record): void
     {
+        // The telemetry allowance is spent for now. Collecting anyway would
+        // only fill a buffer nobody may send.
+        if (! AllowanceBackoff::allows(AllowanceBackoff::TELEMETRY)) {
+            return;
+        }
+
         $this->buffer[] = $record;
 
         if (count($this->buffer) >= $this->batchSize) {
@@ -70,8 +77,15 @@ class RequestBuffer implements Countable
      */
     protected function send(array $records, int $attempt = 1): void
     {
+        // Refused for the rest of the window: these requests go no further.
+        if (! AllowanceBackoff::allows(AllowanceBackoff::TELEMETRY)) {
+            return;
+        }
+
         try {
-            $this->client->reportRequests($records);
+            // A 402 means the telemetry allowance is spent, which the backoff
+            // holds as a window rather than a flag.
+            AllowanceBackoff::record($this->client->reportRequests($records), AllowanceBackoff::TELEMETRY);
         } catch (Throwable) {
             if ($attempt <= $this->maxRetries) {
                 // Linear, not exponential: this runs on shutdown while the
