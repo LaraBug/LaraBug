@@ -5,7 +5,7 @@ namespace LaraBug\Queue;
 use Countable;
 use Throwable;
 use LaraBug\Http\Client;
-use LaraBug\Support\AllowanceBackoff;
+use LaraBug\Support\LimitBackoff;
 
 /**
  * In-memory event buffer for batching queue job events, inspired by Laravel
@@ -51,9 +51,9 @@ class EventBuffer implements Countable
         // load that really ran rather than from a gap.
         $batchingEnabled = $this->loadMonitor->recordJob();
 
-        // The telemetry allowance is spent for now. Collecting anyway would
+        // The telemetry limit is reached for now. Collecting anyway would
         // only fill a buffer nobody may send.
-        if (! AllowanceBackoff::allows(AllowanceBackoff::TELEMETRY)) {
+        if (! LimitBackoff::allows(LimitBackoff::TELEMETRY)) {
             return;
         }
 
@@ -85,7 +85,7 @@ class EventBuffer implements Countable
                 'job' => $data,
             ];
 
-            AllowanceBackoff::record($this->client->report($payload), AllowanceBackoff::TELEMETRY);
+            LimitBackoff::record($this->client->report($payload), LimitBackoff::TELEMETRY);
         } catch (Throwable $e) {
             // Fail silently to not break the user's application.
         }
@@ -107,7 +107,7 @@ class EventBuffer implements Countable
     protected function sendBatch(array $events, int $attempt = 1): void
     {
         // Refused for the rest of the window: these events go no further.
-        if (! AllowanceBackoff::allows(AllowanceBackoff::TELEMETRY)) {
+        if (! LimitBackoff::allows(LimitBackoff::TELEMETRY)) {
             return;
         }
 
@@ -123,10 +123,10 @@ class EventBuffer implements Countable
 
             $response = $this->client->report($payload);
 
-            // Over the telemetry allowance for this billing period. Nothing
+            // Over the telemetry limit for this billing period. Nothing
             // more is sent until the window the server asked for has passed,
             // and issues keep going in the meantime.
-            if (AllowanceBackoff::record($response, AllowanceBackoff::TELEMETRY)) {
+            if (LimitBackoff::record($response, LimitBackoff::TELEMETRY)) {
                 return;
             }
 

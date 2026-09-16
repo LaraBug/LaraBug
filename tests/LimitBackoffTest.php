@@ -7,16 +7,16 @@ use LaraBug\LaraBug;
 use ReflectionClass;
 use LaraBug\Logger\LogBuffer;
 use LaraBug\Queue\EventBuffer;
+use LaraBug\Support\LimitBackoff;
 use LaraBug\Console\CommandBuffer;
 use Illuminate\Support\Facades\Log;
 use LaraBug\Requests\RequestBuffer;
-use LaraBug\Support\AllowanceBackoff;
 use LaraBug\Http\Client as HttpClient;
 use LaraBug\Tests\Mocks\MeteredClient;
 use PHPUnit\Framework\Attributes\Test;
 use LaraBug\Console\ScheduledTaskBuffer;
 
-class AllowanceBackoffTest extends TestCase
+class LimitBackoffTest extends TestCase
 {
     protected MeteredClient $client;
 
@@ -33,9 +33,9 @@ class AllowanceBackoffTest extends TestCase
     }
 
     #[Test]
-    public function a_spent_telemetry_allowance_stops_the_batch_after_it()
+    public function a_reached_telemetry_limit_stops_the_batch_after_it()
     {
-        $this->client->willRefuse(AllowanceBackoff::TELEMETRY);
+        $this->client->willRefuse(LimitBackoff::TELEMETRY);
 
         Log::info('Refused');
         $this->logs()->flush();
@@ -51,33 +51,33 @@ class AllowanceBackoffTest extends TestCase
     #[Test]
     public function the_stream_sends_again_once_the_window_has_passed()
     {
-        $this->client->willRefuse(AllowanceBackoff::TELEMETRY);
+        $this->client->willRefuse(LimitBackoff::TELEMETRY);
 
         Log::info('Refused');
         $this->logs()->flush();
 
         $this->client->assertRequestsSent(1);
 
-        $this->windowHasPassed(AllowanceBackoff::TELEMETRY);
+        $this->windowHasPassed(LimitBackoff::TELEMETRY);
 
         Log::info('Sent on the other side of the window');
         $this->logs()->flush();
 
         $this->client->assertRequestsSent(2);
-        $this->assertNull(AllowanceBackoff::resumesAt(AllowanceBackoff::TELEMETRY));
+        $this->assertNull(LimitBackoff::resumesAt(LimitBackoff::TELEMETRY));
     }
 
     #[Test]
     public function it_waits_as_long_as_the_server_asked_for()
     {
-        $this->client->willRefuse(AllowanceBackoff::TELEMETRY, '90');
+        $this->client->willRefuse(LimitBackoff::TELEMETRY, '90');
 
         Log::info('Refused');
         $this->logs()->flush();
 
         $this->assertEqualsWithDelta(
             time() + 90,
-            AllowanceBackoff::resumesAt(AllowanceBackoff::TELEMETRY),
+            LimitBackoff::resumesAt(LimitBackoff::TELEMETRY),
             1
         );
     }
@@ -85,14 +85,14 @@ class AllowanceBackoffTest extends TestCase
     #[Test]
     public function it_waits_five_minutes_when_the_server_does_not_say()
     {
-        $this->client->willRefuse(AllowanceBackoff::TELEMETRY);
+        $this->client->willRefuse(LimitBackoff::TELEMETRY);
 
         Log::info('Refused');
         $this->logs()->flush();
 
         $this->assertEqualsWithDelta(
             time() + 300,
-            AllowanceBackoff::resumesAt(AllowanceBackoff::TELEMETRY),
+            LimitBackoff::resumesAt(LimitBackoff::TELEMETRY),
             1
         );
     }
@@ -100,14 +100,14 @@ class AllowanceBackoffTest extends TestCase
     #[Test]
     public function it_waits_five_minutes_when_retry_after_makes_no_sense()
     {
-        $this->client->willRefuse(AllowanceBackoff::TELEMETRY, 'whenever suits you');
+        $this->client->willRefuse(LimitBackoff::TELEMETRY, 'whenever suits you');
 
         Log::info('Refused');
         $this->logs()->flush();
 
         $this->assertEqualsWithDelta(
             time() + 300,
-            AllowanceBackoff::resumesAt(AllowanceBackoff::TELEMETRY),
+            LimitBackoff::resumesAt(LimitBackoff::TELEMETRY),
             1
         );
     }
@@ -115,14 +115,14 @@ class AllowanceBackoffTest extends TestCase
     #[Test]
     public function it_waits_until_the_date_retry_after_names()
     {
-        $this->client->willRefuse(AllowanceBackoff::TELEMETRY, $this->httpDate(time() + 120));
+        $this->client->willRefuse(LimitBackoff::TELEMETRY, $this->httpDate(time() + 120));
 
         Log::info('Refused');
         $this->logs()->flush();
 
         $this->assertEqualsWithDelta(
             time() + 120,
-            AllowanceBackoff::resumesAt(AllowanceBackoff::TELEMETRY),
+            LimitBackoff::resumesAt(LimitBackoff::TELEMETRY),
             1
         );
     }
@@ -130,12 +130,12 @@ class AllowanceBackoffTest extends TestCase
     #[Test]
     public function a_date_retry_after_that_has_already_passed_holds_nothing()
     {
-        $this->client->willRefuse(AllowanceBackoff::TELEMETRY, $this->httpDate(time() - 120));
+        $this->client->willRefuse(LimitBackoff::TELEMETRY, $this->httpDate(time() - 120));
 
         Log::info('Refused');
         $this->logs()->flush();
 
-        $this->assertNull(AllowanceBackoff::resumesAt(AllowanceBackoff::TELEMETRY));
+        $this->assertNull(LimitBackoff::resumesAt(LimitBackoff::TELEMETRY));
 
         Log::info('Sent right after');
         $this->logs()->flush();
@@ -146,12 +146,12 @@ class AllowanceBackoffTest extends TestCase
     #[Test]
     public function a_retry_after_of_zero_asks_for_no_window_at_all()
     {
-        $this->client->willRefuse(AllowanceBackoff::TELEMETRY, '0');
+        $this->client->willRefuse(LimitBackoff::TELEMETRY, '0');
 
         Log::info('Refused');
         $this->logs()->flush();
 
-        $this->assertNull(AllowanceBackoff::resumesAt(AllowanceBackoff::TELEMETRY));
+        $this->assertNull(LimitBackoff::resumesAt(LimitBackoff::TELEMETRY));
 
         Log::info('Sent right after');
         $this->logs()->flush();
@@ -162,14 +162,14 @@ class AllowanceBackoffTest extends TestCase
     #[Test]
     public function it_never_holds_a_stream_for_longer_than_an_hour()
     {
-        $this->client->willRefuse(AllowanceBackoff::TELEMETRY, '99999999');
+        $this->client->willRefuse(LimitBackoff::TELEMETRY, '99999999');
 
         Log::info('Refused');
         $this->logs()->flush();
 
         $this->assertEqualsWithDelta(
-            time() + AllowanceBackoff::MAX_COOLDOWN,
-            AllowanceBackoff::resumesAt(AllowanceBackoff::TELEMETRY),
+            time() + LimitBackoff::MAX_COOLDOWN,
+            LimitBackoff::resumesAt(LimitBackoff::TELEMETRY),
             1
         );
     }
@@ -181,13 +181,13 @@ class AllowanceBackoffTest extends TestCase
 
         $response = (new LaraBug($this->client))->handle(new Exception('Refused'));
 
-        $this->assertSame('Allowance spent', $response->message);
+        $this->assertSame('Limit reached', $response->message);
     }
 
     #[Test]
     public function a_telemetry_refusal_leaves_issues_alone()
     {
-        $this->client->willRefuse(AllowanceBackoff::TELEMETRY);
+        $this->client->willRefuse(LimitBackoff::TELEMETRY);
 
         Log::info('Refused');
         $this->logs()->flush();
@@ -196,13 +196,13 @@ class AllowanceBackoffTest extends TestCase
 
         $this->client->assertRequestsSent(2);
         $this->assertArrayHasKey('exception', $this->client->lastRequest());
-        $this->assertNull(AllowanceBackoff::resumesAt(AllowanceBackoff::ISSUES));
+        $this->assertNull(LimitBackoff::resumesAt(LimitBackoff::ISSUES));
     }
 
     #[Test]
     public function an_issue_refusal_leaves_telemetry_alone()
     {
-        $this->client->willRefuse(AllowanceBackoff::ISSUES);
+        $this->client->willRefuse(LimitBackoff::ISSUES);
 
         $larabug = new LaraBug($this->client);
         $larabug->handle(new Exception('Refused'));
@@ -224,14 +224,14 @@ class AllowanceBackoffTest extends TestCase
 
         (new LaraBug($this->client))->handle(new Exception('Refused'));
 
-        $this->assertNotNull(AllowanceBackoff::resumesAt(AllowanceBackoff::ISSUES));
-        $this->assertNull(AllowanceBackoff::resumesAt(AllowanceBackoff::TELEMETRY));
+        $this->assertNotNull(LimitBackoff::resumesAt(LimitBackoff::ISSUES));
+        $this->assertNull(LimitBackoff::resumesAt(LimitBackoff::TELEMETRY));
     }
 
     #[Test]
     public function one_refused_telemetry_sender_quietens_the_others()
     {
-        $this->client->willRefuse(AllowanceBackoff::TELEMETRY);
+        $this->client->willRefuse(LimitBackoff::TELEMETRY);
 
         $requests = new RequestBuffer($this->client, $this->app['config']->get('larabug', []));
         $requests->add(['uri' => '/checkout']);
@@ -239,7 +239,7 @@ class AllowanceBackoffTest extends TestCase
 
         $this->client->assertRequestsSent(1);
 
-        Log::info('Same allowance, different sender');
+        Log::info('Same limit, different sender');
         $this->logs()->flush();
 
         $this->client->assertRequestsSent(1);
@@ -257,7 +257,7 @@ class AllowanceBackoffTest extends TestCase
 
         // Nothing to wait out: a switched-off feature is not a window, so
         // clearing every backoff leaves the channel just as shut.
-        AllowanceBackoff::clear();
+        LimitBackoff::clear();
 
         $this->assertFalse($this->logs()->enabled());
 
@@ -275,7 +275,7 @@ class AllowanceBackoffTest extends TestCase
         Log::info('Rejected');
         $this->logs()->flush();
 
-        AllowanceBackoff::clear();
+        LimitBackoff::clear();
 
         $this->assertFalse($this->logs()->enabled());
 
@@ -286,9 +286,9 @@ class AllowanceBackoffTest extends TestCase
     }
 
     #[Test]
-    public function a_spent_telemetry_allowance_stops_the_command_buffer()
+    public function a_reached_telemetry_limit_stops_the_command_buffer()
     {
-        $this->client->willRefuse(AllowanceBackoff::TELEMETRY);
+        $this->client->willRefuse(LimitBackoff::TELEMETRY);
 
         $commands = new CommandBuffer($this->client, $this->config());
         $commands->add(['command' => 'migrate']);
@@ -303,9 +303,9 @@ class AllowanceBackoffTest extends TestCase
     }
 
     #[Test]
-    public function a_spent_telemetry_allowance_stops_the_scheduled_task_buffer()
+    public function a_reached_telemetry_limit_stops_the_scheduled_task_buffer()
     {
-        $this->client->willRefuse(AllowanceBackoff::TELEMETRY);
+        $this->client->willRefuse(LimitBackoff::TELEMETRY);
 
         $tasks = new ScheduledTaskBuffer($this->client, $this->config());
         $tasks->add(['task' => 'backup:run']);
@@ -320,9 +320,9 @@ class AllowanceBackoffTest extends TestCase
     }
 
     #[Test]
-    public function a_spent_telemetry_allowance_stops_the_queue_job_buffer()
+    public function a_reached_telemetry_limit_stops_the_queue_job_buffer()
     {
-        $this->client->willRefuse(AllowanceBackoff::TELEMETRY);
+        $this->client->willRefuse(LimitBackoff::TELEMETRY);
 
         $jobs = new EventBuffer($this->client, $this->config());
         $jobs->add(['job' => 'SendInvoice']);
@@ -339,7 +339,7 @@ class AllowanceBackoffTest extends TestCase
     {
         $this->app['config']['larabug.jobs.auto_batch_threshold'] = 3;
 
-        $this->client->willRefuse(AllowanceBackoff::TELEMETRY);
+        $this->client->willRefuse(LimitBackoff::TELEMETRY);
 
         $jobs = new EventBuffer($this->client, $this->config());
         $jobs->add(['job' => 'SendInvoice']);
@@ -348,7 +348,7 @@ class AllowanceBackoffTest extends TestCase
 
         $this->client->assertRequestsSent(1);
 
-        $this->windowHasPassed(AllowanceBackoff::TELEMETRY);
+        $this->windowHasPassed(LimitBackoff::TELEMETRY);
 
         $jobs->add(['job' => 'SendStatement']);
 
@@ -381,7 +381,7 @@ class AllowanceBackoffTest extends TestCase
      */
     protected function windowHasPassed(string $stream): void
     {
-        $property = (new ReflectionClass(AllowanceBackoff::class))->getProperty('resumeAt');
+        $property = (new ReflectionClass(LimitBackoff::class))->getProperty('resumeAt');
 
         $resumeAt = $property->getValue();
         $resumeAt[$stream] = time() - 1;

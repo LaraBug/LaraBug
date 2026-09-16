@@ -3,7 +3,7 @@
 namespace LaraBug\Cve;
 
 use LaraBug\Http\Client;
-use LaraBug\Support\AllowanceBackoff;
+use LaraBug\Support\LimitBackoff;
 use LaraBug\Scanners\ComposerLockScanner;
 use Illuminate\Contracts\Cache\Repository as CacheRepository;
 
@@ -106,8 +106,8 @@ class RequestTrigger
 
     protected function shouldFire(string $currentHash): bool
     {
-        // A CVE finding is an issue, and the issue allowance is spent for now.
-        if (! AllowanceBackoff::allows(AllowanceBackoff::ISSUES)) {
+        // A CVE finding is an issue, and the issue limit is reached for now.
+        if (! LimitBackoff::allows(LimitBackoff::ISSUES)) {
             return false;
         }
 
@@ -159,10 +159,10 @@ class RequestTrigger
             return;
         }
 
-        // 402 is the issue allowance for this billing period being spent. It
+        // 402 is the issue limit for this billing period being reached. It
         // holds off every sender of issues, not just this one, and it lifts by
         // itself once the window passes.
-        if (AllowanceBackoff::record($response, AllowanceBackoff::ISSUES)) {
+        if (LimitBackoff::record($response, LimitBackoff::ISSUES)) {
             return;
         }
 

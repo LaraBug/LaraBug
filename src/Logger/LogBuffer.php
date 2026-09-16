@@ -4,7 +4,7 @@ namespace LaraBug\Logger;
 
 use Throwable;
 use LaraBug\Http\Client;
-use LaraBug\Support\AllowanceBackoff;
+use LaraBug\Support\LimitBackoff;
 
 /**
  * Buffers log records and ships them in batches, mirroring Queue\EventBuffer:
@@ -62,7 +62,7 @@ class LogBuffer
         // Still inside a window the server asked for. These lines go nowhere:
         // they would only be refused again, and holding them until the window
         // passes would ship a batch of stale lines at the end of it.
-        if (! AllowanceBackoff::allows(AllowanceBackoff::TELEMETRY)) {
+        if (! LimitBackoff::allows(LimitBackoff::TELEMETRY)) {
             return;
         }
 
@@ -83,10 +83,10 @@ class LogBuffer
             if ($response && method_exists($response, 'getStatusCode')) {
                 $status = $response->getStatusCode();
 
-                // The telemetry allowance for this billing period is spent. That
+                // The telemetry limit for this billing period is reached. That
                 // answer expires, so it is held as a window rather than
                 // switching logging off for the life of the process.
-                if (AllowanceBackoff::record($response, AllowanceBackoff::TELEMETRY)) {
+                if (LimitBackoff::record($response, LimitBackoff::TELEMETRY)) {
                     $this->sending = false;
 
                     return;
@@ -131,7 +131,7 @@ class LogBuffer
     {
         // Collecting while the stream is held back only fills a buffer nobody
         // may send. This turns itself back on when the window passes.
-        if (! AllowanceBackoff::allows(AllowanceBackoff::TELEMETRY)) {
+        if (! LimitBackoff::allows(LimitBackoff::TELEMETRY)) {
             return false;
         }
 

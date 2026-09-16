@@ -6,11 +6,11 @@ use Throwable;
 use LaraBug\Http\Client;
 use LaraBug\Filters\DataFilter;
 use LaraBug\Concerns\Larabugable;
+use LaraBug\Support\LimitBackoff;
 use LaraBug\Requests\TraceContext;
 use Illuminate\Support\Facades\App;
 use LaraBug\Requests\RequestMonitor;
 use Illuminate\Support\Facades\Cache;
-use LaraBug\Support\AllowanceBackoff;
 use Illuminate\Foundation\Application;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Request;
@@ -430,10 +430,10 @@ class LaraBug
 
     private function logError(array $exception): ?ResponseInterface
     {
-        // The issue allowance is spent for the moment. Sending would collect
+        // The issue limit is reached for the moment. Sending would collect
         // another 402 and cost the application a round trip per exception,
         // which is the worst moment to be slow. Resumes on its own.
-        if (! AllowanceBackoff::allows(AllowanceBackoff::ISSUES)) {
+        if (! LimitBackoff::allows(LimitBackoff::ISSUES)) {
             return null;
         }
 
@@ -442,7 +442,7 @@ class LaraBug
             'user' => $this->getUser(),
         ]);
 
-        AllowanceBackoff::record($response, AllowanceBackoff::ISSUES);
+        LimitBackoff::record($response, LimitBackoff::ISSUES);
 
         return $response;
     }

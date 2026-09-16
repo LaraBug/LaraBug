@@ -57,12 +57,12 @@ class CveScanCommandTest extends TestCase
     }
 
     #[Test]
-    public function it_says_so_when_the_issue_allowance_is_spent()
+    public function it_says_so_when_the_issue_limit_is_reached()
     {
         $client = $this->bindClient(new CveClient(402, '{"stream":"issues"}'));
 
         $this->artisan('larabug:scan')
-            ->expectsOutputToContain('allowance is spent')
+            ->expectsOutputToContain('limit is reached')
             ->assertExitCode(1);
 
         $client->assertRequestsSent(1);

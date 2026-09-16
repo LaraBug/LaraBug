@@ -3,7 +3,7 @@
 namespace LaraBug\Tests;
 
 use LaraBug\LaraBug;
-use LaraBug\Support\AllowanceBackoff;
+use LaraBug\Support\LimitBackoff;
 use LaraBug\Tests\Mocks\LaraBugClient;
 use LaraBug\Tests\Mocks\MeteredClient;
 use PHPUnit\Framework\Attributes\Test;
@@ -84,17 +84,17 @@ class TestCommandTest extends TestCase
     }
 
     #[Test]
-    public function it_tells_a_spent_issue_allowance_apart_from_a_broken_integration()
+    public function it_tells_a_reached_issue_limit_apart_from_a_broken_integration()
     {
         $this->app['config']['larabug.environments'] = ['testing'];
 
         $client = new MeteredClient();
-        $client->willRefuse(AllowanceBackoff::ISSUES);
+        $client->willRefuse(LimitBackoff::ISSUES);
 
         $this->app['larabug'] = new LaraBug($client);
 
         $this->artisan('larabug:test')
-            ->expectsOutput('✗ [LaraBug] This project\'s issue allowance is spent, so the exception was refused')
+            ->expectsOutput('✗ [LaraBug] This project\'s issue limit is reached, so the exception was refused')
             ->doesntExpectOutput('✗ [LaraBug] Failed to send exception to LaraBug')
             ->assertExitCode(0);
     }

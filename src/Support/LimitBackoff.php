@@ -7,19 +7,19 @@ use Throwable;
 /**
  * The "do not send until" clock, kept per stream.
  *
- * The server meters two allowances apart: issues (exceptions and CVE findings)
+ * The server meters two limits apart: issues (exceptions and CVE findings)
  * and telemetry (requests, queries, logs, cache, mail, queue jobs, commands and
  * scheduled tasks). It refuses them independently with a 402, because an
- * application that has spent its telemetry allowance must still be able to
+ * application that has reached its telemetry limit must still be able to
  * report the exception that took it down. A backoff on one stream therefore
  * never touches the other.
  *
  * A 402 is remembered as a timestamp rather than a flag, because "over this
- * month's allowance" stops being true on its own: the cycle rolls over, or the
+ * month's limit" stops being true on its own: the cycle rolls over, or the
  * customer upgrades. Under PHP-FPM the difference is invisible, since the
  * process ends with the request either way, but under Octane, a queue worker
  * or Horizon a flag would mute the application for as long as the worker lives.
- * Noticing that the allowance came back must not require a deploy.
+ * Noticing that there is room again must not require a deploy.
  *
  * The scheduled heartbeat is the one sender left out. It runs as its own
  * short-lived process per invocation, so a window held here could never reach
@@ -28,9 +28,9 @@ use Throwable;
  *
  * The state is static because the senders are several objects with several
  * lifetimes — a log buffer, a request buffer, a job buffer, the exception
- * reporter — and they are all spending the same two allowances.
+ * reporter — and they are all spending against the same two limits.
  */
-class AllowanceBackoff
+class LimitBackoff
 {
     /** Exceptions and CVE findings. */
     public const ISSUES = 'issues';
@@ -76,8 +76,9 @@ class AllowanceBackoff
     /**
      * Note a refusal, if that is what this response is.
      *
-     * Returns true when the response was a 402, so a caller can tell a spent
-     * allowance apart from the answers it already handles. That stays the
+     * Returns true when the response was a 402, so a caller can tell a limit
+     * that has been reached apart from the answers it already handles. That
+     * stays the
      * answer even when the server asked for no wait at all, because the batch
      * in hand was refused either way. Every other status is somebody else's
      * business.
@@ -86,8 +87,8 @@ class AllowanceBackoff
      *                           response, or null when the request never got off
      *                           the ground.
      * @param  string  $stream  The stream that was being sent. Used when the body
-     *                          does not name one, since the only allowance we
-     *                          know was being spent is the one we were spending.
+     *                          does not name one, since the only limit we know
+     *                          was reached is the one we were sending against.
      */
     public static function record(mixed $response, string $stream): bool
     {
@@ -144,7 +145,7 @@ class AllowanceBackoff
     }
 
     /**
-     * Which allowance the server says is spent.
+     * Which limit the server says has been reached.
      *
      * The 402 body carries a "stream" key. A body that names neither stream, or
      * no body at all, leaves the one that was being sent: better to mute the
@@ -165,7 +166,7 @@ class AllowanceBackoff
      * Retry-After carries either a count of seconds or an HTTP date, and both
      * forms are read here. A date already past reads as zero, the same as the
      * server sending one. Anything we cannot make sense of falls back to five
-     * minutes, since a spent allowance does not come back within the second.
+     * minutes, since a limit that has been reached does not lift within the second.
      */
     protected static function cooldown(object $response): int
     {

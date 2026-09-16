@@ -60,10 +60,10 @@ class ScanCommand extends Command
             return self::FAILURE;
         }
 
-        // A refusal that expires, unlike the 403 above: the allowance comes
-        // back when the billing period rolls over, or the moment the plan does.
+        // A refusal that expires, unlike the 403 above: the limit lifts when
+        // the billing period rolls over, or the moment the plan does.
         if ($status === 402) {
-            $this->error('This month\'s issue allowance is spent, so the scan was refused. It runs again once the billing period rolls over.');
+            $this->error('This month\'s issue limit is reached, so the scan was refused. It runs again once the billing period rolls over.');
 
             return self::FAILURE;
         }

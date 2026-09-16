@@ -34,7 +34,7 @@ class MeteredClient extends \LaraBug\Http\Client
     }
 
     /**
-     * Queue a "you are over your allowance" answer.
+     * Queue a "you are over your limit" answer.
      *
      * @param  string|null  $stream  The stream the server names, or null to leave
      *                               the body silent about which one it was.
@@ -45,7 +45,7 @@ class MeteredClient extends \LaraBug\Http\Client
         return $this->willAnswer(new Response(
             402,
             $retryAfter === null ? [] : ['Retry-After' => $retryAfter],
-            json_encode($stream === null ? ['message' => 'Allowance spent'] : ['stream' => $stream])
+            json_encode($stream === null ? ['message' => 'Limit reached'] : ['stream' => $stream])
         ));
     }
 
