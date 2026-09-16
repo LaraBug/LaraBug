@@ -6,12 +6,15 @@ use Exception;
 use LaraBug\LaraBug;
 use ReflectionClass;
 use LaraBug\Logger\LogBuffer;
+use LaraBug\Queue\EventBuffer;
+use LaraBug\Console\CommandBuffer;
 use Illuminate\Support\Facades\Log;
 use LaraBug\Requests\RequestBuffer;
 use LaraBug\Support\AllowanceBackoff;
 use LaraBug\Http\Client as HttpClient;
 use LaraBug\Tests\Mocks\MeteredClient;
 use PHPUnit\Framework\Attributes\Test;
+use LaraBug\Console\ScheduledTaskBuffer;
 
 class AllowanceBackoffTest extends TestCase
 {
@@ -97,7 +100,7 @@ class AllowanceBackoffTest extends TestCase
     #[Test]
     public function it_waits_five_minutes_when_retry_after_makes_no_sense()
     {
-        $this->client->willRefuse(AllowanceBackoff::TELEMETRY, 'Wed, 16 Sep 2026 12:00:00 GMT');
+        $this->client->willRefuse(AllowanceBackoff::TELEMETRY, 'whenever suits you');
 
         Log::info('Refused');
         $this->logs()->flush();
@@ -107,6 +110,78 @@ class AllowanceBackoffTest extends TestCase
             AllowanceBackoff::resumesAt(AllowanceBackoff::TELEMETRY),
             1
         );
+    }
+
+    #[Test]
+    public function it_waits_until_the_date_retry_after_names()
+    {
+        $this->client->willRefuse(AllowanceBackoff::TELEMETRY, $this->httpDate(time() + 120));
+
+        Log::info('Refused');
+        $this->logs()->flush();
+
+        $this->assertEqualsWithDelta(
+            time() + 120,
+            AllowanceBackoff::resumesAt(AllowanceBackoff::TELEMETRY),
+            1
+        );
+    }
+
+    #[Test]
+    public function a_date_retry_after_that_has_already_passed_holds_nothing()
+    {
+        $this->client->willRefuse(AllowanceBackoff::TELEMETRY, $this->httpDate(time() - 120));
+
+        Log::info('Refused');
+        $this->logs()->flush();
+
+        $this->assertNull(AllowanceBackoff::resumesAt(AllowanceBackoff::TELEMETRY));
+
+        Log::info('Sent right after');
+        $this->logs()->flush();
+
+        $this->client->assertRequestsSent(2);
+    }
+
+    #[Test]
+    public function a_retry_after_of_zero_asks_for_no_window_at_all()
+    {
+        $this->client->willRefuse(AllowanceBackoff::TELEMETRY, '0');
+
+        Log::info('Refused');
+        $this->logs()->flush();
+
+        $this->assertNull(AllowanceBackoff::resumesAt(AllowanceBackoff::TELEMETRY));
+
+        Log::info('Sent right after');
+        $this->logs()->flush();
+
+        $this->client->assertRequestsSent(2);
+    }
+
+    #[Test]
+    public function it_never_holds_a_stream_for_longer_than_an_hour()
+    {
+        $this->client->willRefuse(AllowanceBackoff::TELEMETRY, '99999999');
+
+        Log::info('Refused');
+        $this->logs()->flush();
+
+        $this->assertEqualsWithDelta(
+            time() + AllowanceBackoff::MAX_COOLDOWN,
+            AllowanceBackoff::resumesAt(AllowanceBackoff::TELEMETRY),
+            1
+        );
+    }
+
+    #[Test]
+    public function the_refused_response_is_still_readable_by_the_sender_that_got_it()
+    {
+        $this->client->willRefuse();
+
+        $response = (new LaraBug($this->client))->handle(new Exception('Refused'));
+
+        $this->assertSame('Allowance spent', $response->message);
     }
 
     #[Test]
@@ -208,6 +283,92 @@ class AllowanceBackoffTest extends TestCase
         $this->logs()->flush();
 
         $this->client->assertRequestsSent(1);
+    }
+
+    #[Test]
+    public function a_spent_telemetry_allowance_stops_the_command_buffer()
+    {
+        $this->client->willRefuse(AllowanceBackoff::TELEMETRY);
+
+        $commands = new CommandBuffer($this->client, $this->config());
+        $commands->add(['command' => 'migrate']);
+        $commands->flush();
+
+        $this->client->assertRequestsSent(1);
+
+        $commands->add(['command' => 'queue:work']);
+        $commands->flush();
+
+        $this->client->assertRequestsSent(1);
+    }
+
+    #[Test]
+    public function a_spent_telemetry_allowance_stops_the_scheduled_task_buffer()
+    {
+        $this->client->willRefuse(AllowanceBackoff::TELEMETRY);
+
+        $tasks = new ScheduledTaskBuffer($this->client, $this->config());
+        $tasks->add(['task' => 'backup:run']);
+        $tasks->flush();
+
+        $this->client->assertRequestsSent(1);
+
+        $tasks->add(['task' => 'sitemap:generate']);
+        $tasks->flush();
+
+        $this->client->assertRequestsSent(1);
+    }
+
+    #[Test]
+    public function a_spent_telemetry_allowance_stops_the_queue_job_buffer()
+    {
+        $this->client->willRefuse(AllowanceBackoff::TELEMETRY);
+
+        $jobs = new EventBuffer($this->client, $this->config());
+        $jobs->add(['job' => 'SendInvoice']);
+
+        $this->client->assertRequestsSent(1);
+
+        $jobs->add(['job' => 'SendReminder']);
+
+        $this->client->assertRequestsSent(1);
+    }
+
+    #[Test]
+    public function jobs_that_arrive_during_a_hold_still_count_toward_the_batching_decision()
+    {
+        $this->app['config']['larabug.jobs.auto_batch_threshold'] = 3;
+
+        $this->client->willRefuse(AllowanceBackoff::TELEMETRY);
+
+        $jobs = new EventBuffer($this->client, $this->config());
+        $jobs->add(['job' => 'SendInvoice']);
+        $jobs->add(['job' => 'SendReminder']);
+        $jobs->add(['job' => 'SendReceipt']);
+
+        $this->client->assertRequestsSent(1);
+
+        $this->windowHasPassed(AllowanceBackoff::TELEMETRY);
+
+        $jobs->add(['job' => 'SendStatement']);
+
+        // Batching is on because the three held-back jobs were still counted,
+        // so this one waits for a batch instead of paying for its own request.
+        $this->client->assertRequestsSent(1);
+        $this->assertSame(1, $jobs->count());
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    protected function config(): array
+    {
+        return $this->app['config']->get('larabug', []);
+    }
+
+    protected function httpDate(int $timestamp): string
+    {
+        return gmdate('D, d M Y H:i:s \G\M\T', $timestamp);
     }
 
     protected function logs(): LogBuffer

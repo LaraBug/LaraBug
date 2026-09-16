@@ -21,6 +21,11 @@ use Throwable;
  * or Horizon a flag would mute the application for as long as the worker lives.
  * Noticing that the allowance came back must not require a deploy.
  *
+ * The scheduled heartbeat is the one sender left out. It runs as its own
+ * short-lived process per invocation, so a window held here could never reach
+ * it: quietening that one needs a backoff the whole application shares rather
+ * than one each process keeps to itself.
+ *
  * The state is static because the senders are several objects with several
  * lifetimes — a log buffer, a request buffer, a job buffer, the exception
  * reporter — and they are all spending the same two allowances.
@@ -35,6 +40,13 @@ class AllowanceBackoff
 
     /** How long to stay quiet when the server does not say how long. */
     public const DEFAULT_COOLDOWN = 300;
+
+    /**
+     * The longest window we will sit out, however long the server asks for.
+     * A stray Retry-After must not mute a worker for the rest of its life:
+     * that is the failure this class exists to remove.
+     */
+    public const MAX_COOLDOWN = 3600;
 
     /** @var array<string, int> Stream name => epoch second at which sending may resume. */
     protected static array $resumeAt = [];
@@ -64,9 +76,11 @@ class AllowanceBackoff
     /**
      * Note a refusal, if that is what this response is.
      *
-     * Returns true when the response was a 402 and a stream is now backed off,
-     * so a caller can tell a spent allowance apart from the answers it already
-     * handles. Every other status is somebody else's business.
+     * Returns true when the response was a 402, so a caller can tell a spent
+     * allowance apart from the answers it already handles. That stays the
+     * answer even when the server asked for no wait at all, because the batch
+     * in hand was refused either way. Every other status is somebody else's
+     * business.
      *
      * @param  mixed  $response  The response as the senders hold it: a PSR-7
      *                           response, or null when the request never got off
@@ -89,17 +103,24 @@ class AllowanceBackoff
             return false;
         }
 
-        static::hold(static::refusedStream($response, $stream), static::cooldown($response));
+        $cooldown = static::cooldown($response);
+
+        // A Retry-After of zero is the server asking for us back right away.
+        // There is no window to sit out, only this batch to give up on.
+        if ($cooldown > 0) {
+            static::hold(static::refusedStream($response, $stream), $cooldown);
+        }
 
         return true;
     }
 
     /**
-     * Stop sending this stream for the given number of seconds.
+     * Stop sending this stream for the given number of seconds, never less
+     * than one and never more than MAX_COOLDOWN.
      */
     public static function hold(string $stream, int $seconds): void
     {
-        static::$resumeAt[$stream] = time() + max(1, $seconds);
+        static::$resumeAt[$stream] = time() + min(self::MAX_COOLDOWN, max(1, $seconds));
     }
 
     /**
@@ -138,23 +159,38 @@ class AllowanceBackoff
     }
 
     /**
-     * How long the server asked for, in seconds.
+     * How long the server asked for, in seconds. Zero means it asked for no
+     * wait at all, which is not the same as it having asked for nothing.
      *
-     * Retry-After may also carry an HTTP date by the letter of the spec. Ours
-     * sends seconds, and a date we failed to parse would be indistinguishable
-     * from one we parsed wrongly, so anything that is not a plain positive
-     * integer falls back to five minutes.
+     * Retry-After carries either a count of seconds or an HTTP date, and both
+     * forms are read here. A date already past reads as zero, the same as the
+     * server sending one. Anything we cannot make sense of falls back to five
+     * minutes, since a spent allowance does not come back within the second.
      */
     protected static function cooldown(object $response): int
     {
         try {
-            if (method_exists($response, 'getHeaderLine')) {
-                $retryAfter = trim($response->getHeaderLine('Retry-After'));
-
-                if ($retryAfter !== '' && ctype_digit($retryAfter) && (int) $retryAfter > 0) {
-                    return (int) $retryAfter;
-                }
+            if (! method_exists($response, 'getHeaderLine')) {
+                return self::DEFAULT_COOLDOWN;
             }
+
+            $retryAfter = trim($response->getHeaderLine('Retry-After'));
+
+            if ($retryAfter === '') {
+                return self::DEFAULT_COOLDOWN;
+            }
+
+            if (ctype_digit($retryAfter)) {
+                return (int) $retryAfter;
+            }
+
+            $until = strtotime($retryAfter);
+
+            if ($until === false) {
+                return self::DEFAULT_COOLDOWN;
+            }
+
+            return max(0, $until - time());
         } catch (Throwable) {
             // A header we could not read is a header the server did not send.
         }

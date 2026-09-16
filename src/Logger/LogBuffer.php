@@ -87,7 +87,6 @@ class LogBuffer
                 // answer expires, so it is held as a window rather than
                 // switching logging off for the life of the process.
                 if (AllowanceBackoff::record($response, AllowanceBackoff::TELEMETRY)) {
-                    $this->buffer = [];
                     $this->sending = false;
 
                     return;
