@@ -4,6 +4,7 @@ namespace LaraBug\Logger;
 
 use Throwable;
 use LaraBug\Http\Client;
+use LaraBug\Support\LimitBackoff;
 
 /**
  * Buffers log records and ships them in batches, mirroring Queue\EventBuffer:
@@ -58,6 +59,13 @@ class LogBuffer
 
     protected function send(array $records, int $attempt = 1): void
     {
+        // Still inside a window the server asked for. These lines go nowhere:
+        // they would only be refused again, and holding them until the window
+        // passes would ship a batch of stale lines at the end of it.
+        if (! LimitBackoff::allows(LimitBackoff::TELEMETRY)) {
+            return;
+        }
+
         $this->sending = true;
 
         try {
@@ -75,9 +83,18 @@ class LogBuffer
             if ($response && method_exists($response, 'getStatusCode')) {
                 $status = $response->getStatusCode();
 
+                // The telemetry limit for this billing period is reached. That
+                // answer expires, so it is held as a window rather than
+                // switching logging off for the life of the process.
+                if (LimitBackoff::record($response, LimitBackoff::TELEMETRY)) {
+                    $this->sending = false;
+
+                    return;
+                }
+
                 // A disabled feature or a rejected project is a permanent no.
                 // Retrying it just spends the user's time on every request.
-                if ($status === 403 || $status === 402 || $status === 422) {
+                if ($status === 403 || $status === 422) {
                     $this->disable();
 
                     return;
@@ -112,6 +129,12 @@ class LogBuffer
 
     public function enabled(): bool
     {
+        // Collecting while the stream is held back only fills a buffer nobody
+        // may send. This turns itself back on when the window passes.
+        if (! LimitBackoff::allows(LimitBackoff::TELEMETRY)) {
+            return false;
+        }
+
         return ! isset($this->config['logs']['enabled'])
             || $this->config['logs']['enabled'];
     }

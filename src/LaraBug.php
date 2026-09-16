@@ -6,6 +6,7 @@ use Throwable;
 use LaraBug\Http\Client;
 use LaraBug\Filters\DataFilter;
 use LaraBug\Concerns\Larabugable;
+use LaraBug\Support\LimitBackoff;
 use LaraBug\Requests\TraceContext;
 use Illuminate\Support\Facades\App;
 use LaraBug\Requests\RequestMonitor;
@@ -429,10 +430,21 @@ class LaraBug
 
     private function logError(array $exception): ?ResponseInterface
     {
-        return $this->client->report([
+        // The issue limit is reached for the moment. Sending would collect
+        // another 402 and cost the application a round trip per exception,
+        // which is the worst moment to be slow. Resumes on its own.
+        if (! LimitBackoff::allows(LimitBackoff::ISSUES)) {
+            return null;
+        }
+
+        $response = $this->client->report([
             'exception' => $exception,
             'user' => $this->getUser(),
         ]);
+
+        LimitBackoff::record($response, LimitBackoff::ISSUES);
+
+        return $response;
     }
 
     public function getUser(): ?array

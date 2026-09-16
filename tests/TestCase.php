@@ -3,6 +3,7 @@
 namespace LaraBug\Tests;
 
 use LaraBug\ServiceProvider;
+use LaraBug\Support\LimitBackoff;
 use Illuminate\Foundation\Application;
 
 class TestCase extends \Orchestra\Testbench\TestCase
@@ -10,6 +11,10 @@ class TestCase extends \Orchestra\Testbench\TestCase
     public function setUp(): void
     {
         parent::setUp();
+
+        // The backoff is process wide on purpose, so a test that earns itself a
+        // 402 would otherwise mute every test that runs after it.
+        LimitBackoff::clear();
     }
 
     /**

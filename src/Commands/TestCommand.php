@@ -5,6 +5,7 @@ namespace LaraBug\Commands;
 use Exception;
 use LaraBug\LaraBug;
 use Illuminate\Console\Command;
+use LaraBug\Support\LimitBackoff;
 
 class TestCommand extends Command
 {
@@ -48,6 +49,9 @@ class TestCommand extends Command
                 $this->info("✓ [LaraBug] Sent exception to LaraBug with ID: {$response->id}");
             } elseif ($response === null) {
                 $this->info('✓ [LaraBug] Sent exception to LaraBug!');
+            } elseif (LimitBackoff::resumesAt(LimitBackoff::ISSUES) !== null) {
+                $this->error('✗ [LaraBug] This project\'s issue limit is reached, so the exception was refused');
+                $this->info('Reporting starts again by itself once the limit lifts, no deploy needed.');
             } else {
                 $this->error('✗ [LaraBug] Failed to send exception to LaraBug');
             }

@@ -60,6 +60,14 @@ class ScanCommand extends Command
             return self::FAILURE;
         }
 
+        // A refusal that expires, unlike the 403 above: the limit lifts when
+        // the billing period rolls over, or the moment the plan does.
+        if ($status === 402) {
+            $this->error('This month\'s issue limit is reached, so the scan was refused. It runs again once the billing period rolls over.');
+
+            return self::FAILURE;
+        }
+
         if ($status >= 400) {
             $this->error("LaraBug returned HTTP {$status}: {$body}");
 
