@@ -57,6 +57,18 @@ class CveScanCommandTest extends TestCase
     }
 
     #[Test]
+    public function it_says_so_when_the_issue_allowance_is_spent()
+    {
+        $client = $this->bindClient(new CveClient(402, '{"stream":"issues"}'));
+
+        $this->artisan('larabug:scan')
+            ->expectsOutputToContain('allowance is spent')
+            ->assertExitCode(1);
+
+        $client->assertRequestsSent(1);
+    }
+
+    #[Test]
     public function it_reports_a_lockfile_it_cannot_read()
     {
         $this->bindClient(new CveClient());
