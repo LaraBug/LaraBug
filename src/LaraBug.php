@@ -10,6 +10,7 @@ use LaraBug\Requests\TraceContext;
 use Illuminate\Support\Facades\App;
 use LaraBug\Requests\RequestMonitor;
 use Illuminate\Support\Facades\Cache;
+use LaraBug\Support\AllowanceBackoff;
 use Illuminate\Foundation\Application;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Request;
@@ -429,10 +430,21 @@ class LaraBug
 
     private function logError(array $exception): ?ResponseInterface
     {
-        return $this->client->report([
+        // The issue allowance is spent for the moment. Sending would collect
+        // another 402 and cost the application a round trip per exception,
+        // which is the worst moment to be slow. Resumes on its own.
+        if (! AllowanceBackoff::allows(AllowanceBackoff::ISSUES)) {
+            return null;
+        }
+
+        $response = $this->client->report([
             'exception' => $exception,
             'user' => $this->getUser(),
         ]);
+
+        AllowanceBackoff::record($response, AllowanceBackoff::ISSUES);
+
+        return $response;
     }
 
     public function getUser(): ?array

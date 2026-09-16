@@ -3,6 +3,7 @@
 namespace LaraBug\Cve;
 
 use LaraBug\Http\Client;
+use LaraBug\Support\AllowanceBackoff;
 use LaraBug\Scanners\ComposerLockScanner;
 use Illuminate\Contracts\Cache\Repository as CacheRepository;
 
@@ -105,6 +106,11 @@ class RequestTrigger
 
     protected function shouldFire(string $currentHash): bool
     {
+        // A CVE finding is an issue, and the issue allowance is spent for now.
+        if (! AllowanceBackoff::allows(AllowanceBackoff::ISSUES)) {
+            return false;
+        }
+
         // The server has told us it does not want these yet. Without this the
         // scan is enabled by default but the project is not, so every single
         // request would post the lockfile and collect another 403.
@@ -150,6 +156,13 @@ class RequestTrigger
             $this->cache->put($this->lastSentHashCacheKey, $payload['content_hash'], $ttl);
             $this->cache->put($this->lastSentAtCacheKey, time(), $ttl);
 
+            return;
+        }
+
+        // 402 is the issue allowance for this billing period being spent. It
+        // holds off every sender of issues, not just this one, and it lifts by
+        // itself once the window passes.
+        if (AllowanceBackoff::record($response, AllowanceBackoff::ISSUES)) {
             return;
         }
 
