@@ -1,6 +1,6 @@
 ---
 name: larabug-development
-description: Use when configuring the LaraBug package, controlling what it reports, or sending data to LaraBug from application code. Covers config/larabug.php and the LB_* environment variables, filtering sensitive data, manual exception reporting, per-exception context, queue job tracking, log shipping, CVE scanning, the JavaScript client, and testing with the LaraBug fake.
+description: Use when configuring the LaraBug package, controlling what it reports, or sending data to LaraBug from application code. Covers config/larabug.php and the LB_* environment variables, filtering sensitive data, manual exception reporting, per-exception context, queue job tracking, Livewire component tracking, log shipping, CVE scanning, the JavaScript client, and testing with the LaraBug fake.
 metadata:
   author: LaraBug
   tags:
@@ -48,6 +48,7 @@ Read the config file before changing behaviour. Every key documents what it does
 |---|---|---|
 | Exceptions | on | `larabug.register_exception_handler` |
 | Queue jobs | on | `LB_TRACK_JOBS` |
+| Livewire components | on | `LB_TRACK_LIVEWIRE` |
 | CVE scanning | on | `LB_CVE_ENABLED` |
 | Logs | off | name the `larabug-logs` channel in your log stack |
 | HTTP requests | off | `LB_TRACK_REQUESTS` |
@@ -118,6 +119,8 @@ Request monitoring has its own, separate controls, and the cautious defaults are
 
 Do not switch these on to make debugging easier without saying out loud what starts being stored.
 
+Livewire has two of its own, both on, both filtered by `larabug.blacklist` before anything is kept: `livewire.capture_parameters` (the arguments a component method was called with) and `livewire.capture_updates` (the values properties were changed to). Switch either off to keep the method or property name and drop what came with it.
+
 ## Queue jobs
 
 Job tracking is on by default and reports failures at full rate regardless of `jobs.sample_rate`. To opt a specific job in, or to attach tags and metadata:
@@ -148,6 +151,22 @@ dispatch_tracked(new ProcessPayment($order));
 ```
 
 Filter volume with `jobs.only_queues`, `jobs.ignore_queues` and `jobs.ignore_jobs` before reaching for `sample_rate`.
+
+## Livewire
+
+On by default, and free in an application that does not have Livewire installed: nothing loads a Livewire class or runs unless the container has one.
+
+It exists because a Livewire update is otherwise unreadable. Every component in the application posts to the same endpoint, so the route says nothing, and the body is a snapshot blob that no exception can be read against. An exception thrown in a component therefore carries the component it happened in, the method the client asked it to run, that method's arguments and the properties the client changed.
+
+Arguments arrive from the browser as a positional list, which nothing can filter. They are named from the component method's own signature first, so `save($reference, $password)` is scrubbed as `password` rather than slipping through as an anonymous string. Component state itself is never collected, only the updates.
+
+Component lifecycle timings (mount, hydrate, update, call, render, dehydrate) land on the request timeline beside queries and cache calls, so they also need `LB_TRACK_REQUESTS`. The request record carries names only and never a component value.
+
+```
+LB_TRACK_LIVEWIRE=false
+LB_LIVEWIRE_CAPTURE_PARAMETERS=false
+LB_LIVEWIRE_CAPTURE_UPDATES=false
+```
 
 ## Logs
 

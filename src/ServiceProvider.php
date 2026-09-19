@@ -24,11 +24,13 @@ use Illuminate\Contracts\Http\Kernel;
 use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\Facades\Route;
 use LaraBug\Console\CommandListeners;
+use LaraBug\Livewire\LivewireContext;
 use LaraBug\Logger\LaraBugLogHandler;
 use LaraBug\Queue\JobEventSubscriber;
 use Illuminate\Foundation\AliasLoader;
 use LaraBug\Commands\HeartbeatCommand;
 use LaraBug\Requests\RequestListeners;
+use LaraBug\Livewire\LivewireListeners;
 use Illuminate\Console\Scheduling\Event;
 use LaraBug\Console\ScheduledTaskBuffer;
 use Illuminate\Console\Scheduling\Schedule;
@@ -109,6 +111,8 @@ class ServiceProvider extends BaseServiceProvider
             }
         }
 
+        $this->registerLivewireListeners();
+
         if (config('larabug.jobs.track_jobs', true)) {
             $this->app['events']->subscribe(JobEventSubscriber::class);
         }
@@ -168,6 +172,33 @@ class ServiceProvider extends BaseServiceProvider
                     }
                 });
             }
+        }
+    }
+
+    /**
+     * Listen to Livewire's lifecycle, in the applications that have Livewire.
+     *
+     * Livewire is not a dependency of this package and most applications using
+     * it do not have it installed. Nothing below loads a Livewire class, calls
+     * a Livewire method or costs anything at all when it is absent: the
+     * container is asked whether the manager is bound, which is the same
+     * question Livewire's own optional integrations ask.
+     */
+    protected function registerLivewireListeners(): void
+    {
+        if (! config('larabug.livewire.track_livewire', true)) {
+            return;
+        }
+
+        if (! $this->app->bound('livewire')) {
+            return;
+        }
+
+        try {
+            $this->app->make(LivewireListeners::class)->subscribe($this->app->make('livewire'));
+        } catch (Throwable) {
+            // An application whose 'livewire' binding is something else
+            // entirely simply does not get component monitoring.
         }
     }
 
@@ -293,6 +324,12 @@ class ServiceProvider extends BaseServiceProvider
         // made about it, and the buffer outlives both to flush on shutdown.
         $this->app->singleton(RequestMonitor::class);
         $this->app->singleton(Sampler::class);
+
+        // Scoped rather than singleton: under Octane a worker serves one
+        // request after another in the same process, and a component addressed
+        // by one request must not still be attached to the next one's
+        // exception report.
+        $this->app->scoped(LivewireContext::class);
 
         $this->app->singleton(RequestBuffer::class, fn ($app) => new RequestBuffer(
             $app->make(Client::class),

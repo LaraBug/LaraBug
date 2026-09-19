@@ -36,6 +36,7 @@ class RequestMonitor
         'notifications_sent' => 0,
         'exceptions' => 0,
         'logs' => 0,
+        'livewire_operations' => 0,
     ];
 
     /** @var array<int, array<string, mixed>> */
@@ -53,6 +54,13 @@ class RequestMonitor
     /** @var array<int, array<string, mixed>> */
     protected array $cache = [];
 
+    /** @var array<int, array<string, mixed>> */
+    protected array $livewire = [];
+
+    protected string $livewireComponent = '';
+
+    protected string $livewireMethod = '';
+
     /** @var array<string, mixed>|null */
     protected ?array $route = null;
 
@@ -68,6 +76,8 @@ class RequestMonitor
 
     protected readonly int $maxCacheEvents;
 
+    protected readonly int $maxLivewireEvents;
+
     public function __construct()
     {
         $this->maxQueries = (int) config('larabug.requests.max_queries', 100);
@@ -75,6 +85,7 @@ class RequestMonitor
         $this->maxMail = (int) config('larabug.requests.max_mail', 50);
         $this->maxNotifications = (int) config('larabug.requests.max_notifications', 50);
         $this->maxCacheEvents = (int) config('larabug.requests.max_cache_events', 100);
+        $this->maxLivewireEvents = (int) config('larabug.requests.max_livewire_events', 100);
 
         // LARAVEL_START is set in public/index.php before the framework boots,
         // so it is the only honest answer to "when did this request begin".
@@ -281,6 +292,59 @@ class RequestMonitor
     }
 
     /**
+     * Record one Livewire lifecycle event: a component mounting, hydrating,
+     * updating, running a method or rendering. The counter keeps counting past
+     * the cap, the same as queries: a page that mounts four hundred components
+     * is worth knowing about, and the number is what says so.
+     *
+     * Names only. The component, the method that was called and the property
+     * that changed, never an argument or a value: this record is kept for every
+     * sampled request, and component state has no business being kept that
+     * widely. The values live on the exception report, and only there.
+     *
+     * @param  array<string, mixed>  $event
+     */
+    public function recordLivewireEvent(array $event): void
+    {
+        $this->counters['livewire_operations']++;
+
+        if (count($this->livewire) >= $this->maxLivewireEvents) {
+            return;
+        }
+
+        // Stamped here rather than in the listener that built it: the
+        // offset is only meaningful against this request's start, and this
+        // is the object that holds it.
+        $event['start_ms'] = $this->startedAtMs((float) ($event['duration_ms'] ?? 0));
+
+        $this->livewire[] = $event;
+    }
+
+    /**
+     * The component this request was addressed to, and the method it was asked
+     * to run.
+     *
+     * Every Livewire update in an application posts to the same endpoint, so
+     * the route these records group by is one row for all of them. These two
+     * fields are what tell them apart. Nothing here changes the grouping key;
+     * that is the server's to decide, and this is the evidence it needs to
+     * decide it.
+     *
+     * First one wins, the same as the exception id: a request is addressed to
+     * one component, and anything after it is a child doing its own work.
+     */
+    public function setLivewireSubject(string $component, string $method = ''): void
+    {
+        if ($component !== '' && $this->livewireComponent === '') {
+            $this->livewireComponent = $component;
+        }
+
+        if ($method !== '' && $this->livewireMethod === '') {
+            $this->livewireMethod = $method;
+        }
+    }
+
+    /**
      * The finished record.
      *
      * @return array<string, mixed>
@@ -345,6 +409,12 @@ class RequestMonitor
             'mail' => $this->mail,
             'notifications' => $this->notifications,
             'cache' => $this->cache,
+
+            // Empty on every request in an application without Livewire, and
+            // on every non-Livewire request in one with it.
+            'livewire_component' => $this->livewireComponent,
+            'livewire_method' => $this->livewireMethod,
+            'livewire' => $this->livewire,
         ], $stages, $this->counters);
     }
 

@@ -11,6 +11,7 @@ use LaraBug\Requests\TraceContext;
 use Illuminate\Support\Facades\App;
 use LaraBug\Requests\RequestMonitor;
 use Illuminate\Support\Facades\Cache;
+use LaraBug\Livewire\LivewireContext;
 use Illuminate\Foundation\Application;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Request;
@@ -275,6 +276,15 @@ class LaraBug
         // Outside a tracked request this is a fresh id no request shares.
         $data['trace_id'] = TraceContext::id();
 
+        // A Livewire update posts to the same endpoint whatever component it
+        // addresses, so the url and the route above say almost nothing about
+        // what failed. This is the part that does.
+        $livewire = $this->getLivewireData();
+
+        if ($livewire !== []) {
+            $data['livewire'] = $livewire;
+        }
+
         if (! empty(self::$customContext)) {
             $data['custom_data'] = self::$customContext;
             self::$customContext = [];
@@ -289,6 +299,29 @@ class LaraBug
         }
 
         return $data;
+    }
+
+    /**
+     * The Livewire component this execution was working on, already scrubbed
+     * by the context that collected it. Empty in an application without
+     * Livewire, and on every request that did not touch a component.
+     *
+     * Wrapped whole for the same reason the request monitor call is: a failure
+     * to describe a component must never stop an exception being reported.
+     *
+     * @return array<string, mixed>
+     */
+    protected function getLivewireData(): array
+    {
+        try {
+            if (! config('larabug.livewire.track_livewire', true)) {
+                return [];
+            }
+
+            return app(LivewireContext::class)->toArray();
+        } catch (Throwable) {
+            return [];
+        }
     }
 
     public function filterParameterValues(array $parameters): array

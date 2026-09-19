@@ -302,6 +302,15 @@ return [
         'max_cache_events' => env('LB_REQUEST_MAX_CACHE_EVENTS', 100),
 
         /*
+        | How many Livewire lifecycle events are kept per request
+        | The operation counter keeps counting past this, the same as queries: a
+        | page that mounts four hundred components is worth knowing about, and
+        | the number is what says so
+        | Default: 100
+        */
+        'max_livewire_events' => env('LB_REQUEST_MAX_LIVEWIRE_EVENTS', 100),
+
+        /*
         | How many records are held before they are sent
         | A web process serves one request, so this mostly matters for Octane
         | and for the console
@@ -384,6 +393,65 @@ return [
             'cvv',
             'iban',
         ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Livewire
+    |--------------------------------------------------------------------------
+    |
+    | Records what the Livewire part of a request was doing: which components
+    | mounted, hydrated, updated and rendered, and on a failure, which component
+    | was addressed, which method it was asked to run and which properties the
+    | client changed.
+    |
+    | Worth having because a Livewire update is otherwise unreadable. Every
+    | component in the application posts to the same endpoint, so the route says
+    | nothing, and the body is a snapshot blob no exception can be read against.
+    |
+    | On by default, and free in an application without Livewire: nothing here
+    | loads a Livewire class or runs at all unless Livewire is installed.
+    |
+    | The lifecycle events land on the request timeline, beside the queries and
+    | cache calls, so they need request monitoring switched on above. Everything
+    | else lands on the exception report and does not.
+    |
+    */
+    'livewire' => [
+        /*
+        | Enable or disable Livewire monitoring
+        | Default: true
+        */
+        'track_livewire' => env('LB_TRACK_LIVEWIRE', true),
+
+        /*
+        | Whether the arguments a component method was called with are kept
+        | Livewire posts them as a positional list, so they are named from the
+        | method's own signature before the blacklist above runs over them: an
+        | argument arrives anonymous and is scrubbed as 'password' because that
+        | is what the method calls it. Turn this off to keep the method name
+        | and drop its arguments entirely
+        | Default: true
+        */
+        'capture_parameters' => env('LB_LIVEWIRE_CAPTURE_PARAMETERS', true),
+
+        /*
+        | Whether the values the client changed properties to are kept
+        | Keyed by property path and filtered by the blacklist above the same
+        | way. Turn this off to keep which properties changed and drop what
+        | they changed to
+        | Default: true
+        */
+        'capture_updates' => env('LB_LIVEWIRE_CAPTURE_UPDATES', true),
+
+        /*
+        | How long a single captured string may be
+        | A component property holds whatever the customer typed into it, up to
+        | and including a base64 upload; this is what stops one deciding how
+        | large our payload is
+        | Default: 255
+        */
+        'max_value_length' => env('LB_LIVEWIRE_MAX_VALUE_LENGTH', 255),
     ],
 
     /*
