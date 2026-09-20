@@ -98,31 +98,12 @@ class LaraBug
                 $data['line'] = $customData['line'];
                 $data['class'] = null;
 
-                $count = config('larabug.lines_count');
-
-                if ($count > 50) {
-                    $count = 12;
-                }
-
-                $lines = file($data['file']);
+                // A browser error's file is a URL on the visitor's machine, not
+                // a path on this server, so there is no source here to quote.
+                // Reading it would hand anyone who can post a report the
+                // contents of a local file, or a fetch of any URL they name.
+                // The browser sends its own stack, which is in `exception`.
                 $data['executor'] = [];
-
-                for ($i = -1 * abs($count); $i <= abs($count); $i++) {
-                    $currentLine = $data['line'] + $i;
-
-                    $index = $currentLine - 1;
-
-                    if (! array_key_exists($index, $lines)) {
-                        continue;
-                    }
-
-                    $data['executor'][] = [
-                        'line_number' => $currentLine,
-                        'line' => $lines[$index],
-                    ];
-                }
-
-                $data['executor'] = array_filter($data['executor']);
 
                 // The frames collected above walked the PHP wrapper's trace,
                 // which says nothing about where the JavaScript error was.
