@@ -78,6 +78,22 @@ class JavascriptReportTest extends TestCase
         $this->assertSame([], $exception['executor']);
     }
 
+    /** @test */
+    public function it_rejects_a_report_that_does_not_look_like_a_javascript_error()
+    {
+        $response = $this->postJson('/larabug-api/javascript-report', [
+            'message' => ['an', 'array'],
+            'file' => ['another', 'array'],
+            'line' => 'not a line',
+            'stack' => str_repeat('a', 20001),
+            'url' => str_repeat('b', 2049),
+        ]);
+
+        $response->assertStatus(422);
+
+        $this->client->assertRequestsSent(0);
+    }
+
     /**
      * @return string
      */
