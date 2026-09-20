@@ -54,12 +54,22 @@ return [
     | Environment setting
     |--------------------------------------------------------------------------
     |
-    | This setting determines if the exception should be send over or not.
+    | The environments exceptions are reported from. Anything running as an
+    | environment not named here reports nothing, which is the usual reason a
+    | developer finds LaraBug silent on a machine other than production.
+    |
+    | A comma separated list, so a staging or acceptance server can be told to
+    | report without publishing this file:
+    |
+    |   LB_ENVIRONMENTS=production,staging
+    |
+    | An empty list disables reporting everywhere.
     |
     */
-    'environments' => [
-        'production',
-    ],
+    'environments' => array_values(array_filter(array_map(
+        'trim',
+        explode(',', (string) env('LB_ENVIRONMENTS', 'production'))
+    ))),
 
     /*
     |--------------------------------------------------------------------------

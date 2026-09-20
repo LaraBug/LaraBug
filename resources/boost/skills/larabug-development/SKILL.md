@@ -40,7 +40,9 @@ Read the config file before changing behaviour. Every key documents what it does
 
 ### Reporting is scoped to environments
 
-`larabug.environments` defaults to `['production']`. Nothing is sent from any other environment, which is the usual reason a developer reports that "LaraBug is not working" locally. Add the environment deliberately rather than removing the check, and remember an empty array disables reporting everywhere.
+`larabug.environments` defaults to `['production']`. Nothing is sent from any other environment, which is the usual reason a developer reports that "LaraBug is not working" locally. Set `LB_ENVIRONMENTS` to a comma separated list to add one, for instance `LB_ENVIRONMENTS=production,staging` on a staging server. Add the environment deliberately rather than removing the check, and remember an empty list disables reporting everywhere.
+
+The list only gates exceptions and the queue heartbeat. Jobs, requests, commands, scheduled tasks, logs and CVE scans are sent from whatever environment they happen in, so an application that reports no exceptions can still be spending its event quota.
 
 ### What is on by default
 
