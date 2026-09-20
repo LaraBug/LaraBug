@@ -193,6 +193,8 @@ Include the client in a layout to report browser errors to the same project:
 @larabugJavaScriptClient
 ```
 
+The client posts to `/larabug-api/javascript-report`, which every visitor can reach, so the route is rate limited per IP address (`LB_REPORT_THROTTLE`, 60 a minute by default). A browser error reports the message, the stack, the file and the line the browser gave it. No source is read from the server for these: the file a browser names is a URL on the visitor's machine, not a path here.
+
 ## Artisan commands
 
 - `php artisan larabug:test` sends a deliberate exception to verify credentials and connectivity. Reach for this first when reporting appears broken.
