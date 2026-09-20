@@ -74,6 +74,19 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Report endpoint rate limit
+    |--------------------------------------------------------------------------
+    |
+    | The JavaScript client posts its reports to /larabug-api/javascript-report,
+    | which is open to every visitor by necessity. This is the rate limit put
+    | on it, in Laravel's "attempts,minutes" form, applied per IP address.
+    | A single broken asset can otherwise report on every page view.
+    |
+    */
+    'report_throttle' => env('LB_REPORT_THROTTLE', '60,1'),
+
+    /*
+    |--------------------------------------------------------------------------
     | Lines near exception
     |--------------------------------------------------------------------------
     |
