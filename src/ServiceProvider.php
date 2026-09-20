@@ -364,6 +364,13 @@ class ServiceProvider extends BaseServiceProvider
             [
                 'namespace' => '\LaraBug\Http\Controllers',
                 'prefix' => 'larabug-api',
+                // Anyone can reach this endpoint: the bundled client posts to
+                // it from the browser of every visitor, before anybody is
+                // logged in. A limit is the only thing between a broken asset,
+                // or someone with curl, and the project's whole quota. The
+                // `web` group is deliberately not here, since its CSRF check
+                // would reject the very client that posts these reports.
+                'middleware' => ['throttle:' . config('larabug.report_throttle', '60,1')],
             ],
             function ($router) {
                 require __DIR__ . '/../routes/api.php';
