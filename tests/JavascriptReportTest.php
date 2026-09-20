@@ -3,6 +3,7 @@
 namespace LaraBug\Tests;
 
 use LaraBug\LaraBug;
+use Illuminate\Support\Facades\Route;
 use LaraBug\Tests\Mocks\LaraBugClient;
 
 class JavascriptReportTest extends TestCase
@@ -92,6 +93,27 @@ class JavascriptReportTest extends TestCase
         $response->assertStatus(422);
 
         $this->client->assertRequestsSent(0);
+    }
+
+    /** @test */
+    public function it_throttles_the_javascript_report_route()
+    {
+        $route = collect(Route::getRoutes()->getRoutes())->first(function ($route) {
+            return $route->uri() === 'larabug-api/javascript-report';
+        });
+
+        $this->assertNotNull($route);
+        $this->assertContains('throttle:60,1', $route->gatherMiddleware());
+    }
+
+    /** @test */
+    public function it_stops_accepting_javascript_reports_once_the_rate_limit_is_reached()
+    {
+        for ($i = 0; $i < 60; $i++) {
+            $this->postJson('/larabug-api/javascript-report', $this->payload())->assertStatus(200);
+        }
+
+        $this->postJson('/larabug-api/javascript-report', $this->payload())->assertStatus(429);
     }
 
     /**
