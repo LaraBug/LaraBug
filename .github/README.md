@@ -2,7 +2,7 @@
 
 # LaraBug Laravel SDK
 
-Official Laravel SDK for [larabug.com](https://www.larabug.com). Captures unhandled exceptions and queued job failures from Laravel 6 through 13 on PHP 7.4 and newer.
+Official Laravel SDK for [larabug.com](https://www.larabug.com). Captures exceptions, queued jobs, requests, commands, scheduled tasks, logs and known vulnerabilities from Laravel 11, 12 and 13 on PHP 8.2 and newer.
 
 [![Software License](https://poser.pugx.org/larabug/larabug/license.svg)](../LICENSE.md)
 [![Latest Version on Packagist](https://poser.pugx.org/larabug/larabug/v/stable.svg)](https://packagist.org/packages/larabug/larabug)
@@ -30,23 +30,37 @@ LB_PROJECT_KEY=your-project-key
 
 Get both keys from your project at [larabug.com](https://www.larabug.com).
 
-Finally, add `larabug` to your default log stack in `config/logging.php`:
+That's it. Every unhandled exception, and every failed queue job, now reports to LaraBug automatically. The package registers itself with your exception handler, so there is nothing to wire up.
 
-```php
-'channels' => [
-    'stack' => [
-        'driver' => 'stack',
-        'channels' => ['single', 'larabug'],
-        'ignore_exceptions' => false,
-    ],
+Reporting is scoped to environments, and only `production` reports by default. Name the others you want to hear from:
 
-    'larabug' => [
-        'driver' => 'larabug',
-    ],
-],
+```
+LB_ENVIRONMENTS=production,staging
 ```
 
-That's it. Every unhandled exception, and every failed queue job, now reports to LaraBug automatically.
+Check the wiring from the application itself:
+
+```bash
+php artisan larabug:test
+```
+
+## Pointing at your own install
+
+Self hosted installs, and staging or acceptance servers running their own copy, set the endpoint instead of the keys:
+
+```
+LB_DSN=https://login-key:project-key@larabug.example.com/api/log
+```
+
+Or set the parts separately:
+
+```
+LB_SERVER=https://larabug.example.com/api/log
+LB_KEY=your-login-key
+LB_PROJECT_KEY=your-project-key
+```
+
+The heartbeat endpoint follows the reporting server, so there is nothing else to configure. Set `LB_HEARTBEAT_SERVER` if it lives somewhere else. `LB_VERIFY_SSL=false` skips certificate verification, which local installs with a self signed certificate need and nothing else should use.
 
 ## Documentation
 
