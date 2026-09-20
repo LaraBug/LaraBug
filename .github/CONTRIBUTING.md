@@ -36,6 +36,25 @@ Before submitting a pull request:
 - Check the codebase to ensure that your feature doesn't already exist.
 - Check the pull requests to ensure that another person hasn't already submitted the feature or fix.
 
+## Tests
+
+Two suites, both run by `composer test`.
+
+`tests/` builds the pieces by hand and checks each one in isolation. Fast, and
+the right place for a filter, a parser or a buffer.
+
+`tests/Integration` boots a real Laravel application with the package installed
+and reads the HTTP calls the package made. Everything above the socket is the
+real thing: the real service provider, the real buffers and the real
+`LaraBug\Http\Client`, with only the network replaced by a recording
+transport. Run it on its own with `composer test-integration`.
+
+Put a test there when what you changed only shows up once an application is
+booted. Wiring in the service provider, a Laravel event firing the way a
+listener expects, the shape of a payload, or the host it is sent to. Nothing in
+that suite reaches the network, and no test may point at a real LaraBug
+install.
+
 ## Requirements
 
 If the project maintainer has any additional requirements, you will find them listed here.

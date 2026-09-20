@@ -28,11 +28,13 @@
     },
     "autoload-dev": {
         "psr-4": {
-            "LaraBug\\Tests\\": "tests"
+            "LaraBug\\Tests\\": "tests",
+            "ExampleApp\\": "tests/Integration/Application"
         }
     },
     "scripts": {
         "test": "vendor/bin/phpunit",
+        "test-integration": "vendor/bin/phpunit --testsuite=Integration",
         "test-coverage": "vendor/bin/phpunit --coverage-html coverage",
         "format": "vendor/bin/php-cs-fixer fix"
     },
