@@ -224,7 +224,8 @@ class ServiceProvider extends BaseServiceProvider
         Route::group(
             [
                 'namespace' => '\LaraBug\Http\Controllers',
-                'prefix' => 'larabug-api'
+                'prefix' => 'larabug-api',
+                'middleware' => 'throttle:60,1'
             ],
             function ($router) {
                 require __DIR__ . '/../routes/api.php';
