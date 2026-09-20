@@ -104,31 +104,11 @@ class LaraBug
                 $data['line'] = $customData['line'];
                 $data['class'] = null;
 
-                $count = config('larabug.lines_count');
-
-                if ($count > 50) {
-                    $count = 12;
-                }
-
-                $lines = file($data['file']);
+                // A JavaScript error's file is a URL in the browser, never a path on
+                // this server, so there is no source to read here. Reading it handed
+                // any anonymous caller an arbitrary file read, and the browser stack
+                // in $data['exception'] is the context that belongs in the report.
                 $data['executor'] = [];
-
-                for ($i = -1 * abs($count); $i <= abs($count); $i++) {
-                    $currentLine = $data['line'] + $i;
-
-                    $index = $currentLine - 1;
-
-                    if (!array_key_exists($index, $lines)) {
-                        continue;
-                    }
-
-                    $data['executor'][] = [
-                        'line_number' => $currentLine,
-                        'line' => $lines[$index],
-                    ];
-                }
-
-                $data['executor'] = array_filter($data['executor']);
             }
 
             $rawResponse = $this->logError($data);
