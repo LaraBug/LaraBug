@@ -149,58 +149,6 @@ class Client
         }
     }
 
-    /**
-     * Report that this app's workers are alive.
-     *
-     * Its own endpoint rather than a kind of report: this arrives on a schedule
-     * whether or not anything happened, and the thing it proves is that the
-     * sender is running at all.
-     */
-    public function heartbeat(array $payload): ?ResponseInterface
-    {
-        try {
-            return $this->getGuzzleHttpClient()->request('POST', $this->heartbeatUrl(), [
-                'headers' => [
-                    'Authorization' => 'Bearer '.$this->login,
-                    'Content-Type' => 'application/json',
-                    'Accept' => 'application/json',
-                    'User-Agent' => 'LaraBug-Package',
-                ],
-                'json' => array_merge(['project' => $this->project], $payload),
-                'verify' => config('larabug.verify_ssl'),
-                // Shorter than a report's: this runs every minute from the
-                // scheduler, and a broker that has gone away should not hold the
-                // schedule open behind it.
-                'timeout' => 5,
-            ]);
-        } catch (RequestException $e) {
-            return $e->getResponse();
-        } catch (Exception) {
-            return null;
-        }
-    }
-
-    /**
-     * Follows the reporting server unless told otherwise, so a self-hosted
-     * install does not have to configure the same host twice.
-     */
-    protected function heartbeatUrl(): string
-    {
-        $configured = config('larabug.heartbeat.server');
-
-        if ($configured) {
-            return $configured;
-        }
-
-        $server = (string) config('larabug.server');
-
-        if (str_ends_with($server, '/api/log')) {
-            return substr($server, 0, -8).'/api/heartbeat';
-        }
-
-        return rtrim($server, '/').'/heartbeat';
-    }
-
     public function getGuzzleHttpClient(): ClientInterface
     {
         return $this->client ??= new \GuzzleHttp\Client([
