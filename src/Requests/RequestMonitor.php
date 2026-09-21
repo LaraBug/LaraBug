@@ -25,6 +25,17 @@ class RequestMonitor
     /** @var array<string, float> Wall-clock marks, in seconds. */
     protected array $marks = [];
 
+    /**
+     * Work that only makes sense once the request is over.
+     *
+     * A listener that pairs two events has no way, mid-request, to tell an
+     * unfinished pair from one whose second half has not happened yet. This is
+     * the moment it can: nothing else will arrive.
+     *
+     * @var array<int, callable>
+     */
+    protected array $beforeFlush = [];
+
     /** @var array<string, int> */
     protected array $counters = [
         'queries' => 0,
@@ -345,12 +356,31 @@ class RequestMonitor
     }
 
     /**
+     * Register work to run when the record is built.
+     *
+     * Guarded like every other listener path: a contributor that raises must
+     * not take the record it was contributing to down with it.
+     */
+    public function beforeFlush(callable $callback): void
+    {
+        $this->beforeFlush[] = $callback;
+    }
+
+    /**
      * The finished record.
      *
      * @return array<string, mixed>
      */
     public function toArray(Request $request, Response $response, float $sampleRate): array
     {
+        foreach ($this->beforeFlush as $callback) {
+            try {
+                $callback();
+            } catch (Throwable) {
+                // Instrumentation never surfaces in the application's stack.
+            }
+        }
+
         $stages = $this->stages();
 
         return array_merge([

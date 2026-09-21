@@ -354,15 +354,6 @@ return [
         'capture_mail_recipients' => env('LB_REQUEST_CAPTURE_MAIL_RECIPIENTS', false),
 
         /*
-        | Whether full cache keys are recorded
-        | Off by default: a key up to its first colon is kept, which is the store
-        | and the kind of thing cached, and the id after it is dropped the way a
-        | query's bindings are. Turn this on only where the keys are yours to keep
-        | Default: false
-        */
-        'capture_cache_keys' => env('LB_REQUEST_CAPTURE_CACHE_KEYS', false),
-
-        /*
         | Whether request headers are recorded
         | Headers are how you tell a browser from a crawler and a v1 client
         | from a v2 one, which is usually what a strange request turns out to

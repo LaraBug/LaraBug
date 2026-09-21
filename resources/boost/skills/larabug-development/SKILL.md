@@ -115,7 +115,8 @@ Request monitoring has its own, separate controls, and the cautious defaults are
 
 - `capture_headers` is on, but `redact_headers` replaces `authorization`, `cookie` and friends with a marker.
 - `capture_payload_on_error` is off, and even when on it only keeps the body of a failed request. `redact_fields` masks keys inside it.
-- `capture_cache_keys` and `capture_mail_recipients` are off. Query strings are never recorded at all, since reset tokens and signed URL signatures live there.
+- `capture_mail_recipients` is off. Query strings are never recorded at all, since reset tokens and signed URL signatures live there.
+- Cache keys are always templated to their shape before they leave the process, so an id, a uuid or a session id inside a key never is. There is no opt-out, because the key is also the rollup key on the panel and a literal one widens that rollup per value.
 
 Do not switch these on to make debugging easier without saying out loud what starts being stored.
 
