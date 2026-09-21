@@ -21,11 +21,6 @@ use Throwable;
  * or Horizon a flag would mute the application for as long as the worker lives.
  * Noticing that there is room again must not require a deploy.
  *
- * The scheduled heartbeat is the one sender left out. It runs as its own
- * short-lived process per invocation, so a window held here could never reach
- * it: quietening that one needs a backoff the whole application shares rather
- * than one each process keeps to itself.
- *
  * The state is static because the senders are several objects with several
  * lifetimes — a log buffer, a request buffer, a job buffer, the exception
  * reporter — and they are all spending against the same two limits.

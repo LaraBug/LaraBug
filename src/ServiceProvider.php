@@ -28,7 +28,6 @@ use LaraBug\Livewire\LivewireContext;
 use LaraBug\Logger\LaraBugLogHandler;
 use LaraBug\Queue\JobEventSubscriber;
 use Illuminate\Foundation\AliasLoader;
-use LaraBug\Commands\HeartbeatCommand;
 use LaraBug\Requests\RequestListeners;
 use LaraBug\Livewire\LivewireListeners;
 use Illuminate\Console\Scheduling\Event;
@@ -62,7 +61,6 @@ class ServiceProvider extends BaseServiceProvider
         $this->commands([
             TestCommand::class,
             ScanCommand::class,
-            HeartbeatCommand::class,
         ]);
 
         $this->mapLaraBugApiRoutes();
@@ -128,22 +126,6 @@ class ServiceProvider extends BaseServiceProvider
             $this->app['events']->subscribe(ScheduledTaskListeners::class);
         }
 
-        // The heartbeat only has a job to do where the scheduler runs, which is
-        // also the only place it can be registered from.
-        if (config('larabug.heartbeat.enabled', true)) {
-            $this->app->booted(function () {
-                $schedule = $this->app->make(Schedule::class);
-
-                $event = $schedule->command('larabug:heartbeat')
-                    ->withoutOverlapping()
-                    // Not onOneServer: each server runs its own workers, and a
-                    // heartbeat from one of them says nothing about the rest.
-                    ->runInBackground();
-
-                $this->applyHeartbeatCadence($event, config('larabug.heartbeat.schedule', 'everyMinute'));
-            });
-        }
-
         if (config('larabug.cve.enabled', false)) {
             $trigger = strtolower((string) config('larabug.cve.trigger', 'both'));
 
@@ -200,16 +182,6 @@ class ServiceProvider extends BaseServiceProvider
             // An application whose 'livewire' binding is something else
             // entirely simply does not get component monitoring.
         }
-    }
-
-    protected function applyHeartbeatCadence(Event $event, string $cadence): void
-    {
-        match (strtolower($cadence)) {
-            'everytwominutes' => $event->everyTwoMinutes(),
-            'everyfiveminutes' => $event->everyFiveMinutes(),
-            'everytenminutes' => $event->everyTenMinutes(),
-            default => $event->everyMinute(),
-        };
     }
 
     protected function applyCadence(Event $event, string $cadence): void

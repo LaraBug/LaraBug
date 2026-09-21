@@ -54,7 +54,6 @@ Read the config file before changing behaviour. Every key documents what it does
 | HTTP requests | off | `LB_TRACK_REQUESTS` |
 | Artisan commands | off | `LB_TRACK_COMMANDS` |
 | Scheduled tasks | off | `LB_TRACK_SCHEDULED_TASKS` |
-| Queue heartbeat | on | `LB_HEARTBEAT`, needs `schedule:run` |
 
 The off-by-default monitors are off because each one spends the account's event quota. Never switch one on unless you were asked to.
 
@@ -200,7 +199,6 @@ The client posts to `/larabug-api/javascript-report`, which every visitor can re
 
 - `php artisan larabug:test` sends a deliberate exception to verify credentials and connectivity. Reach for this first when reporting appears broken.
 - `php artisan larabug:scan` runs a CVE scan now.
-- `php artisan larabug:heartbeat --show` prints the worker payload instead of sending it.
 
 ## Testing
 
