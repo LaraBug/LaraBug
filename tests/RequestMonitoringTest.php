@@ -374,7 +374,9 @@ class RequestMonitoringTest extends TestCase
 
         $message = $monitor->toArray(Request::create('/x', 'GET'), new Response('', 200), 1.0)['mail'][0];
 
-        $this->assertSame(get_class($mailable), $message['mailable']);
+        // Anonymous here, so the name is the part before the null byte: the
+        // file and line after it would otherwise become the grouping key.
+        $this->assertSame($this->anonymousName($mailable), $message['mailable']);
     }
 
     #[Test]
@@ -506,8 +508,118 @@ class RequestMonitoringTest extends TestCase
         $this->assertCount(2, $record['notifications']);
     }
 
+    /**
+     * The panel groups mail on md5 of this string, so whatever is in it is a
+     * rollup key. An anonymous mailable's raw class name is a server path and a
+     * line number behind a null byte.
+     */
     #[Test]
-    public function it_records_cache_operations_with_the_key_narrowed_to_a_prefix()
+    public function an_anonymous_mailable_is_recorded_without_its_file_path()
+    {
+        $monitor = new RequestMonitor();
+        $listeners = new RequestListeners($monitor, new Sampler());
+
+        $mailable = new class () extends \Illuminate\Mail\Mailable {};
+
+        $job = new \Illuminate\Mail\SendQueuedMailable($mailable);
+
+        $event = new \stdClass();
+        $event->job = $job;
+
+        $listeners->onJobQueued($event);
+
+        $record = $monitor->toArray(Request::create('/x', 'POST'), new Response('', 200), 1.0);
+
+        $recorded = $record['mail'][0]['mailable'];
+
+        $this->assertStringNotContainsString("\0", $recorded);
+        $this->assertStringNotContainsString(__FILE__, $recorded);
+        $this->assertStringEndsWith('@anonymous', $recorded);
+    }
+
+    #[Test]
+    public function a_message_that_sent_is_not_flagged_as_failed()
+    {
+        $monitor = new RequestMonitor();
+        $listeners = new RequestListeners($monitor, new Sampler());
+
+        $message = $this->mailMessage('Welcome aboard', ['alice@example.com']);
+
+        $listeners->onMailSending($this->mailEvent($message));
+        $listeners->onMailSent($this->mailEvent($message));
+
+        $record = $monitor->toArray(Request::create('/register', 'POST'), new Response('', 200), 1.0);
+
+        $this->assertCount(1, $record['mail']);
+        $this->assertSame(0, $record['mail'][0]['failed']);
+    }
+
+    /**
+     * Laravel fires nothing when a send throws: sending happens, the transport
+     * raises, sent never comes. The mark left behind is the only evidence, and
+     * the end of the request is the first moment it means "failed" rather than
+     * "not finished yet".
+     */
+    #[Test]
+    public function a_send_that_never_completed_is_recorded_as_a_failure()
+    {
+        $monitor = new RequestMonitor();
+        $listeners = new RequestListeners($monitor, new Sampler());
+
+        $listeners->onMailSending($this->mailEvent($this->mailMessage('Receipt', ['alice@example.com'])));
+
+        $record = $monitor->toArray(Request::create('/checkout', 'POST'), new Response('', 500), 1.0);
+
+        $this->assertCount(1, $record['mail']);
+
+        $message = $record['mail'][0];
+        $this->assertSame(1, $message['failed']);
+        $this->assertSame('Receipt', $message['subject']);
+
+        // Nothing reached a recipient, so nothing is counted as having.
+        $this->assertSame(0, $message['to_count']);
+        $this->assertSame('', $message['recipient_domains']);
+    }
+
+    #[Test]
+    public function a_failed_send_is_only_recorded_once()
+    {
+        $monitor = new RequestMonitor();
+        $listeners = new RequestListeners($monitor, new Sampler());
+
+        $listeners->onMailSending($this->mailEvent($this->mailMessage('Receipt', ['alice@example.com'])));
+
+        $listeners->flushUnfinishedMail();
+        $listeners->flushUnfinishedMail();
+
+        $record = $monitor->toArray(Request::create('/checkout', 'POST'), new Response('', 500), 1.0);
+
+        $this->assertCount(1, $record['mail']);
+        $this->assertSame(1, $record['mail_sent']);
+    }
+
+    #[Test]
+    public function an_outgoing_call_is_grouped_by_shape_rather_than_by_id()
+    {
+        $monitor = new RequestMonitor();
+        $listeners = new RequestListeners($monitor, new Sampler());
+
+        $listeners->onOutgoingRequest($this->outgoingEvent(
+            'GET',
+            'https://api.stripe.com/v1/customers/4821/invoices/9f8b7c6d-1234-4abc-8def-0123456789ab',
+            new \Illuminate\Http\Client\Response(new \GuzzleHttp\Psr7\Response(200))
+        ));
+
+        $call = $monitor->toArray(Request::create('/orders', 'GET'), new Response('', 200), 1.0)['outgoing'][0];
+
+        // The host is the grouping dimension and stays whole; the path is
+        // templated so one endpoint is one call site, not one per customer.
+        $this->assertSame('api.stripe.com', $call['host']);
+        $this->assertSame('https://api.stripe.com/v1/customers/{int}/invoices/{uuid}', $call['url']);
+    }
+
+    #[Test]
+    public function it_records_cache_operations_with_the_key_templated()
     {
         $monitor = new RequestMonitor();
         $listeners = new RequestListeners($monitor, new Sampler());
@@ -526,7 +638,7 @@ class RequestMonitoringTest extends TestCase
         $this->assertSame(['hit', 'miss', 'write', 'forget'], array_column($record['cache'], 'op'));
 
         $hit = $record['cache'][0];
-        $this->assertSame('user', $hit['key_prefix']);
+        $this->assertSame('user:{int}:profile', $hit['key_prefix']);
         $this->assertSame('redis', $hit['store']);
 
         // A ttl only means something on a write.
@@ -535,18 +647,20 @@ class RequestMonitoringTest extends TestCase
     }
 
     #[Test]
-    public function it_keeps_the_full_cache_key_only_when_opted_in()
+    public function two_keys_that_differ_only_by_id_become_one_cache_group()
     {
-        config(['larabug.requests.capture_cache_keys' => true]);
-
         $monitor = new RequestMonitor();
         $listeners = new RequestListeners($monitor, new Sampler());
 
-        $listeners->onCacheHit($this->cacheEvent('user:42:profile', 'redis'));
+        $listeners->onCacheHit($this->cacheEvent('user:8213:profile', 'redis'));
+        $listeners->onCacheHit($this->cacheEvent('user:44:profile', 'redis'));
 
-        $event = $monitor->toArray(Request::create('/x', 'GET'), new Response('', 200), 1.0)['cache'][0];
+        $events = $monitor->toArray(Request::create('/x', 'GET'), new Response('', 200), 1.0)['cache'];
 
-        $this->assertSame('user:42:profile', $event['key_prefix']);
+        $this->assertSame(
+            ['user:{int}:profile', 'user:{int}:profile'],
+            array_column($events, 'key_prefix')
+        );
     }
 
     #[Test]
@@ -600,7 +714,9 @@ class RequestMonitoringTest extends TestCase
         $this->assertCount(1, $record['mail']);
 
         $message = $record['mail'][0];
-        $this->assertSame(get_class($mailable), $message['mailable']);
+        // Anonymous here, so the name is the part before the null byte: the
+        // file and line after it would otherwise become the grouping key.
+        $this->assertSame($this->anonymousName($mailable), $message['mailable']);
         $this->assertSame(1, $message['to_count']);
         $this->assertSame(1, $message['cc_count']);
         $this->assertSame('example.com,other.test', $message['recipient_domains']);
@@ -678,6 +794,15 @@ class RequestMonitoringTest extends TestCase
                 return $this->bcc;
             }
         };
+    }
+
+    /** The stable part of an anonymous class name, up to the null byte. */
+    private function anonymousName(object $object): string
+    {
+        $class = get_class($object);
+        $nul = strpos($class, "\0");
+
+        return $nul === false ? $class : substr($class, 0, $nul);
     }
 
     private function mailEvent(object $message): object

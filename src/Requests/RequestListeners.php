@@ -30,13 +30,26 @@ use Illuminate\Notifications\Events\NotificationFailed;
  */
 class RequestListeners
 {
-    /** @var array<int, float> Send-start marks, in seconds, keyed by message. */
+    /**
+     * Send-start marks, keyed by message.
+     *
+     * The mailable and subject are read here rather than at the sent event
+     * because a send that throws never reaches one, and a failure whose
+     * mailable is empty groups with every other mailer's failures.
+     *
+     * @var array<int, array{at: float, mailable: string, subject: string}>
+     */
     protected array $mailStartedAt = [];
 
     public function __construct(
         protected readonly RequestMonitor $monitor,
         protected readonly Sampler $sampler,
     ) {
+        // Registered here rather than in subscribe: the sweep belongs to this
+        // listener's marks, which exist from the moment it does. Sweeping
+        // clears as it goes, so a second listener on the same monitor reports
+        // its own unfinished sends and never repeats another's.
+        $this->monitor->beforeFlush($this->flushUnfinishedMail(...));
     }
 
     public function subscribe(Dispatcher $events): void
@@ -135,8 +148,7 @@ class RequestListeners
     }
 
     /**
-     * The key is narrowed to a prefix unless the application opted the full
-     * keys in; the ttl is only meaningful on a write.
+     * The key is templated to its shape; the ttl is only meaningful on a write.
      */
     private function recordCacheEvent(string $op, object $event): void
     {
@@ -149,25 +161,19 @@ class RequestListeners
     }
 
     /**
-     * Laravel's keys are routinely "prefix:id", and the prefix is the
-     * diagnostic part while the id is customer data: the part up to the first
-     * colon keeps the former and drops the latter. A key with no colon is
-     * bounded to a fixed length; an application that opted in keeps its keys
-     * whole.
+     * The key as its shape rather than its instance.
+     *
+     * This used to keep the part up to the first colon, which lost the shape of
+     * every key it did collapse (`user:8213:profile` became `user`) and
+     * collapsed nothing at all in a key with no colon — which is exactly what a
+     * session id, a rate limiter key and a scheduled task key are. Those went
+     * to the rollup one row per value.
+     *
+     * @see CacheKeyTemplate for what collapses and why it holds no regex.
      */
     private function cacheKey(string $key): string
     {
-        if (config('larabug.requests.capture_cache_keys', false)) {
-            return mb_substr($key, 0, 255);
-        }
-
-        $colon = strpos($key, ':');
-
-        if ($colon > 0) {
-            return mb_substr($key, 0, $colon);
-        }
-
-        return mb_substr($key, 0, 64);
+        return CacheKeyTemplate::template($key);
     }
 
     public function onJobQueued(object $event): void
@@ -199,7 +205,11 @@ class RequestListeners
                 return;
             }
 
-            $this->mailStartedAt[spl_object_id($message)] = microtime(true);
+            $this->mailStartedAt[spl_object_id($message)] = [
+                'at' => microtime(true),
+                'mailable' => $this->mailableClass(),
+                'subject' => $this->mailSubject($message),
+            ];
         });
     }
 
@@ -218,7 +228,7 @@ class RequestListeners
             if ($message === null) {
                 // A mailer that fired the event without a message still sent
                 // one; keep the tile honest even when there is nothing to detail.
-                $this->monitor->recordMail([]);
+                $this->monitor->recordMail(['failed' => 0]);
 
                 return;
             }
@@ -227,14 +237,21 @@ class RequestListeners
             $cc = $this->mailAddresses($this->recipients($message, 'getCc'));
             $bcc = $this->mailAddresses($this->recipients($message, 'getBcc'));
 
+            // Read off the mark where there is one: the sending event already
+            // walked the stack for these, and walking it twice per message
+            // buys nothing. A sent event with no sending before it — which is
+            // mostly a mailer under test — still reads them live.
+            $mark = $this->mailStartedAt[spl_object_id($message)] ?? null;
+
             $this->monitor->recordMail([
-                'mailable' => $this->mailableClass(),
-                'subject' => $this->mailSubject($message),
+                'mailable' => $mark['mailable'] ?? $this->mailableClass(),
+                'subject' => $mark['subject'] ?? $this->mailSubject($message),
                 'to_count' => count($to),
                 'cc_count' => count($cc),
                 'bcc_count' => count($bcc),
                 'recipient_domains' => $this->mailRecipients(array_merge($to, $cc, $bcc)),
                 'queued' => 0,
+                'failed' => 0,
                 'duration_ms' => $this->mailDuration($message),
             ]);
         });
@@ -253,7 +270,7 @@ class RequestListeners
             $object = $frame['object'] ?? null;
 
             if ($object instanceof Mailable) {
-                return get_class($object);
+                return $this->normalisedClass(get_class($object));
             }
         }
 
@@ -364,11 +381,46 @@ class RequestListeners
             return 0.0;
         }
 
-        $duration = round((microtime(true) - $this->mailStartedAt[$key]) * 1000, 3);
+        $duration = round((microtime(true) - $this->mailStartedAt[$key]['at']) * 1000, 3);
 
         unset($this->mailStartedAt[$key]);
 
         return $duration;
+    }
+
+    /**
+     * Every send that started and never finished, as a failed message.
+     *
+     * Laravel fires no event for a send that throws: `MessageSending` happens,
+     * the transport raises, and `MessageSent` never comes. What is left is the
+     * mark, so the marks still standing when the request ends are exactly the
+     * sends that failed.
+     *
+     * Clearing as it sweeps makes a second call a no-op, which is what keeps a
+     * double registration from doubling the failures.
+     */
+    public function flushUnfinishedMail(): void
+    {
+        $this->guard(function () {
+            $pending = $this->mailStartedAt;
+            $this->mailStartedAt = [];
+
+            foreach ($pending as $mark) {
+                $this->monitor->recordMail([
+                    'mailable' => $mark['mailable'],
+                    'subject' => $mark['subject'],
+                    // A send that threw reached no recipient, and the counts
+                    // are what a recipient tile would add up.
+                    'to_count' => 0,
+                    'cc_count' => 0,
+                    'bcc_count' => 0,
+                    'recipient_domains' => '',
+                    'queued' => 0,
+                    'failed' => 1,
+                    'duration_ms' => round((microtime(true) - $mark['at']) * 1000, 3),
+                ]);
+            }
+        });
     }
 
     /**
@@ -390,13 +442,16 @@ class RequestListeners
         $bcc = $this->mailableAddresses($mailable, 'bcc');
 
         $this->monitor->recordMail([
-            'mailable' => get_class($mailable),
+            'mailable' => $this->normalisedClass(get_class($mailable)),
             'subject' => (string) ($mailable->subject ?? ''),
             'to_count' => count($to),
             'cc_count' => count($cc),
             'bcc_count' => count($bcc),
             'recipient_domains' => $this->mailRecipients(array_merge($to, $cc, $bcc)),
             'queued' => 1,
+            // Queued at this point and nothing more. Whether it sends is the
+            // worker's story, and the worker is not recording this request.
+            'failed' => 0,
             'duration_ms' => 0.0,
         ]);
     }
@@ -466,9 +521,14 @@ class RequestListeners
     }
 
     /**
-     * An on-the-fly notification is an anonymous class, and get_class returns
-     * its file path after a null byte; the part before it is the only stable
-     * name it has.
+     * An on-the-fly notification or mailable is an anonymous class, and
+     * get_class returns its defining file and line after a null byte; the part
+     * before it is the only stable name it has.
+     *
+     * Not cosmetic: the panel groups mail on md5 of this string and
+     * notifications on md5 of it and the channel, so the untrimmed version puts
+     * a server path and a line number into a rollup key — one group per
+     * definition site, and it moves the moment the file does.
      */
     private function normalisedClass(string $class): string
     {
@@ -520,6 +580,12 @@ class RequestListeners
      * The url with its query values stripped, the names kept, the same stance
      * the request path takes. Rebuilt rather than regexed so a value carrying
      * an & or = of its own cannot smuggle itself back in.
+     *
+     * The path is templated the way a cache key is: `/v1/customers/cus_4821`
+     * and `/v1/customers/cus_93` are one call site, not two. The house rule is
+     * already this everywhere else — routes become `/api/users/{id}`, queries
+     * become fingerprints — and an id in a path is the same instance-shaped
+     * value in a different position.
      */
     private function strippedUrl(string $url): string
     {
@@ -532,7 +598,7 @@ class RequestListeners
         $rebuilt = (isset($parts['scheme']) ? $parts['scheme'].'://' : '')
             .($parts['host'] ?? '')
             .(isset($parts['port']) ? ':'.$parts['port'] : '')
-            .($parts['path'] ?? '');
+            .CacheKeyTemplate::template($parts['path'] ?? '');
 
         if (! isset($parts['query']) || $parts['query'] === '') {
             return $rebuilt;
