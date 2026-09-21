@@ -146,7 +146,10 @@ class LaraBugTest extends TestCase
         $this->assertArrayHasKey('trace_id', $data);
         $this->assertNotSame('', $data['trace_id']);
 
-        $this->assertCount(15, $data);
+        // Empty here: nothing caused this execution.
+        $this->assertSame('', $data['parent_trace_id']);
+
+        $this->assertCount(16, $data);
     }
 
     #[Test]

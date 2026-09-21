@@ -3,11 +3,17 @@
 namespace LaraBug\Requests;
 
 /**
- * One id shared by everything this execution reports.
+ * One id shared by everything this execution reports, and the id of the
+ * execution that caused it.
  *
  * The request record, the log lines written during it and the exception it
  * threw all carry the same trace id, which is what lets the panel show the
  * lines leading up to an error rather than three unrelated lists.
+ *
+ * A job dispatched by that request, or a second monitored application it
+ * called, is a separate execution and keeps a trace of its own. What joins the
+ * two is the parent id: two stories stay two stories, and the step between
+ * them can still be walked.
  *
  * Static because the things that need it cannot reach each other: a Monolog
  * handler, an exception reporter and a middleware share no object, and passing
@@ -17,9 +23,20 @@ class TraceContext
 {
     protected static ?string $traceId = null;
 
+    protected static ?string $parentTraceId = null;
+
     public static function id(): string
     {
         return self::$traceId ??= self::generate();
+    }
+
+    /**
+     * The execution that caused this one, or null when this one began on its
+     * own: an untraced console command, or a request nobody we monitor made.
+     */
+    public static function parentId(): ?string
+    {
+        return self::$parentTraceId;
     }
 
     /**
@@ -52,5 +69,20 @@ class TraceContext
     public static function reset(): void
     {
         self::$traceId = null;
+        self::$parentTraceId = null;
+    }
+
+    /**
+     * Starts a new trace that names the execution it came out of.
+     *
+     * Same fresh id reset() gives, plus the parent, so nothing downstream has
+     * to know whether this execution was caused by another one. An empty or
+     * missing parent is not an error: most executions have none.
+     */
+    public static function startChild(?string $parentTraceId): void
+    {
+        self::reset();
+
+        self::$parentTraceId = ($parentTraceId === null || $parentTraceId === '') ? null : $parentTraceId;
     }
 }

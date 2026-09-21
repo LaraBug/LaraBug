@@ -29,7 +29,9 @@ class JobEventSubscriber
     {
         // Each job is its own unit of work, so each gets its own trace: a long
         // lived worker would otherwise stamp every job with the first job's id.
-        TraceContext::reset();
+        // The trace that dispatched it is kept as the parent, which is the only
+        // thing left joining the job to the request behind it.
+        TraceContext::startChild(JobTracePayload::parentIdFor($event->job));
 
         $jobId = $event->job->getJobId() ?? spl_object_hash($event->job);
 

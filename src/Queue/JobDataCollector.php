@@ -5,6 +5,7 @@ namespace LaraBug\Queue;
 use Exception;
 use Carbon\Carbon;
 use LaraBug\Filters\DataFilter;
+use LaraBug\Requests\TraceContext;
 use Illuminate\Contracts\Queue\Job;
 
 class JobDataCollector
@@ -50,6 +51,12 @@ class JobDataCollector
             'timeout' => $payload['timeout'] ?? null,
             'payload' => $this->filterer->filterPayload($payload),
             'tags' => $payload['tags'] ?? [],
+
+            // The same id this job's log lines and exceptions carry, and the
+            // trace of whatever dispatched it.
+            'trace_id' => TraceContext::id(),
+            'parent_trace_id' => TraceContext::parentId() ?? '',
+
             'created_at' => now()->toIso8601String(),
         ];
 

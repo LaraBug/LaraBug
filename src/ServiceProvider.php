@@ -18,6 +18,7 @@ use LaraBug\Commands\TestCommand;
 use LaraBug\Queue\DispatchMacros;
 use LaraBug\Console\CommandBuffer;
 use LaraBug\Logger\LaraBugHandler;
+use LaraBug\Queue\JobTracePayload;
 use LaraBug\Requests\RequestBuffer;
 use LaraBug\Requests\RequestMonitor;
 use Illuminate\Contracts\Http\Kernel;
@@ -113,6 +114,11 @@ class ServiceProvider extends BaseServiceProvider
 
         if (config('larabug.jobs.track_jobs', true)) {
             $this->app['events']->subscribe(JobEventSubscriber::class);
+
+            // A job is processed by another process long after the execution
+            // that dispatched it has ended, so the trace it came out of is
+            // written into the job's payload while that execution is still up.
+            JobTracePayload::register();
         }
 
         // Command monitoring. The inverse of request monitoring: a command runs

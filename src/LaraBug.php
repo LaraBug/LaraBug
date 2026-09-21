@@ -257,6 +257,10 @@ class LaraBug
         // Outside a tracked request this is a fresh id no request shares.
         $data['trace_id'] = TraceContext::id();
 
+        // The execution that caused this one, when there was one: the request
+        // that dispatched this job, or the application that called this one.
+        $data['parent_trace_id'] = TraceContext::parentId() ?? '';
+
         // A Livewire update posts to the same endpoint whatever component it
         // addresses, so the url and the route above say almost nothing about
         // what failed. This is the part that does.
