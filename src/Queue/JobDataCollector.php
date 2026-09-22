@@ -51,12 +51,8 @@ class JobDataCollector
             'timeout' => $payload['timeout'] ?? null,
             'payload' => $this->filterer->filterPayload($payload),
             'tags' => $payload['tags'] ?? [],
-
-            // The same id this job's log lines and exceptions carry, and the
-            // trace of whatever dispatched it.
             'trace_id' => TraceContext::id(),
             'parent_trace_id' => TraceContext::parentId() ?? '',
-
             'created_at' => now()->toIso8601String(),
         ];
 
