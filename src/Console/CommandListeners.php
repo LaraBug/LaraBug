@@ -51,6 +51,7 @@ class CommandListeners
             $this->stack[] = [
                 'command' => $command,
                 'trace_id' => TraceContext::id(),
+                'parent_trace_id' => TraceContext::parentId() ?? '',
                 'started_at' => gmdate('Y-m-d H:i:s'),
                 'start' => microtime(true),
             ];
@@ -78,6 +79,7 @@ class CommandListeners
 
                 // The same id this command's log lines and exceptions carry.
                 'trace_id' => $frame['trace_id'],
+                'parent_trace_id' => $frame['parent_trace_id'],
 
                 'arguments' => $this->arguments($event->input ?? null),
 

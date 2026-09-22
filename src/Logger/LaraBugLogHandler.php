@@ -67,6 +67,7 @@ class LaraBugLogHandler extends AbstractProcessingHandler
             // Falls back to the ambient trace so lines are joined to the request
             // or job that wrote them even when the app never sets a trace id.
             'trace_id' => $this->traceId($record),
+            'parent_trace_id' => $this->parentTraceId($record),
             'exception_id' => (string) $this->correlation($record, 'exception_id'),
             'environment' => (string) ($this->config['environment'] ?? ''),
             'release' => (string) ($this->config['release'] ?? ''),
@@ -113,6 +114,22 @@ class LaraBugLogHandler extends AbstractProcessingHandler
             // A line that cannot be correlated is still a line worth shipping.
             return '';
         }
+    }
+
+    /**
+     * The trace this execution came out of. Read from the line first for the
+     * same reason the trace id is: an application that correlates its own lines
+     * knows better than the ambient context does.
+     */
+    protected function parentTraceId(array|ArrayAccess $record): string
+    {
+        $supplied = $this->correlation($record, 'parent_trace_id');
+
+        if ($supplied !== '') {
+            return $supplied;
+        }
+
+        return TraceContext::parentId() ?? '';
     }
 
     /**

@@ -103,6 +103,7 @@ class ScheduledTaskListeners
             'status' => $status,
             'duration_ms' => round($duration, 3),
             'trace_id' => TraceContext::id(),
+            'parent_trace_id' => TraceContext::parentId() ?? '',
             'without_overlapping' => (is_object($task) && ! empty($task->withoutOverlapping)) ? 1 : 0,
             'environment' => (string) config('app.env'),
             'release' => (string) config('larabug.project_version', ''),

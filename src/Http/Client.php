@@ -4,6 +4,7 @@ namespace LaraBug\Http;
 
 use Exception;
 use GuzzleHttp\ClientInterface;
+use LaraBug\Requests\Traceparent;
 use Psr\Http\Message\ResponseInterface;
 use GuzzleHttp\Exception\RequestException;
 
@@ -27,12 +28,7 @@ class Client
     {
         try {
             return $this->getGuzzleHttpClient()->request('POST', config('larabug.server'), [
-                'headers' => [
-                    'Authorization' => 'Bearer '.$this->login,
-                    'Content-Type' => 'application/json',
-                    'Accept' => 'application/json',
-                    'User-Agent' => 'LaraBug-Package',
-                ],
+                'headers' => $this->headers(),
                 'json' => array_merge([
                     'project' => $this->project,
                     'additional' => [],
@@ -67,12 +63,7 @@ class Client
     {
         try {
             return $this->getGuzzleHttpClient()->request('POST', config('larabug.server'), [
-                'headers' => [
-                    'Authorization' => 'Bearer '.$this->login,
-                    'Content-Type' => 'application/json',
-                    'Accept' => 'application/json',
-                    'User-Agent' => 'LaraBug-Package',
-                ],
+                'headers' => $this->headers(),
                 'json' => [
                     'type' => 'requests_batch',
                     'project' => $this->project,
@@ -98,12 +89,7 @@ class Client
     {
         try {
             return $this->getGuzzleHttpClient()->request('POST', config('larabug.server'), [
-                'headers' => [
-                    'Authorization' => 'Bearer '.$this->login,
-                    'Content-Type' => 'application/json',
-                    'Accept' => 'application/json',
-                    'User-Agent' => 'LaraBug-Package',
-                ],
+                'headers' => $this->headers(),
                 'json' => [
                     'type' => 'commands_batch',
                     'project' => $this->project,
@@ -127,12 +113,7 @@ class Client
     {
         try {
             return $this->getGuzzleHttpClient()->request('POST', config('larabug.server'), [
-                'headers' => [
-                    'Authorization' => 'Bearer '.$this->login,
-                    'Content-Type' => 'application/json',
-                    'Accept' => 'application/json',
-                    'User-Agent' => 'LaraBug-Package',
-                ],
+                'headers' => $this->headers(),
                 'json' => [
                     'type' => 'scheduled_tasks_batch',
                     'project' => $this->project,
@@ -147,6 +128,24 @@ class Client
         } catch (Exception) {
             return null;
         }
+    }
+
+    /**
+     * The traceparent is what lets the receiving end continue this execution's
+     * story rather than start one of its own. Built per call, because its span
+     * names this one request.
+     *
+     * @return array<string, string>
+     */
+    protected function headers(): array
+    {
+        return [
+            'Authorization' => 'Bearer '.$this->login,
+            'Content-Type' => 'application/json',
+            'Accept' => 'application/json',
+            'User-Agent' => 'LaraBug-Package',
+            'traceparent' => Traceparent::forCurrentTrace(),
+        ];
     }
 
     public function getGuzzleHttpClient(): ClientInterface

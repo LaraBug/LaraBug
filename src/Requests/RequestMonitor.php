@@ -410,6 +410,11 @@ class RequestMonitor
             // The same id the log lines and the exception from this execution
             // carry, which is the whole reason any of them is worth joining.
             'trace_id' => TraceContext::id(),
+
+            // The caller's trace, when a monitored application made this
+            // request and said so in its traceparent.
+            'parent_trace_id' => TraceContext::parentId() ?? '',
+
             'exception_id' => $this->exceptionId,
 
             'user_agent' => (string) $request->userAgent(),
