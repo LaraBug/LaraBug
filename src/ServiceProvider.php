@@ -99,7 +99,7 @@ class ServiceProvider extends BaseServiceProvider
         // Request monitoring. Pushed rather than prepended: the stage either
         // side of this middleware is meant to be the application's own stack,
         // and running first would fold every other middleware into the action.
-        if (config('larabug.requests.track_requests', false) && ! $this->app->runningInConsole()) {
+        if (config('larabug.requests.track_requests', true) && ! $this->app->runningInConsole()) {
             try {
                 $this->app->make(Kernel::class)->pushMiddleware(CaptureRequest::class);
 
@@ -123,12 +123,12 @@ class ServiceProvider extends BaseServiceProvider
 
         // Command monitoring. The inverse of request monitoring: a command runs
         // in the console, so this is not gated behind runningInConsole.
-        if (config('larabug.commands.track_commands', false)) {
+        if (config('larabug.commands.track_commands', true)) {
             $this->app['events']->subscribe(CommandListeners::class);
         }
 
         // Scheduled task monitoring, the same context as commands.
-        if (config('larabug.schedule.track_scheduled_tasks', false)) {
+        if (config('larabug.schedule.track_scheduled_tasks', true)) {
             $this->app['events']->subscribe(ScheduledTaskListeners::class);
         }
 
@@ -161,6 +161,71 @@ class ServiceProvider extends BaseServiceProvider
                 });
             }
         }
+    }
+
+    /**
+     * Put our log channel into the stack the application actually logs through.
+     *
+     * Defining the channel is not the same as using it. Until this existed the
+     * opt-in was an edit to the host's logging config, usually
+     * `LOG_STACK=single,larabug-logs`, so `logs.enabled` could be true while
+     * nothing whatsoever was shipped. Every installation that never read that
+     * far had logs off and no way to tell.
+     *
+     * In `register()` rather than `boot()`: the config is already loaded here,
+     * and the log manager resolves and caches a channel the first time
+     * something writes to it. A provider that logs during boot would resolve
+     * the stack before a change made in our boot could reach it.
+     *
+     * Decided on the default channel's driver, not its name, so an application
+     * whose stack is called something else is still handled. Idempotent, so an
+     * application that already named the channel itself gets nothing added and
+     * an Octane worker rebooting the container does not stack up copies.
+     */
+    protected function addLogChannelToTheApplicationsStack(): void
+    {
+        $config = $this->app['config'];
+
+        if (! $config->get('larabug.logs.enabled', true)) {
+            return;
+        }
+
+        $default = $config->get('logging.default');
+
+        if (! is_string($default) || $default === '' || $default === 'larabug-logs') {
+            return;
+        }
+
+        $channel = $config->get("logging.channels.{$default}");
+
+        // An application whose default names no channel at all is misconfigured
+        // in a way that is not ours to repair.
+        if (! is_array($channel)) {
+            return;
+        }
+
+        if (($channel['driver'] ?? null) === 'stack') {
+            $channels = $channel['channels'] ?? [];
+
+            if (in_array('larabug-logs', $channels, true)) {
+                return;
+            }
+
+            $config->set("logging.channels.{$default}.channels", [...$channels, 'larabug-logs']);
+
+            return;
+        }
+
+        // A single channel, so there is no stack to join. Wrap it in one rather
+        // than replacing it: the application's own logging has to carry on
+        // writing exactly where it was writing before.
+        $config->set('logging.channels.larabug-stack', [
+            'driver' => 'stack',
+            'channels' => [$default, 'larabug-logs'],
+            'ignore_exceptions' => false,
+        ]);
+
+        $config->set('logging.default', 'larabug-stack');
     }
 
     /**
@@ -265,6 +330,8 @@ class ServiceProvider extends BaseServiceProvider
         });
 
         $this->app->singleton('larabug', fn ($app) => new LaraBug($app[Client::class]));
+
+        $this->addLogChannelToTheApplicationsStack();
 
         // Log shipping buffer. Bound lazily, so an app that never adds the
         // channel never builds one.

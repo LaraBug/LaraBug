@@ -213,18 +213,19 @@ return [
     | the framework took, how many queries and cache calls it made, and which
     | statements ran.
     |
-    | Off by default, and sampled at a tenth when switched on. A package that
-    | starts reporting every request the moment it updates is a package that
-    | spends its user's quota without being asked.
+    | On, and sampled at a tenth. Sampling is what keeps this affordable, so
+    | the stream is collected without being asked and the volume is not: a
+    | tenth of the requests answers the same questions about throughput and
+    | latency as all of them, at a tenth of the quota.
     |
     */
     'requests' => [
         /*
         | Enable or disable request monitoring
-        | Set to true via LB_TRACK_REQUESTS=true to start recording
-        | Default: false (opt-in)
+        | Set LB_TRACK_REQUESTS=false to stop recording
+        | Default: true
         */
-        'track_requests' => env('LB_TRACK_REQUESTS', false),
+        'track_requests' => env('LB_TRACK_REQUESTS', true),
 
         /*
         | The fraction of requests recorded, 0.0 to 1.0
@@ -452,17 +453,17 @@ return [
     | code it exited with, and the arguments it was given. A separate execution
     | context from a request, so it has its own switch.
     |
-    | Off by default, and kept whole rather than sampled: commands run at nothing
-    | like request volume, and the one that failed at 3am is the one worth having.
+    | On, and kept whole rather than sampled: commands run at nothing like
+    | request volume, and the one that failed at 3am is the one worth having.
     |
     */
     'commands' => [
         /*
         | Enable or disable command monitoring
-        | Set to true via LB_TRACK_COMMANDS=true to start recording
-        | Default: false (opt-in)
+        | Set LB_TRACK_COMMANDS=false to stop recording
+        | Default: true
         */
-        'track_commands' => env('LB_TRACK_COMMANDS', false),
+        'track_commands' => env('LB_TRACK_COMMANDS', true),
 
         /*
         | Commands never recorded, matched with fnmatch against the command name
@@ -514,16 +515,16 @@ return [
     | events too, and the command listener bows out while a task is in flight so
     | the run is counted once, against the schedule.
     |
-    | Off by default. Kept whole, the same as commands.
+    | On. Kept whole, the same as commands.
     |
     */
     'schedule' => [
         /*
         | Enable or disable scheduled task monitoring
-        | Set to true via LB_TRACK_SCHEDULED_TASKS=true to start recording
-        | Default: false (opt-in)
+        | Set LB_TRACK_SCHEDULED_TASKS=false to stop recording
+        | Default: true
         */
-        'track_scheduled_tasks' => env('LB_TRACK_SCHEDULED_TASKS', false),
+        'track_scheduled_tasks' => env('LB_TRACK_SCHEDULED_TASKS', true),
 
         'batch_size' => env('LB_SCHEDULED_TASK_BATCH_SIZE', 20),
         'max_retries' => env('LB_SCHEDULED_TASK_MAX_RETRIES', 2),
