@@ -8,6 +8,8 @@ use LaraBug\Logger\LogBuffer;
 use Illuminate\Support\Facades\Log;
 use LaraBug\Tests\Mocks\LaraBugClient;
 use PHPUnit\Framework\Attributes\Test;
+use Illuminate\Mail\Events\MessageSent;
+use Illuminate\Mail\Events\MessageSending;
 
 /**
  * An installation collects every stream, with nothing set.
@@ -54,6 +56,19 @@ class CollectsEverythingByDefaultTest extends TestCase
     public function requests_are_collected_at_the_sampled_rate_not_whole()
     {
         $this->assertSame(0.1, (float) config('larabug.requests.sample_rate'));
+    }
+
+    /**
+     * Mail used to be heard in HTTP only, where real applications send almost
+     * none of it. The console is where the workers and commands run.
+     */
+    #[Test]
+    public function mail_is_listened_to_once_in_the_console_where_jobs_and_commands_run()
+    {
+        $this->assertTrue($this->app->runningInConsole());
+
+        $this->assertCount(1, $this->app['events']->getListeners(MessageSending::class));
+        $this->assertCount(1, $this->app['events']->getListeners(MessageSent::class));
     }
 
     #[Test]

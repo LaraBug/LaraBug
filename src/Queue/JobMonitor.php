@@ -4,6 +4,7 @@ namespace LaraBug\Queue;
 
 use Throwable;
 use LaraBug\Http\Client;
+use LaraBug\Mail\ExecutionMail;
 use Illuminate\Contracts\Queue\Job;
 
 class JobMonitor
@@ -39,8 +40,13 @@ class JobMonitor
         $this->send($data);
     }
 
-    public function trackJobCompleted(Job $job, string $connectionName, ?float $durationMs, ?int $memoryUsed): void
-    {
+    public function trackJobCompleted(
+        Job $job,
+        string $connectionName,
+        ?float $durationMs,
+        ?int $memoryUsed,
+        ExecutionMail $mail = new ExecutionMail(),
+    ): void {
         if (! $this->shouldTrack($job)) {
             return;
         }
@@ -56,13 +62,22 @@ class JobMonitor
         $data = $this->collector->collect($job, $connectionName, 'completed', [
             'duration_ms' => $durationMs,
             'memory_usage' => $memoryUsed,
+            ...$mail->toArray(),
+            // What the mail on it is weighted by: a completed record stands in
+            // for every job of its kind that sampling dropped.
+            'sample_rate' => $this->sampleRate(),
         ]);
 
         $this->send($data);
     }
 
-    public function trackJobFailed(Job $job, string $connectionName, Throwable $exception, ?float $durationMs): void
-    {
+    public function trackJobFailed(
+        Job $job,
+        string $connectionName,
+        Throwable $exception,
+        ?float $durationMs,
+        ExecutionMail $mail = new ExecutionMail(),
+    ): void {
         if (! $this->shouldTrack($job)) {
             return;
         }
@@ -94,6 +109,9 @@ class JobMonitor
                 'storage' => array_filter($storage), // Server/headers data goes in the storage field
                 'environment' => config('app.env', 'production'),
             ],
+            ...$mail->toArray(),
+            // A failure is never sampled out, so it stands for itself alone.
+            'sample_rate' => 1.0,
         ]);
 
         $this->send($data);
@@ -169,7 +187,7 @@ class JobMonitor
 
     protected function shouldSample(): bool
     {
-        $sampleRate = $this->config['jobs']['sample_rate'] ?? 1.0;
+        $sampleRate = $this->sampleRate();
 
         if ($sampleRate >= 1.0) {
             return true;
@@ -180,6 +198,15 @@ class JobMonitor
         }
 
         return (mt_rand() / mt_getrandmax()) <= $sampleRate;
+    }
+
+    /**
+     * The rate completed jobs are kept at, bounded the way it is applied: a
+     * configured 2.0 keeps every job, which is a rate of one.
+     */
+    protected function sampleRate(): float
+    {
+        return min(1.0, max(0.0, (float) ($this->config['jobs']['sample_rate'] ?? 1.0)));
     }
 
     protected function reportError(Throwable $e): void

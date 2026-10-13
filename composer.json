@@ -28,7 +28,8 @@
     },
     "autoload-dev": {
         "psr-4": {
-            "LaraBug\\Tests\\": "tests"
+            "LaraBug\\Tests\\": "tests",
+            "Workbench\\App\\": "tests/Workbench"
         }
     },
     "scripts": {

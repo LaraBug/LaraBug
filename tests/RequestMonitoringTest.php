@@ -5,6 +5,7 @@ namespace LaraBug\Tests;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use LaraBug\Requests\Sampler;
+use LaraBug\Mail\MailListeners;
 use LaraBug\Requests\TraceContext;
 use LaraBug\Requests\RequestBuffer;
 use LaraBug\Requests\RequestMonitor;
@@ -317,7 +318,7 @@ class RequestMonitoringTest extends TestCase
     public function it_records_a_message_with_its_recipient_domains_and_not_the_addresses()
     {
         $monitor = new RequestMonitor();
-        $listeners = new RequestListeners($monitor, new Sampler());
+        $listeners = new MailListeners($monitor);
 
         $listeners->onMailSent($this->mailEvent($this->mailMessage(
             'Welcome aboard',
@@ -345,7 +346,7 @@ class RequestMonitoringTest extends TestCase
         config(['larabug.requests.capture_mail_recipients' => true]);
 
         $monitor = new RequestMonitor();
-        $listeners = new RequestListeners($monitor, new Sampler());
+        $listeners = new MailListeners($monitor);
 
         $listeners->onMailSent($this->mailEvent($this->mailMessage('Receipt', ['alice@example.com'])));
 
@@ -358,13 +359,13 @@ class RequestMonitoringTest extends TestCase
     public function it_resolves_the_mailable_class_from_the_call_stack()
     {
         $monitor = new RequestMonitor();
-        $listeners = new RequestListeners($monitor, new Sampler());
+        $listeners = new MailListeners($monitor);
 
         $event = $this->mailEvent($this->mailMessage('Hi', ['a@b.test']));
 
         // The resolver walks the stack for a Mailable frame, so fire the event from inside one.
         $mailable = new class () extends \Illuminate\Mail\Mailable {
-            public function fire(RequestListeners $listeners, object $event): void
+            public function fire(MailListeners $listeners, object $event): void
             {
                 $listeners->onMailSent($event);
             }
@@ -383,7 +384,7 @@ class RequestMonitoringTest extends TestCase
     public function mail_sent_without_a_mailable_carries_an_empty_class()
     {
         $monitor = new RequestMonitor();
-        $listeners = new RequestListeners($monitor, new Sampler());
+        $listeners = new MailListeners($monitor);
 
         $listeners->onMailSent($this->mailEvent($this->mailMessage('Raw', ['a@b.test'])));
 
@@ -394,7 +395,7 @@ class RequestMonitoringTest extends TestCase
     public function it_times_a_send_from_its_sending_event()
     {
         $monitor = new RequestMonitor();
-        $listeners = new RequestListeners($monitor, new Sampler());
+        $listeners = new MailListeners($monitor);
 
         $event = $this->mailEvent($this->mailMessage('Timed', ['a@b.test']));
 
@@ -471,21 +472,25 @@ class RequestMonitoringTest extends TestCase
     }
 
     #[Test]
-    public function a_notification_sent_over_mail_is_not_also_counted_as_mail()
+    public function a_notification_sent_over_mail_is_recorded_as_mail_named_after_the_notification()
     {
         $monitor = new RequestMonitor();
-        $listeners = new RequestListeners($monitor, new Sampler());
+        $listeners = new MailListeners($monitor);
 
         $event = $this->mailEvent($this->mailMessage('Reset your password', ['a@b.test']));
-        // Laravel's stamp on a notification's mail: the notification path records it, the mail path must leave it alone.
+        // Laravel's stamp on a notification's mail, and the only name the message has.
         $event->data = ['__laravel_notification' => FakeNotification::class];
 
+        $listeners->onMailSending($event);
         $listeners->onMailSent($event);
 
         $record = $monitor->toArray(Request::create('/x', 'GET'), new Response('', 200), 1.0);
 
-        $this->assertSame(0, $record['mail_sent']);
-        $this->assertSame([], $record['mail']);
+        $this->assertSame(1, $record['mail_sent']);
+        $this->assertSame(FakeNotification::class, $record['mail'][0]['mailable']);
+        $this->assertSame('Reset your password', $record['mail'][0]['subject']);
+        $this->assertSame('b.test', $record['mail'][0]['recipient_domains']);
+        $this->assertSame(0, $record['mail'][0]['queued']);
     }
 
     #[Test]
@@ -516,6 +521,8 @@ class RequestMonitoringTest extends TestCase
     #[Test]
     public function an_anonymous_mailable_is_recorded_without_its_file_path()
     {
+        config(['larabug.jobs.track_jobs' => false]);
+
         $monitor = new RequestMonitor();
         $listeners = new RequestListeners($monitor, new Sampler());
 
@@ -541,7 +548,7 @@ class RequestMonitoringTest extends TestCase
     public function a_message_that_sent_is_not_flagged_as_failed()
     {
         $monitor = new RequestMonitor();
-        $listeners = new RequestListeners($monitor, new Sampler());
+        $listeners = new MailListeners($monitor);
 
         $message = $this->mailMessage('Welcome aboard', ['alice@example.com']);
 
@@ -564,7 +571,7 @@ class RequestMonitoringTest extends TestCase
     public function a_send_that_never_completed_is_recorded_as_a_failure()
     {
         $monitor = new RequestMonitor();
-        $listeners = new RequestListeners($monitor, new Sampler());
+        $listeners = new MailListeners($monitor);
 
         $listeners->onMailSending($this->mailEvent($this->mailMessage('Receipt', ['alice@example.com'])));
 
@@ -585,12 +592,12 @@ class RequestMonitoringTest extends TestCase
     public function a_failed_send_is_only_recorded_once()
     {
         $monitor = new RequestMonitor();
-        $listeners = new RequestListeners($monitor, new Sampler());
+        $listeners = new MailListeners($monitor);
 
         $listeners->onMailSending($this->mailEvent($this->mailMessage('Receipt', ['alice@example.com'])));
 
-        $listeners->flushUnfinishedMail();
-        $listeners->flushUnfinishedMail();
+        $listeners->flushUnfinishedMail($monitor);
+        $listeners->flushUnfinishedMail($monitor);
 
         $record = $monitor->toArray(Request::create('/checkout', 'POST'), new Response('', 500), 1.0);
 
@@ -693,8 +700,10 @@ class RequestMonitoringTest extends TestCase
     }
 
     #[Test]
-    public function it_records_a_queued_mailable_at_dispatch_marked_queued()
+    public function without_job_tracking_a_queued_mailable_is_recorded_at_dispatch_marked_queued()
     {
+        config(['larabug.jobs.track_jobs' => false]);
+
         $monitor = new RequestMonitor();
         $listeners = new RequestListeners($monitor, new Sampler());
 
@@ -721,6 +730,29 @@ class RequestMonitoringTest extends TestCase
         $this->assertSame(1, $message['cc_count']);
         $this->assertSame('example.com,other.test', $message['recipient_domains']);
         $this->assertSame(1, $message['queued']);
+    }
+
+    #[Test]
+    public function with_job_tracking_a_queued_mailable_is_left_for_the_worker_to_record()
+    {
+        config(['larabug.jobs.track_jobs' => true]);
+
+        $monitor = new RequestMonitor();
+        $listeners = new RequestListeners($monitor, new Sampler());
+
+        $mailable = new class () extends \Illuminate\Mail\Mailable {};
+        $mailable->to('alice@example.com');
+
+        $event = new \stdClass();
+        $event->job = new \Illuminate\Mail\SendQueuedMailable($mailable);
+
+        $listeners->onJobQueued($event);
+
+        $record = $monitor->toArray(Request::create('/register', 'POST'), new Response('', 200), 1.0);
+
+        $this->assertSame(1, $record['jobs_queued']);
+        $this->assertSame(0, $record['mail_sent']);
+        $this->assertSame([], $record['mail']);
     }
 
     #[Test]

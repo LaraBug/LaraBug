@@ -13,6 +13,7 @@ use LaraBug\Queue\JobMonitor;
 use LaraBug\Requests\Sampler;
 use Illuminate\Log\LogManager;
 use LaraBug\Cve\RequestTrigger;
+use LaraBug\Mail\MailListeners;
 use LaraBug\Commands\ScanCommand;
 use LaraBug\Commands\TestCommand;
 use LaraBug\Queue\DispatchMacros;
@@ -99,7 +100,7 @@ class ServiceProvider extends BaseServiceProvider
         // Request monitoring. Pushed rather than prepended: the stage either
         // side of this middleware is meant to be the application's own stack,
         // and running first would fold every other middleware into the action.
-        if (config('larabug.requests.track_requests', true) && ! $this->app->runningInConsole()) {
+        if ($this->tracksRequests()) {
             try {
                 $this->app->make(Kernel::class)->pushMiddleware(CaptureRequest::class);
 
@@ -125,6 +126,14 @@ class ServiceProvider extends BaseServiceProvider
         // in the console, so this is not gated behind runningInConsole.
         if (config('larabug.commands.track_commands', true)) {
             $this->app['events']->subscribe(CommandListeners::class);
+        }
+
+        // Mail, recorded against whichever of those executions sent it. Once,
+        // whichever of them is on: a request running a sync job and a command
+        // running a worker both need it, and the innermost execution is the
+        // one that gets the message.
+        if ($this->tracksRequests() || config('larabug.jobs.track_jobs', true) || config('larabug.commands.track_commands', true)) {
+            $this->app['events']->subscribe(MailListeners::class);
         }
 
         // Scheduled task monitoring, the same context as commands.
@@ -161,6 +170,15 @@ class ServiceProvider extends BaseServiceProvider
                 });
             }
         }
+    }
+
+    /**
+     * Whether this execution is a request being recorded. A console process
+     * never is, however the config reads: nothing would ever flush it.
+     */
+    protected function tracksRequests(): bool
+    {
+        return config('larabug.requests.track_requests', true) && ! $this->app->runningInConsole();
     }
 
     /**
@@ -369,6 +387,14 @@ class ServiceProvider extends BaseServiceProvider
         // made about it, and the buffer outlives both to flush on shutdown.
         $this->app->singleton(RequestMonitor::class);
         $this->app->singleton(Sampler::class);
+
+        // One per process, shared by the job and command listeners that open
+        // executions on it. The request is only handed over when one is being
+        // recorded, so mail sent outside every job and command of a worker is
+        // dropped rather than collected into a record nobody sends.
+        $this->app->singleton(MailListeners::class, fn ($app) => new MailListeners(
+            $this->tracksRequests() ? $app->make(RequestMonitor::class) : null
+        ));
 
         // Scoped rather than singleton: under Octane a worker serves one
         // request after another in the same process, and a component addressed
