@@ -3,16 +3,15 @@
 namespace LaraBug\Requests;
 
 use Throwable;
-use Illuminate\Mail\Mailable;
+use LaraBug\Mail\MailEntry;
+use LaraBug\Support\ClassName;
 use Illuminate\Cache\Events\CacheHit;
 use Illuminate\Queue\Events\JobQueued;
 use Illuminate\Cache\Events\KeyWritten;
-use Illuminate\Mail\Events\MessageSent;
 use Illuminate\Mail\SendQueuedMailable;
 use Illuminate\Cache\Events\CacheMissed;
 use Illuminate\Log\Events\MessageLogged;
 use Illuminate\Cache\Events\KeyForgotten;
-use Illuminate\Mail\Events\MessageSending;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Routing\Events\RouteMatched;
 use Illuminate\Database\Events\QueryExecuted;
@@ -30,26 +29,10 @@ use Illuminate\Notifications\Events\NotificationFailed;
  */
 class RequestListeners
 {
-    /**
-     * Send-start marks, keyed by message.
-     *
-     * The mailable and subject are read here rather than at the sent event
-     * because a send that throws never reaches one, and a failure whose
-     * mailable is empty groups with every other mailer's failures.
-     *
-     * @var array<int, array{at: float, mailable: string, subject: string}>
-     */
-    protected array $mailStartedAt = [];
-
     public function __construct(
         protected readonly RequestMonitor $monitor,
         protected readonly Sampler $sampler,
     ) {
-        // Registered here rather than in subscribe: the sweep belongs to this
-        // listener's marks, which exist from the moment it does. Sweeping
-        // clears as it goes, so a second listener on the same monitor reports
-        // its own unfinished sends and never repeats another's.
-        $this->monitor->beforeFlush($this->flushUnfinishedMail(...));
     }
 
     public function subscribe(Dispatcher $events): void
@@ -62,11 +45,8 @@ class RequestListeners
         $events->listen(KeyForgotten::class, $this->onCacheForgotten(...));
         $events->listen(JobQueued::class, $this->onJobQueued(...));
 
-        // Paired: the sending event only starts a timer, the sent event is what
-        // records the message. A send that throws never reaches sent and leaves
-        // only a mark that the next send overwrites.
-        $events->listen(MessageSending::class, $this->onMailSending(...));
-        $events->listen(MessageSent::class, $this->onMailSent(...));
+        // The mail itself is MailListeners', which records it against whichever
+        // execution sent it: this request, or a job or command running in it.
         $events->listen(NotificationSent::class, $this->onNotificationSent(...));
         $events->listen(NotificationFailed::class, $this->onNotificationFailed(...));
 
@@ -181,311 +161,27 @@ class RequestListeners
         $this->guard(function () use ($event) {
             $this->monitor->increment('jobs_queued');
 
-            // A queued mailable's send happens a worker away, where no request
-            // is being recorded. Counted at dispatch, it lands on the request
-            // that queued it — or is never seen inside one at all.
+            // With job tracking on, the worker that delivers a queued mailable
+            // records the send itself, with its real subject, recipients and
+            // outcome; a marker here as well would count one message twice.
+            // Without it, the dispatch is the only sight of the message anyone
+            // gets, so it lands on the request that queued it.
+            if (config('larabug.jobs.track_jobs', true)) {
+                return;
+            }
+
             $job = $event->job ?? null;
 
-            if ($job instanceof SendQueuedMailable) {
-                $this->recordQueuedMail($job->mailable ?? null);
-            }
-        });
-    }
-
-    public function onMailSending(object $event): void
-    {
-        $this->guard(function () use ($event) {
-            if ($this->isNotificationMail($event)) {
+            if (! $job instanceof SendQueuedMailable) {
                 return;
             }
 
-            $message = $event->message ?? null;
-
-            if ($message === null) {
+            if (! is_object($job->mailable ?? null)) {
                 return;
             }
 
-            $this->mailStartedAt[spl_object_id($message)] = [
-                'at' => microtime(true),
-                'mailable' => $this->mailableClass(),
-                'subject' => $this->mailSubject($message),
-            ];
+            $this->monitor->recordMail(MailEntry::dispatched($job->mailable));
         });
-    }
-
-    public function onMailSent(object $event): void
-    {
-        $this->guard(function () use ($event) {
-            // A notification sent over mail fires this too, and the
-            // notification path already records it; bowing out keeps it from
-            // counting as both, the same split Nightwatch draws.
-            if ($this->isNotificationMail($event)) {
-                return;
-            }
-
-            $message = $event->message ?? null;
-
-            if ($message === null) {
-                // A mailer that fired the event without a message still sent
-                // one; keep the tile honest even when there is nothing to detail.
-                $this->monitor->recordMail(['failed' => 0]);
-
-                return;
-            }
-
-            $to = $this->mailAddresses($this->recipients($message, 'getTo'));
-            $cc = $this->mailAddresses($this->recipients($message, 'getCc'));
-            $bcc = $this->mailAddresses($this->recipients($message, 'getBcc'));
-
-            // Read off the mark where there is one: the sending event already
-            // walked the stack for these, and walking it twice per message
-            // buys nothing. A sent event with no sending before it — which is
-            // mostly a mailer under test — still reads them live.
-            $mark = $this->mailStartedAt[spl_object_id($message)] ?? null;
-
-            $this->monitor->recordMail([
-                'mailable' => $mark['mailable'] ?? $this->mailableClass(),
-                'subject' => $mark['subject'] ?? $this->mailSubject($message),
-                'to_count' => count($to),
-                'cc_count' => count($cc),
-                'bcc_count' => count($bcc),
-                'recipient_domains' => $this->mailRecipients(array_merge($to, $cc, $bcc)),
-                'queued' => 0,
-                'failed' => 0,
-                'duration_ms' => $this->mailDuration($message),
-            ]);
-        });
-    }
-
-    /**
-     * Neither mail event carries the mailable, so it is read off the call
-     * stack instead: a Mailable's send() is always a frame below the event
-     * that fires inside it. Empty for mail sent without a mailable —
-     * Mail::raw() and the like — where the subject is the only name a
-     * message has.
-     */
-    private function mailableClass(): string
-    {
-        foreach (debug_backtrace(DEBUG_BACKTRACE_PROVIDE_OBJECT, 50) as $frame) {
-            $object = $frame['object'] ?? null;
-
-            if ($object instanceof Mailable) {
-                return $this->normalisedClass(get_class($object));
-            }
-        }
-
-        return '';
-    }
-
-    private function mailSubject(object $message): string
-    {
-        if (! method_exists($message, 'getSubject')) {
-            return '';
-        }
-
-        return (string) $message->getSubject();
-    }
-
-    /**
-     * One address list off a message, across mail engines: Symfony's Email has
-     * the getters and returns Address objects, the older Swift message had the
-     * same getter names and returned an [address => name] map, and a message
-     * without the getter contributes nobody.
-     *
-     * @return array<int|string, mixed>
-     */
-    private function recipients(object $message, string $getter): array
-    {
-        if (! method_exists($message, $getter)) {
-            return [];
-        }
-
-        return (array) $message->{$getter}();
-    }
-
-    /**
-     * The address strings in a recipient list, whichever engine produced it:
-     * Symfony hands over Address objects, Swift keyed the address and put the
-     * name in the value.
-     *
-     * @param  array<int|string, mixed>  $recipients
-     * @return array<int, string>
-     */
-    private function mailAddresses(array $recipients): array
-    {
-        $addresses = [];
-
-        foreach ($recipients as $key => $value) {
-            if (is_object($value) && method_exists($value, 'getAddress')) {
-                $addresses[] = (string) $value->getAddress();
-
-                continue;
-            }
-
-            if (is_string($key) && $key !== '') {
-                $addresses[] = $key;
-
-                continue;
-            }
-
-            if (is_string($value) && $value !== '') {
-                $addresses[] = $value;
-            }
-        }
-
-        return $addresses;
-    }
-
-    /**
-     * Stored as the domains a message reached, deduped, never the addresses:
-     * a bounce is a bounce to gmail.com, not to a person, and the local part
-     * is the customer data the whole request position rests on not keeping.
-     * Opting in capture_mail_recipients keeps the full addresses, the same
-     * shape the payload capture takes.
-     *
-     * @param  array<int, string>  $addresses
-     */
-    private function mailRecipients(array $addresses): string
-    {
-        if (config('larabug.requests.capture_mail_recipients', false)) {
-            return implode(',', $addresses);
-        }
-
-        $domains = [];
-
-        foreach ($addresses as $address) {
-            $at = strrpos($address, '@');
-
-            if ($at !== false) {
-                $domains[$this->normalisedDomain(substr($address, $at + 1))] = true;
-            }
-        }
-
-        return implode(',', array_keys($domains));
-    }
-
-    private function normalisedDomain(string $domain): string
-    {
-        return strtolower(trim($domain, " \t\n\r\0\x0B>"));
-    }
-
-    /**
-     * Zero when the sending event was never seen for this message: a mailer
-     * that only fires sent, or a send that threw before the mark was read back.
-     */
-    private function mailDuration(object $message): float
-    {
-        $key = spl_object_id($message);
-
-        if (! isset($this->mailStartedAt[$key])) {
-            return 0.0;
-        }
-
-        $duration = round((microtime(true) - $this->mailStartedAt[$key]['at']) * 1000, 3);
-
-        unset($this->mailStartedAt[$key]);
-
-        return $duration;
-    }
-
-    /**
-     * Every send that started and never finished, as a failed message.
-     *
-     * Laravel fires no event for a send that throws: `MessageSending` happens,
-     * the transport raises, and `MessageSent` never comes. What is left is the
-     * mark, so the marks still standing when the request ends are exactly the
-     * sends that failed.
-     *
-     * Clearing as it sweeps makes a second call a no-op, which is what keeps a
-     * double registration from doubling the failures.
-     */
-    public function flushUnfinishedMail(): void
-    {
-        $this->guard(function () {
-            $pending = $this->mailStartedAt;
-            $this->mailStartedAt = [];
-
-            foreach ($pending as $mark) {
-                $this->monitor->recordMail([
-                    'mailable' => $mark['mailable'],
-                    'subject' => $mark['subject'],
-                    // A send that threw reached no recipient, and the counts
-                    // are what a recipient tile would add up.
-                    'to_count' => 0,
-                    'cc_count' => 0,
-                    'bcc_count' => 0,
-                    'recipient_domains' => '',
-                    'queued' => 0,
-                    'failed' => 1,
-                    'duration_ms' => round((microtime(true) - $mark['at']) * 1000, 3),
-                ]);
-            }
-        });
-    }
-
-    /**
-     * Record a mailable that was queued rather than sent inline, read off the
-     * mailable the job carries: there is no message yet, the send is a worker
-     * away. Recipients are filled in by queue time, so counts and domains are
-     * known; the subject often is not, since an envelope resolves it at
-     * render, and the duration cannot be, so both are left for the send that
-     * is not ours to see.
-     */
-    private function recordQueuedMail(mixed $mailable): void
-    {
-        if (! is_object($mailable)) {
-            return;
-        }
-
-        $to = $this->mailableAddresses($mailable, 'to');
-        $cc = $this->mailableAddresses($mailable, 'cc');
-        $bcc = $this->mailableAddresses($mailable, 'bcc');
-
-        $this->monitor->recordMail([
-            'mailable' => $this->normalisedClass(get_class($mailable)),
-            'subject' => (string) ($mailable->subject ?? ''),
-            'to_count' => count($to),
-            'cc_count' => count($cc),
-            'bcc_count' => count($bcc),
-            'recipient_domains' => $this->mailRecipients(array_merge($to, $cc, $bcc)),
-            'queued' => 1,
-            // Queued at this point and nothing more. Whether it sends is the
-            // worker's story, and the worker is not recording this request.
-            'failed' => 0,
-            'duration_ms' => 0.0,
-        ]);
-    }
-
-    /**
-     * The addresses in one of a mailable's recipient lists. A Mailable holds
-     * its to, cc and bcc as public arrays of ['name' => ..., 'address' => ...],
-     * a different shape from the getters a sent message exposes.
-     *
-     * @return array<int, string>
-     */
-    private function mailableAddresses(object $mailable, string $property): array
-    {
-        $recipients = $mailable->{$property} ?? [];
-
-        if (! is_array($recipients)) {
-            return [];
-        }
-
-        $addresses = [];
-
-        foreach ($recipients as $recipient) {
-            if (is_array($recipient) && isset($recipient['address'])) {
-                $addresses[] = (string) $recipient['address'];
-
-                continue;
-            }
-
-            if (is_string($recipient) && $recipient !== '') {
-                $addresses[] = $recipient;
-            }
-        }
-
-        return $addresses;
     }
 
     public function onNotificationSent(object $event): void
@@ -511,40 +207,13 @@ class RequestListeners
         $notifiable = $event->notifiable ?? null;
 
         $this->monitor->recordNotification([
-            'notification' => is_object($notification) ? $this->normalisedClass(get_class($notification)) : '',
+            'notification' => is_object($notification) ? ClassName::normalised(get_class($notification)) : '',
             'channel' => (string) ($event->channel ?? ''),
             // The type, never the notifiable itself: the class is diagnostic and
             // the id is who got notified, which is not ours to keep.
-            'notifiable_type' => is_object($notifiable) ? $this->normalisedClass(get_class($notifiable)) : '',
+            'notifiable_type' => is_object($notifiable) ? ClassName::normalised(get_class($notifiable)) : '',
             'success' => $success,
         ]);
-    }
-
-    /**
-     * An on-the-fly notification or mailable is an anonymous class, and
-     * get_class returns its defining file and line after a null byte; the part
-     * before it is the only stable name it has.
-     *
-     * Not cosmetic: the panel groups mail on md5 of this string and
-     * notifications on md5 of it and the channel, so the untrimmed version puts
-     * a server path and a line number into a rollup key — one group per
-     * definition site, and it moves the moment the file does.
-     */
-    private function normalisedClass(string $class): string
-    {
-        $nul = strpos($class, "\0");
-
-        return $nul === false ? $class : substr($class, 0, $nul);
-    }
-
-    /**
-     * Whether a mail event is a notification going out over the mail channel:
-     * Laravel stamps the notification on the event data, and the notification
-     * path already records it, so the mail path leaves it alone.
-     */
-    private function isNotificationMail(object $event): bool
-    {
-        return is_array($event->data ?? null) && isset($event->data['__laravel_notification']);
     }
 
     public function onOutgoingRequest(object $event): void

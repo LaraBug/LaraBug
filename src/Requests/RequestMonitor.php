@@ -4,6 +4,7 @@ namespace LaraBug\Requests;
 
 use Throwable;
 use Illuminate\Http\Request;
+use LaraBug\Mail\RecordsMail;
 use Illuminate\Http\UploadedFile;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -20,7 +21,7 @@ use Symfony\Component\HttpFoundation\Response;
  * cost; a tree costs parent ids, ordering and unbounded cardinality to answer
  * the same question for the few requests anyone opens.
  */
-class RequestMonitor
+class RequestMonitor implements RecordsMail
 {
     /** @var array<string, float> Wall-clock marks, in seconds. */
     protected array $marks = [];

@@ -3,6 +3,7 @@
 namespace LaraBug\Console;
 
 use Throwable;
+use LaraBug\Mail\MailListeners;
 use LaraBug\Requests\TraceContext;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Console\Events\CommandFinished;
@@ -17,11 +18,13 @@ use Illuminate\Console\Events\CommandStarting;
  */
 class CommandListeners
 {
-    /** @var array<int, array<string, mixed>|null> The commands in flight. */
+    /** @var array<int, array<string, mixed>> The commands in flight. */
     protected array $stack = [];
 
-    public function __construct(protected readonly CommandBuffer $buffer)
-    {
+    public function __construct(
+        protected readonly CommandBuffer $buffer,
+        protected readonly MailListeners $mailListeners = new MailListeners(),
+    ) {
     }
 
     public function subscribe(Dispatcher $events): void
@@ -35,11 +38,16 @@ class CommandListeners
         $this->guard(function () use ($event) {
             $command = (string) ($event->command ?? '');
 
+            // Every command opens its mail, recorded or not: an ignored
+            // command's mail is not ours to keep, and leaving it unclaimed
+            // would hand it to whatever command or request runs this one.
+            $mail = $this->mailListeners->open();
+
             // A command the scheduler runs in-process belongs to the schedule,
-            // not to commands; a null frame keeps the finish handler's stack
-            // balanced without recording it twice.
+            // not to commands; an untracked frame keeps the finish handler's
+            // stack balanced without recording it twice.
             if ($command === '' || $this->ignored($command) || ScheduledTaskListeners::$inFlight > 0) {
-                $this->stack[] = null;
+                $this->stack[] = ['tracked' => false, 'mail' => $mail];
 
                 return;
             }
@@ -49,6 +57,8 @@ class CommandListeners
             TraceContext::reset();
 
             $this->stack[] = [
+                'tracked' => true,
+                'mail' => $mail,
                 'command' => $command,
                 'trace_id' => TraceContext::id(),
                 'parent_trace_id' => TraceContext::parentId() ?? '',
@@ -67,7 +77,9 @@ class CommandListeners
 
             $frame = array_pop($this->stack);
 
-            if ($frame === null) {
+            $this->mailListeners->close($frame['mail']);
+
+            if (! $frame['tracked']) {
                 return;
             }
 
@@ -82,6 +94,10 @@ class CommandListeners
                 'parent_trace_id' => $frame['parent_trace_id'],
 
                 'arguments' => $this->arguments($event->input ?? null),
+
+                // Only what this command sent itself: a job the command ran,
+                // a queue worker's above all, carries its own.
+                ...$frame['mail']->toArray(),
 
                 'environment' => (string) config('app.env'),
                 'release' => (string) config('larabug.project_version', ''),

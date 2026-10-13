@@ -274,7 +274,8 @@ return [
         'max_outgoing' => env('LB_REQUEST_MAX_OUTGOING', 50),
 
         /*
-        | How many messages are kept per request
+        | How many messages are kept per request, and per job or command: mail
+        | is recorded against whichever of them sent it, and this caps all three
         | The mail counter keeps counting past this, the same as queries and
         | outgoing calls: a request that fans a newsletter out to a hundred
         | recipients is worth knowing about, and the number is what says so
@@ -330,8 +331,9 @@ return [
         'capture_user' => env('LB_REQUEST_CAPTURE_USER', true),
 
         /*
-        | Whether a sent message's full recipient addresses are recorded
-        | Off by default: the domains a request emailed are kept either way,
+        | Whether a sent message's full recipient addresses are recorded, on
+        | requests, jobs and commands alike
+        | Off by default: the domains a message reached are kept either way,
         | which is the diagnostic part, and the addresses are personal data with
         | no more business being stored than a query string's values. Turn this
         | on only where the recipients are yours to keep
