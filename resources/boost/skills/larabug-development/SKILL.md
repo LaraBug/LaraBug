@@ -51,14 +51,14 @@ Read the config file before changing behaviour. Every key documents what it does
 | Queue depth | follows queue jobs | `LB_QUEUE_DEPTH`, needs `schedule:run` |
 | Livewire components | on | `LB_TRACK_LIVEWIRE` |
 | CVE scanning | on | `LB_CVE_ENABLED` |
-| Logs | off | name the `larabug-logs` channel in your log stack |
+| Logs | on, from `info` up | `LB_LOGS_ENABLED`, `LB_LOGS_LEVEL` |
 | Deprecations | follows logs | `LB_LOG_DEPRECATIONS` |
-| HTTP requests | off | `LB_TRACK_REQUESTS` |
-| Artisan commands | off | `LB_TRACK_COMMANDS` |
-| Scheduled tasks | off | `LB_TRACK_SCHEDULED_TASKS` |
+| HTTP requests | on, sampled at a tenth | `LB_TRACK_REQUESTS`, `LB_REQUEST_SAMPLE_RATE` |
+| Artisan commands | on | `LB_TRACK_COMMANDS` |
+| Scheduled tasks | on | `LB_TRACK_SCHEDULED_TASKS` |
 | Query plans for slow SELECTs | off | `LB_QUERY_EXPLAIN` |
 
-The off-by-default monitors are off because each one spends the account's event quota. Never switch one on unless you were asked to.
+Every stream is collected out of the box, so an installation never looks healthy while silently reporting errors only. Each one still spends the account's event quota, so reach for its sample rate or level before switching it off, and never raise a sample rate or switch on query plans unless you were asked to.
 
 ## Exceptions
 
@@ -207,14 +207,14 @@ Switch it on only when asked, and say what it runs.
 
 ## Logs
 
-The package defines a `larabug-logs` channel. Naming it in the stack is the opt-in:
+On by default. The package defines a `larabug-logs` channel and adds it to the application's default channel itself: appended to it when that is a stack, or wrapped together with it in a new `larabug-stack` when it is a single channel. The application keeps logging exactly where it did before. Naming the channel in the stack yourself is fine, it is never added twice.
 
 ```
-LOG_STACK=single,larabug-logs
 LB_LOGS_LEVEL=info
+LB_LOGS_ENABLED=false
 ```
 
-Logs run at far higher volume than exceptions and count against the plan, so `debug` from production is rarely what anyone wants. Defining your own channel called `larabug-logs` overrides the package's.
+Logs run at far higher volume than exceptions and count against the plan, so `debug` from production is rarely what anyone wants. `LB_LOGS_ENABLED=false` stops shipping without touching the logging config. Defining your own channel called `larabug-logs` overrides the package's.
 
 ### Deprecations
 

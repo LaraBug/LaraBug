@@ -897,23 +897,24 @@ return [
     | Ships application log lines to LaraBug, so the lines leading up to an
     | error are there when you open it.
     |
-    | Naming the channel in your logging stack is the opt-in; nothing is sent
-    | until you do. Logs run at far higher volume than exceptions and count
-    | against your plan, so opt in deliberately.
+    | On by default. The package defines the `larabug-logs` channel and adds
+    | it to your default channel itself: appended when that is a stack, or
+    | wrapped together with it in a `larabug-stack` when it is a single
+    | channel, so your own logging keeps writing where it did. Naming the
+    | channel in your stack yourself is fine, it is never added twice.
     |
-    |   LOG_STACK=single,larabug-logs
-    |
-    | The package defines the `larabug-logs` channel itself, so there is
-    | nothing to add to config/logging.php. Define a channel of that name
-    | yourself if you want different settings; yours wins.
+    | Logs run at far higher volume than exceptions and count against your
+    | plan, so keep the level at info or above in production. Define a
+    | channel called `larabug-logs` yourself if you want different settings;
+    | yours wins.
     |
     */
 
     'logs' => [
         /*
-        | Kill switch. Leave it on: the channel decides whether logs are sent.
         | Set LB_LOGS_ENABLED=false to stop shipping without touching the
         | logging config, for instance while debugging a noisy deploy.
+        | Default: true
         */
         'enabled' => env('LB_LOGS_ENABLED', true),
 

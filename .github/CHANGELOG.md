@@ -2,6 +2,11 @@
 
 All notable changes to `larabug` will be documented in this file
 
+## 4.0.0-beta.15 - 2026-10-19
+
+- The Boost skill and guideline now say that HTTP requests (sampled at a tenth), artisan commands, scheduled tasks and logs are on by default, which they already were. They used to call these streams opt-in and told an agent never to switch one on. Query plans (`LB_QUERY_EXPLAIN`) remain the one opt-in.
+- The `logs` section of `config/larabug.php` and the Boost skill no longer describe naming `larabug-logs` in `LOG_STACK` as the way to turn logs on. The package adds the channel to the default log channel itself, and `LB_LOGS_ENABLED=false` turns it off. No behaviour changes in this release.
+
 ## 4.0.0-beta.14 - 2026-10-19
 
 - PHP and Laravel deprecations are now shipped to LaraBug. Laravel writes them to the channel named by `logging.deprecations.channel` (`LOG_DEPRECATIONS_CHANNEL`), which is null by default, so they were discarded before the log stack ever saw them. When that setting is null, `'null'` or names a channel that does not exist, it now points at the package's `larabug-deprecations` channel. When it names a channel, that channel keeps writing and LaraBug is stacked next to it. A channel the application defines as `logging.channels.deprecations` itself is extended the same way. `logging.deprecations.trace` is left to Laravel, and a deprecation logged with its trace carries it in `context.trace`, with paths relative to the application.
