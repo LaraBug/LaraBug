@@ -21,6 +21,7 @@ use LaraBug\Console\CommandBuffer;
 use LaraBug\Logger\LaraBugHandler;
 use LaraBug\Queue\JobTracePayload;
 use LaraBug\Requests\RequestBuffer;
+use Illuminate\Queue\Events\Looping;
 use LaraBug\Requests\PropagateTrace;
 use LaraBug\Requests\QueryExplainer;
 use LaraBug\Requests\RequestMonitor;
@@ -29,6 +30,7 @@ use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\Facades\Route;
 use LaraBug\Console\CommandListeners;
 use LaraBug\Livewire\LivewireContext;
+use LaraBug\Logger\DeprecationBuffer;
 use LaraBug\Logger\LaraBugLogHandler;
 use LaraBug\Queue\JobEventSubscriber;
 use Illuminate\Foundation\AliasLoader;
@@ -38,8 +40,10 @@ use LaraBug\Livewire\LivewireListeners;
 use Illuminate\Console\Scheduling\Event;
 use LaraBug\Console\ScheduledTaskBuffer;
 use Illuminate\Console\Scheduling\Schedule;
+use Illuminate\Queue\Events\WorkerStopping;
 use LaraBug\Console\ScheduledTaskListeners;
 use LaraBug\Http\Middleware\CaptureRequest;
+use LaraBug\Logger\LaraBugDeprecationHandler;
 use Illuminate\Foundation\Bus\PendingDispatch;
 use Illuminate\Contracts\Debug\ExceptionHandler;
 use Illuminate\Http\Client\Factory as HttpFactory;
@@ -93,10 +97,26 @@ class ServiceProvider extends BaseServiceProvider
             ]);
         }
 
+        // Every deprecation Laravel hands over is taken, whatever logs.level
+        // says: Laravel writes them all as warnings, and they have an opt-out
+        // of their own.
+        if (! config('logging.channels.larabug-deprecations')) {
+            config([
+                'logging.channels.larabug-deprecations' => [
+                    'driver' => 'larabug-deprecations',
+                    'level' => 'debug',
+                ],
+            ]);
+        }
+
         // Send whatever is still buffered at the end of the request. Without
         // this a request that logs less than one batch ships nothing, which is
         // most requests. Monolog's own close() covers the CLI case.
         $this->app->terminating(function () {
+            if ($this->app->resolved(DeprecationBuffer::class)) {
+                $this->app[DeprecationBuffer::class]->flushIfDue();
+            }
+
             if ($this->app->resolved(LogBuffer::class)) {
                 $this->app[LogBuffer::class]->flush();
             }
@@ -123,6 +143,8 @@ class ServiceProvider extends BaseServiceProvider
         $this->callAfterResolving(HttpFactory::class, function (HttpFactory $factory) {
             $factory->globalRequestMiddleware(new PropagateTrace());
         });
+
+        $this->registerDeprecationFlushes();
 
         $this->registerLivewireListeners();
 
@@ -275,6 +297,175 @@ class ServiceProvider extends BaseServiceProvider
     }
 
     /**
+     * Point Laravel's deprecations channel at LaraBug.
+     *
+     * Laravel writes deprecations to a channel of their own, named by
+     * `logging.deprecations.channel`, which is null unless the application
+     * sets LOG_DEPRECATIONS_CHANNEL. So they are discarded before the default
+     * stack, and with it `larabug-logs`, ever sees them.
+     *
+     * An application that sends them nowhere gets our channel. One that sends
+     * them somewhere keeps that destination, with ours stacked next to it. In
+     * `register()` for the same reason the default stack is extended there,
+     * and idempotent for the same reasons too. `logging.deprecations.trace` is
+     * left alone: Laravel reads it when it writes the line, and the handler
+     * understands the line either way.
+     */
+    protected function addLogChannelToTheDeprecationsChannel(): void
+    {
+        $config = $this->app['config'];
+
+        if (! $config->get('larabug.logs.enabled', true)) {
+            return;
+        }
+
+        if (! $config->get('larabug.logs.deprecations.enabled', true)) {
+            return;
+        }
+
+        // Laravel only reads the setting when the application has not defined
+        // a channel called `deprecations` itself, so that one is extended.
+        $defined = $config->get('logging.channels.deprecations');
+
+        if (is_array($defined)) {
+            $this->addLogChannelToTheDefinedDeprecationsChannel($defined);
+
+            return;
+        }
+
+        // Older applications set it as a bare channel name, not an array.
+        $setting = is_string($config->get('logging.deprecations'))
+            ? 'logging.deprecations'
+            : 'logging.deprecations.channel';
+
+        $channel = $config->get($setting);
+
+        if (in_array($channel, ['larabug-deprecations', 'larabug-deprecations-stack'], true)) {
+            return;
+        }
+
+        $destinations = $this->deprecationDestinations($channel);
+
+        if ($destinations === []) {
+            $config->set($setting, 'larabug-deprecations');
+
+            return;
+        }
+
+        $config->set('logging.channels.larabug-deprecations-stack', [
+            'driver' => 'stack',
+            'channels' => [...$destinations, 'larabug-deprecations'],
+            'ignore_exceptions' => false,
+        ]);
+
+        $config->set($setting, 'larabug-deprecations-stack');
+    }
+
+    /**
+     * @param  array<string, mixed>  $channel
+     */
+    protected function addLogChannelToTheDefinedDeprecationsChannel(array $channel): void
+    {
+        $config = $this->app['config'];
+
+        if (($channel['driver'] ?? null) === 'stack') {
+            $channels = array_values(array_diff($this->stackedChannels($channel), ['larabug-logs', 'larabug-deprecations']));
+
+            $config->set('logging.channels.deprecations.channels', [...$channels, 'larabug-deprecations']);
+
+            return;
+        }
+
+        // A stack cannot name the channel it replaces, so the application's
+        // channel moves under a name of our own and keeps writing as before.
+        $config->set('logging.channels.larabug-deprecations-destination', $channel);
+
+        $config->set('logging.channels.deprecations', array_filter([
+            'driver' => 'stack',
+            'name' => $channel['name'] ?? null,
+            'channels' => ['larabug-deprecations-destination', 'larabug-deprecations'],
+            'ignore_exceptions' => false,
+        ], fn ($value) => $value !== null));
+    }
+
+    /**
+     * The channels an application sends its deprecations to, none when it
+     * sends them nowhere. Our own `larabug-logs` is never one of them: it would
+     * ship every occurrence of a deprecation as a line of its own, which is
+     * what our deprecations channel exists to prevent.
+     *
+     * @return array<int, string>
+     */
+    protected function deprecationDestinations(mixed $channel): array
+    {
+        if (! is_string($channel)) {
+            return [];
+        }
+
+        if (in_array($channel, ['', 'null', 'larabug-logs'], true)) {
+            return [];
+        }
+
+        $config = $this->app['config']->get("logging.channels.{$channel}");
+
+        if (! is_array($config)) {
+            return [];
+        }
+
+        if (($config['driver'] ?? null) !== 'stack') {
+            return [$channel];
+        }
+
+        $channels = $this->stackedChannels($config);
+
+        if (! in_array('larabug-logs', $channels, true)) {
+            return [$channel];
+        }
+
+        return array_values(array_diff($channels, ['larabug-logs']));
+    }
+
+    /**
+     * @param  array<string, mixed>  $stack
+     * @return array<int, string>
+     */
+    protected function stackedChannels(array $stack): array
+    {
+        $channels = $stack['channels'] ?? [];
+
+        // LOG_STACK=single,larabug-logs reaches the config as one string.
+        if (is_string($channels)) {
+            $channels = explode(',', $channels);
+        }
+
+        return array_values(array_filter($channels, 'is_string'));
+    }
+
+    /**
+     * A queue worker never terminates the application, so what has been
+     * coalesced is sent from its loop, and all of it once it stops. A worker
+     * killing itself over a timed out job skips the shutdown function.
+     */
+    protected function registerDeprecationFlushes(): void
+    {
+        if (! config('larabug.logs.deprecations.enabled', true)) {
+            return;
+        }
+
+        $this->app['events']->listen(Looping::class, function () {
+            if ($this->app->resolved(DeprecationBuffer::class)) {
+                $this->app[DeprecationBuffer::class]->flushIfDue();
+            }
+        });
+
+        $this->app['events']->listen(WorkerStopping::class, function () {
+            if ($this->app->resolved(DeprecationBuffer::class)) {
+                $this->app[DeprecationBuffer::class]->flush();
+            }
+        });
+    }
+
+    /**
      * Listen to Livewire's lifecycle, in the applications that have Livewire.
      *
      * Livewire is not a dependency of this package and most applications using
@@ -379,6 +570,8 @@ class ServiceProvider extends BaseServiceProvider
 
         $this->addLogChannelToTheApplicationsStack();
 
+        $this->addLogChannelToTheDeprecationsChannel();
+
         // Log shipping buffer. Bound lazily, so an app that never adds the
         // channel never builds one.
         $this->app->singleton(LogBuffer::class, fn ($app) => new LogBuffer(
@@ -386,28 +579,42 @@ class ServiceProvider extends BaseServiceProvider
             $app['config']->get('larabug', [])
         ));
 
+        $this->app->singleton(DeprecationBuffer::class, fn ($app) => new DeprecationBuffer(
+            $app[LogBuffer::class],
+            (int) $app['config']->get('larabug.logs.deprecations.interval', 3600)
+        ));
+
         if ($this->app['log'] instanceof LogManager) {
+            // A local closure rather than a method: the log manager binds the
+            // drivers below to itself, so $this inside them is not this class.
+            $handlerConfig = fn ($app) => [
+                'logs' => $app['config']->get('larabug.logs', []),
+                'environment' => $app['config']->get('app.env', ''),
+                'release' => $app['config']->get('larabug.logs.release') ?? '',
+            ];
+
             $this->app['log']->extend('larabug', fn ($app, $config) => new Logger('larabug', [
                 new LaraBugHandler($app['larabug']),
             ]));
 
-            $this->app['log']->extend('larabug-logs', function ($app, $config) {
-                $larabug = $app['config']->get('larabug', []);
-
-                $handler = new LaraBugLogHandler(
+            $this->app['log']->extend('larabug-logs', fn ($app, $config) => new Logger('larabug-logs', [
+                new LaraBugLogHandler(
                     $app[LogBuffer::class],
-                    [
-                        'logs' => $larabug['logs'] ?? [],
-                        'environment' => $app['config']->get('app.env', ''),
-                        'release' => $larabug['logs']['release'] ?? '',
-                    ],
+                    $handlerConfig($app),
                     // The channel's own level wins, so a stack can ship warnings
                     // to us while writing everything to disk.
-                    Logger::toMonologLevel($config['level'] ?? $larabug['logs']['level'] ?? 'info')
-                );
+                    Logger::toMonologLevel($config['level'] ?? $app['config']->get('larabug.logs.level') ?? 'info')
+                ),
+            ]));
 
-                return new Logger('larabug-logs', [$handler]);
-            });
+            $this->app['log']->extend('larabug-deprecations', fn ($app, $config) => new Logger('deprecations', [
+                new LaraBugDeprecationHandler(
+                    $app[LogBuffer::class],
+                    $app[DeprecationBuffer::class],
+                    $handlerConfig($app),
+                    Logger::toMonologLevel($config['level'] ?? 'debug')
+                ),
+            ]));
         }
 
         // Request monitoring. One of each per execution: the monitor holds the

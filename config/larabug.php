@@ -949,5 +949,20 @@ return [
         | deploy. A commit sha or a version tag.
         */
         'release' => env('LB_LOGS_RELEASE'),
+
+        /*
+        | PHP and Laravel deprecations. Laravel writes them to a channel of its
+        | own, set by LOG_DEPRECATIONS_CHANNEL, which discards them unless the
+        | application names one. LaraBug is added to that channel, next to
+        | whatever the application already sends them to.
+        |
+        | A deprecation fires on every call, so each one is sent the first time
+        | it occurs in a process, and after that at most once per interval
+        | (in seconds) with the number of occurrences it stands for.
+        */
+        'deprecations' => [
+            'enabled' => env('LB_LOG_DEPRECATIONS', true),
+            'interval' => env('LB_LOG_DEPRECATIONS_INTERVAL', 3600),
+        ],
     ],
 ];
