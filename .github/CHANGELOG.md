@@ -2,6 +2,13 @@
 
 All notable changes to `larabug` will be documented in this file
 
+## 4.0.0-beta.13 - 2026-10-19
+
+- Slow SELECTs can now carry a summary of their query plan, so the server can tell a statement that scans a whole table for want of an index from one that is merely slow. This is opt-in and off by default: set `LB_QUERY_EXPLAIN=true` (`queries.explain.enabled`). When on, LaraBug runs plain `EXPLAIN` on MySQL and MariaDB, and `EXPLAIN (FORMAT JSON)` on Postgres, against the same connection with the original bindings. It never runs `EXPLAIN ANALYZE`, so the query is not executed again. Other drivers are never explained.
+- Only a query already kept on a sampled request is considered, and only when it is a single read only SELECT (no `FOR UPDATE` or `FOR SHARE`, no write inside a CTE, not inside `DB::pretend()`) that took at least `queries.explain.min_duration_ms` (100 by default). Each statement is explained at most once per `queries.explain.interval` seconds (3600 by default). The interval is claimed with `Cache::add` on the default cache store so it holds across processes, and is kept in the process itself when there is no cache store.
+- The EXPLAIN runs after the response has been sent, when the request record is assembled, so it never delays the query or the response. LaraBug's own EXPLAIN is never recorded or explained. A failing EXPLAIN is swallowed, and reported as a `buffer_error` only with `jobs.report_buffer_errors` on. MariaDB caps it at one second with `SET STATEMENT max_statement_time`. MySQL and Postgres run it uncapped, because MySQL's `max_execution_time` does not apply to `EXPLAIN` and Postgres can only scope a `statement_timeout` to one statement inside a transaction.
+- The query's entry in `sql` gains an optional `plan` object with `driver`, `full_scan`, `table`, `rows_estimate`, `key`, `possible_keys` and `explained_at`. On MySQL and MariaDB a table is scanned when a row has type `ALL`, or `index` with no possible key, and the fields come from the scanning row expected to read the most. On Postgres it is scanned when the plan has a `Seq Scan` node, the fields come from the largest one, and both keys are null. Bindings, values and the raw plan are never sent.
+
 ## 4.0.0-beta.12 - 2026-10-19
 
 - Calls the application makes through Laravel's `Http` client now carry a W3C `traceparent` for the current request, job, command or scheduled task, so a second monitored application they reach records itself as its child. It is sent only to hosts listed in `requests.trace_propagation_targets` (`LB_TRACE_PROPAGATION_TARGETS`, comma separated). The list is empty by default, which sends it nowhere, so a trace id never reaches a third party unless its host is listed.

@@ -55,6 +55,7 @@ Read the config file before changing behaviour. Every key documents what it does
 | HTTP requests | off | `LB_TRACK_REQUESTS` |
 | Artisan commands | off | `LB_TRACK_COMMANDS` |
 | Scheduled tasks | off | `LB_TRACK_SCHEDULED_TASKS` |
+| Query plans for slow SELECTs | off | `LB_QUERY_EXPLAIN` |
 
 The off-by-default monitors are off because each one spends the account's event quota. Never switch one on unless you were asked to.
 
@@ -184,6 +185,24 @@ LB_TRACK_LIVEWIRE=false
 LB_LIVEWIRE_CAPTURE_PARAMETERS=false
 LB_LIVEWIRE_CAPTURE_UPDATES=false
 ```
+
+## Query plans
+
+A slow query on a request record does not say why it was slow. With `LB_QUERY_EXPLAIN=true`, LaraBug asks the database for the plan of a slow SELECT and attaches a summary to that query: whether it scans a whole table, which table, the planner's row estimate, and the index it used or could have used. That is how the panel tells a missing index apart from a query that is merely slow.
+
+It is off by default because it runs a statement of LaraBug's own against the application's database. What runs is plain `EXPLAIN` on MySQL and MariaDB, and `EXPLAIN (FORMAT JSON)` on Postgres, with the original bindings on the same connection. Never `EXPLAIN ANALYZE`, so the query itself is not executed again. Other drivers are never explained.
+
+Only a query already kept on a sampled request is considered, and only when it is a single read only SELECT (no `FOR UPDATE`, no write inside a CTE) that took at least `queries.explain.min_duration_ms` (100 by default). Each statement is explained at most once per `queries.explain.interval` seconds (3600 by default), tracked in the default cache store so the interval holds across processes. Queries inside `DB::pretend()` are skipped.
+
+The EXPLAIN runs after the response has been sent, so it never delays the query or the response, and a failing one is swallowed. MariaDB caps it at one second. MySQL and Postgres run it uncapped, since neither can cap a single statement safely outside a transaction. The bindings are only used to run it: neither they nor the raw plan are sent.
+
+```
+LB_QUERY_EXPLAIN=true
+LB_QUERY_EXPLAIN_MIN_DURATION_MS=100
+LB_QUERY_EXPLAIN_INTERVAL=3600
+```
+
+Switch it on only when asked, and say what it runs.
 
 ## Logs
 

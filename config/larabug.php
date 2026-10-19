@@ -409,6 +409,65 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Query plans
+    |--------------------------------------------------------------------------
+    |
+    | Laravel does not say how many rows a statement examined, so a query that
+    | scans a whole table because an index is missing looks no different from
+    | one that is merely slow. With explain on, LaraBug asks the database for
+    | the plan of a slow SELECT and sends a summary of it: whether it scans a
+    | table, which table, how many rows the planner expects and which index it
+    | used or could have used.
+    |
+    | Off by default, because this runs a statement of LaraBug's own against
+    | your database. What it runs is plain EXPLAIN on MySQL and MariaDB, and
+    | EXPLAIN (FORMAT JSON) on Postgres, with the original bindings on the
+    | same connection. Never EXPLAIN ANALYZE, which would execute the query.
+    |
+    | It only considers a statement that was kept on a sampled request, that
+    | is a single read-only SELECT (no FOR UPDATE or FOR SHARE, no write inside
+    | a CTE), that took at least min_duration_ms, and that runs on mysql,
+    | mariadb or pgsql. Each statement is explained at most once per interval,
+    | tracked in your default cache store so the interval holds across
+    | processes, or in the process itself when there is no cache store.
+    |
+    | The EXPLAIN runs after the response has been sent, when the request
+    | record is assembled, so it never delays the query or the response. A
+    | failing EXPLAIN is swallowed, and reported as a buffer error only when
+    | jobs.report_buffer_errors is on. MariaDB caps it at one second with
+    | SET STATEMENT max_statement_time. MySQL and Postgres run it uncapped:
+    | MySQL's max_execution_time only governs SELECT statements, and Postgres
+    | only scopes a statement_timeout to one statement inside a transaction,
+    | where SET LOCAL would also outlive the EXPLAIN in a transaction of yours.
+    |
+    | The bindings are only used to run the EXPLAIN. Neither they nor the raw
+    | plan are ever sent.
+    |
+    */
+    'queries' => [
+        'explain' => [
+            /*
+            | Enable or disable query plans
+            | Default: false
+            */
+            'enabled' => env('LB_QUERY_EXPLAIN', false),
+
+            /*
+            | How slow a SELECT has to be before its plan is worth asking for
+            | Default: 100 (milliseconds)
+            */
+            'min_duration_ms' => env('LB_QUERY_EXPLAIN_MIN_DURATION_MS', 100),
+
+            /*
+            | Seconds before the same statement is explained again
+            | Default: 3600
+            */
+            'interval' => env('LB_QUERY_EXPLAIN_INTERVAL', 3600),
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Livewire
     |--------------------------------------------------------------------------
     |

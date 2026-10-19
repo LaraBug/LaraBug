@@ -22,6 +22,7 @@ use LaraBug\Logger\LaraBugHandler;
 use LaraBug\Queue\JobTracePayload;
 use LaraBug\Requests\RequestBuffer;
 use LaraBug\Requests\PropagateTrace;
+use LaraBug\Requests\QueryExplainer;
 use LaraBug\Requests\RequestMonitor;
 use Illuminate\Contracts\Http\Kernel;
 use Illuminate\Support\Facades\Blade;
@@ -414,6 +415,10 @@ class ServiceProvider extends BaseServiceProvider
         // made about it, and the buffer outlives both to flush on shutdown.
         $this->app->singleton(RequestMonitor::class);
         $this->app->singleton(Sampler::class);
+
+        // One per monitor, since it hooks the monitor's flush, and it keeps the
+        // statements it explained for as long as the process lives.
+        $this->app->singleton(QueryExplainer::class);
 
         // One per process, shared by the job and command listeners that open
         // executions on it. The request is only handed over when one is being

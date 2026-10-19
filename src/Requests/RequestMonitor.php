@@ -185,8 +185,10 @@ class RequestMonitor implements RecordsMail
      * here rather than filtered later: a value in a WHERE clause is customer
      * data, and the safest place to not send it is the place it would
      * otherwise be collected.
+     *
+     * Returns where the statement was kept, or null once the cap is reached.
      */
-    public function recordQuery(string $sql, string $connection, float $durationMs): void
+    public function recordQuery(string $sql, string $connection, float $durationMs): ?int
     {
         $this->counters['queries']++;
 
@@ -194,7 +196,7 @@ class RequestMonitor implements RecordsMail
         // thousand queries is worth knowing about, and the reason to look at
         // it is the number rather than the ten thousandth statement.
         if (count($this->queries) >= $this->maxQueries) {
-            return;
+            return null;
         }
 
         $normalised = QueryNormaliser::normalise($sql);
@@ -206,6 +208,25 @@ class RequestMonitor implements RecordsMail
             'duration_ms' => round($durationMs, 3),
             'start_ms' => $this->startedAtMs($durationMs),
         ];
+
+        return array_key_last($this->queries);
+    }
+
+    /**
+     * Attach the summary of a statement's plan to the entry it describes.
+     *
+     * The hash has to match as well as the position, so a plan can only ever
+     * land on the statement it was asked for.
+     *
+     * @param  array<string, mixed>  $plan
+     */
+    public function recordQueryPlan(int $index, string $hash, array $plan): void
+    {
+        if (($this->queries[$index]['hash'] ?? null) !== $hash) {
+            return;
+        }
+
+        $this->queries[$index]['plan'] = $plan;
     }
 
     /**

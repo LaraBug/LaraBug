@@ -1,0 +1,14 @@
+[
+    {
+        "id": 1,
+        "select_type": "SIMPLE",
+        "table": "orders",
+        "type": "ref",
+        "possible_keys": "orders_user_id_index",
+        "key": "orders_user_id_index",
+        "key_len": "5",
+        "ref": "const",
+        "rows": "40",
+        "Extra": ""
+    }
+]
