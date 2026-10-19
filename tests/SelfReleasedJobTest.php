@@ -90,7 +90,7 @@ class SelfReleasedJobTest extends TestCase
 
     #[Test]
     #[DefineEnvironment('sampleNoCompletedJobs')]
-    public function a_released_job_is_not_sampled_away()
+    public function a_released_job_and_its_retry_are_not_sampled_away()
     {
         Queue::push(new AwaitPayment(releasesFor: 60));
 
@@ -102,9 +102,8 @@ class SelfReleasedJobTest extends TestCase
 
         $records = $this->records();
 
-        $this->assertCount(1, $records);
-        $this->assertSame('released', $records[0]['status']);
-        $this->assertSame(1.0, $records[0]['sample_rate']);
+        $this->assertSame(['released', 'completed'], array_column($records, 'status'));
+        $this->assertSame([1.0, 1.0], array_column($records, 'sample_rate'));
     }
 
     #[Test]

@@ -686,7 +686,9 @@ return [
         | 0.1 = track 10% of successful jobs
         | 0.0 = don't track successful jobs
         |
-        | Note: Failures are ALWAYS tracked at 100% regardless of this setting
+        | Note: Failures are ALWAYS tracked at 100% regardless of this setting,
+        | and so are released jobs and every attempt after a job's first. A
+        | processing record is kept or dropped with its job's completion.
         */
         'sample_rate' => env('LB_SAMPLE_RATE', 1.0),
 

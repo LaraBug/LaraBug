@@ -100,7 +100,7 @@ class DefaultJobTimesTest extends TestCase
     protected function sendOnlyProcessingRecords($app): void
     {
         $app['config']->set('larabug.jobs.track_processing', true);
-        $app['config']->set('larabug.jobs.sample_rate', 0.0);
+        $app['config']->set('larabug.jobs.track_completed', false);
         $app['config']->set('larabug.jobs.track_failed', false);
     }
 

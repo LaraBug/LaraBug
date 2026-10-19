@@ -2,6 +2,11 @@
 
 All notable changes to `larabug` will be documented in this file
 
+## 4.0.0-beta.11 - 2026-10-19
+
+- An attempt after a job's first is never sampled out by `jobs.sample_rate`. An earlier attempt may have been reported as `released` or `processing`, and the server keeps the last record it was sent, so a dropped completion left the job looking released or stuck until the server's sweep marked it abandoned. Such a record carries a `sample_rate` of 1.0. This costs volume: with a sample rate below 1.0, every retried job that completes is now sent.
+- With `jobs.track_processing` on, a processing record is now kept or dropped together with its attempt's completion. Before, every processing record was sent while its completion could be sampled out, which left the job looking stuck. Whether an attempt is kept is now decided by its job's uuid instead of a random draw, so both records get the same answer.
+
 ## 4.0.0-beta.10 - 2026-10-19
 
 - A job that fails itself with `$this->fail()` without throwing is now reported once, as `failed`. Laravel fires the processed event after the failed one for such a job, so it used to be followed by a `completed` record as well.

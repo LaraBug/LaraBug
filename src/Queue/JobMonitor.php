@@ -39,6 +39,10 @@ class JobMonitor
             return;
         }
 
+        if (! $this->isSampled($job)) {
+            return;
+        }
+
         $data = $this->collector->collect($job, $connectionName, 'processing');
 
         $this->send($data);
@@ -60,7 +64,7 @@ class JobMonitor
                 return;
             }
 
-            if (! $this->shouldSample()) {
+            if (! $this->isSampled($job)) {
                 return;
             }
 
@@ -70,7 +74,7 @@ class JobMonitor
                 ...$mail->toArray(),
                 // What the mail on it is weighted by: a completed record stands in
                 // for every job of its kind that sampling dropped.
-                'sample_rate' => $this->sampleRate(),
+                'sample_rate' => $this->isRetry($job) ? 1.0 : $this->sampleRate(),
             ]);
 
             $this->send($data);
@@ -238,8 +242,20 @@ class JobMonitor
         }
     }
 
-    protected function shouldSample(): bool
+    /**
+     * Whether the processing and completed records of an attempt are sent.
+     * It is decided by the job's uuid rather than a coin toss, so both are
+     * kept or dropped together: a processing record whose completion was
+     * dropped would stay the job's last state on the server.
+     */
+    protected function isSampled(Job $job): bool
     {
+        // An earlier attempt may have been reported as released or as
+        // processing, and only this attempt's record can replace it.
+        if ($this->isRetry($job)) {
+            return true;
+        }
+
         $sampleRate = $this->sampleRate();
 
         if ($sampleRate >= 1.0) {
@@ -250,7 +266,12 @@ class JobMonitor
             return false;
         }
 
-        return (mt_rand() / mt_getrandmax()) <= $sampleRate;
+        return crc32($job->uuid() ?? spl_object_hash($job)) / 0xFFFFFFFF < $sampleRate;
+    }
+
+    protected function isRetry(Job $job): bool
+    {
+        return $job->attempts() > 1;
     }
 
     /**
