@@ -2,6 +2,11 @@
 
 All notable changes to `larabug` will be documented in this file
 
+## 4.0.0-beta.4 - 2026-10-19
+
+- Buffered queue job records are now sent once `jobs.flush_interval` has passed even while the worker sits idle. Before, the interval was only checked when the next job came in, so the tail of every burst waited for more work.
+- A worker that stops, gracefully or by killing itself over a timed out job, flushes its buffer first. A timed out job's kill skips the shutdown function, so those records used to be lost.
+
 ## 4.0.0-beta.3 - 2026-10-13
 
 - Outgoing mail is now recorded wherever it is sent, not only from HTTP requests. Each message belongs to the innermost execution that sent it: a queue job, else an artisan command, else the request. Completed and failed job records and command records carry `mail` and `mail_sent`, and job records carry the `sample_rate` they were kept at.

@@ -7,10 +7,12 @@ use LaraBug\Mail\MailListeners;
 use Illuminate\Queue\Jobs\SyncJob;
 use LaraBug\Requests\TraceContext;
 use Illuminate\Contracts\Queue\Job;
+use Illuminate\Queue\Events\Looping;
 use Illuminate\Queue\Events\JobFailed;
 use Illuminate\Queue\Events\JobProcessed;
 use Illuminate\Queue\Events\JobProcessing;
 use Illuminate\Contracts\Events\Dispatcher;
+use Illuminate\Queue\Events\WorkerStopping;
 
 class JobEventSubscriber
 {
@@ -36,6 +38,27 @@ class JobEventSubscriber
         $events->listen(JobProcessing::class, [$this, 'handleJobProcessing']);
         $events->listen(JobProcessed::class, [$this, 'handleJobProcessed']);
         $events->listen(JobFailed::class, [$this, 'handleJobFailed']);
+        $events->listen(Looping::class, [$this, 'handleLooping']);
+        $events->listen(WorkerStopping::class, [$this, 'handleWorkerStopping']);
+    }
+
+    /**
+     * Fired on every pass of the worker loop, an empty queue included. The
+     * worker asks this event whether to carry on and pauses on a false, so
+     * this must never return one.
+     */
+    public function handleLooping(Looping $event): void
+    {
+        $this->monitor->flushIfDue();
+    }
+
+    /**
+     * Fired before a graceful stop and before the worker kills itself over a
+     * timed out job, where no shutdown function would run.
+     */
+    public function handleWorkerStopping(WorkerStopping $event): void
+    {
+        $this->monitor->flush();
     }
 
     public function handleJobProcessing(JobProcessing $event): void
