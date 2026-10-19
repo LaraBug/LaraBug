@@ -2,6 +2,13 @@
 
 All notable changes to `larabug` will be documented in this file
 
+## 4.0.0-beta.12 - 2026-10-19
+
+- Calls the application makes through Laravel's `Http` client now carry a W3C `traceparent` for the current request, job, command or scheduled task, so a second monitored application they reach records itself as its child. It is sent only to hosts listed in `requests.trace_propagation_targets` (`LB_TRACE_PROPAGATION_TARGETS`, comma separated). The list is empty by default, which sends it nowhere, so a trace id never reaches a third party unless its host is listed.
+- A target is an exact host such as `api.example.com`, or `*.example.com` for any host below example.com but not example.com itself. Hosts are compared case insensitively and without the port. No target is read as a regular expression.
+- A `traceparent` the call already carries is kept, and a call made while no trace has started gets none. Guzzle used directly, outside the `Http` facade, is not reached and never sends the header. LaraBug's own reports are unaffected.
+- A queued job and a scheduled task now start their trace when they begin instead of on first use, so a call they make before anything else is reported already carries it.
+
 ## 4.0.0-beta.11 - 2026-10-19
 
 - An attempt after a job's first is never sampled out by `jobs.sample_rate`. An earlier attempt may have been reported as `released` or `processing`, and the server keeps the last record it was sent, so a dropped completion left the job looking released or stuck until the server's sweep marked it abandoned. Such a record carries a `sample_rate` of 1.0. This costs volume: with a sample rate below 1.0, every retried job that completes is now sent.

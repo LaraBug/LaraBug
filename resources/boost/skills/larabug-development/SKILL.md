@@ -1,6 +1,6 @@
 ---
 name: larabug-development
-description: Use when configuring the LaraBug package, controlling what it reports, or sending data to LaraBug from application code. Covers config/larabug.php and the LB_* environment variables, filtering sensitive data, manual exception reporting, per-exception context, queue job tracking, Livewire component tracking, log shipping, CVE scanning, the JavaScript client, and testing with the LaraBug fake.
+description: Use when configuring the LaraBug package, controlling what it reports, or sending data to LaraBug from application code. Covers config/larabug.php and the LB_* environment variables, filtering sensitive data, manual exception reporting, per-exception context, queue job tracking, trace propagation between applications, Livewire component tracking, log shipping, CVE scanning, the JavaScript client, and testing with the LaraBug fake.
 metadata:
   author: LaraBug
   tags:
@@ -154,6 +154,20 @@ dispatch_tracked(new ProcessPayment($order));
 Filter volume with `jobs.only_queues`, `jobs.ignore_queues` and `jobs.ignore_jobs` before reaching for `sample_rate`.
 
 A queue whose workers have stopped sends no job records at all, so the scheduler also measures queue depth once a minute (`jobs.depth`). It measures the default connection's queue and every queue Horizon supervises in the current environment. Set `jobs.depth.queues` to a list of `connection:queue` strings, such as `['redis:default', 'redis:emails']`, to measure exactly those instead.
+
+## Tracing across applications
+
+Every request, job, command and scheduled task has a trace id. A queued job names the trace that dispatched it as its parent, and a request that arrives with a W3C `traceparent` header names the caller's trace as its parent, which is how one story is followed from one monitored application into another. The receiving application only reads that header with request monitoring on (`LB_TRACK_REQUESTS`).
+
+For that header to go out, list the hosts of your own applications in `requests.trace_propagation_targets`:
+
+```
+LB_TRACE_PROPAGATION_TARGETS=api.example.com,*.internal.example.com
+```
+
+The list is empty by default, which sends the header nowhere. Keep it that way for third parties: a payment provider or a webhook receiver has no use for your trace id. `*.example.com` matches any host below example.com but not example.com itself, so list both when both are wanted. Hosts are compared case insensitively and without the port, and nothing is read as a regular expression. A `traceparent` the call already sets is kept.
+
+Only calls made through Laravel's `Http` client get the header. Guzzle used directly, outside the `Http` facade, is out of reach, so set the header yourself there with `LaraBug\Requests\Traceparent::forCurrentTrace()` when the other end is yours.
 
 ## Livewire
 

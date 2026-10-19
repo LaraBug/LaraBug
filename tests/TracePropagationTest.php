@@ -128,6 +128,42 @@ class TracePropagationTest extends TestCase
     }
 
     #[Test]
+    public function a_job_has_a_trace_before_it_runs_so_the_calls_it_makes_can_carry_it()
+    {
+        $rawBody = json_encode($this->payloadFor(new TraceablePropagationJob()));
+
+        TraceContext::reset();
+        $this->processJob($rawBody);
+
+        $this->assertTrue(TraceContext::started());
+    }
+
+    #[Test]
+    public function a_scheduled_task_has_a_trace_before_it_runs_so_the_calls_it_makes_can_carry_it()
+    {
+        TraceContext::reset();
+
+        $task = new \stdClass();
+        $task->expression = '* * * * *';
+        $task->command = 'suite:task';
+
+        $event = new \stdClass();
+        $event->task = $task;
+
+        $buffer = new class () extends ScheduledTaskBuffer {
+            public function __construct()
+            {
+            }
+        };
+
+        (new ScheduledTaskListeners($buffer))->onScheduledTaskStarting($event);
+
+        ScheduledTaskListeners::$inFlight = 0;
+
+        $this->assertTrue(TraceContext::started());
+    }
+
+    #[Test]
     public function a_job_record_carries_its_own_trace_and_the_one_it_came_from()
     {
         $rawBody = json_encode($this->payloadFor(new TraceablePropagationJob()));

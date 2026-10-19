@@ -385,6 +385,26 @@ return [
             'cvv',
             'iban',
         ],
+
+        /*
+        | Hosts the application's own outgoing calls send their trace to
+        | A call to one of these carries a W3C traceparent header, so a second
+        | monitored application that receives it records itself as a child of
+        | this request, job or command. Empty by default, which sends it
+        | nowhere: a trace id has no business reaching every payment provider,
+        | mail service and webhook the application talks to, so list only the
+        | applications you run yourself
+        | Matched against the host alone, case insensitively and without the
+        | port. 'api.example.com' is that host only; '*.example.com' is any
+        | host below example.com but not example.com itself, so list both when
+        | both are wanted. Nothing here is read as a regular expression
+        | A traceparent the call already carries is never replaced
+        | Only calls made through Laravel's Http client are reached. Guzzle used
+        | directly, outside the Http facade, never sends the header
+        | Environment: LB_TRACE_PROPAGATION_TARGETS=api.example.com,*.internal.example.com
+        | Default: [] (sent nowhere)
+        */
+        'trace_propagation_targets' => array_values(array_filter(array_map('trim', explode(',', env('LB_TRACE_PROPAGATION_TARGETS', ''))))),
     ],
 
     /*

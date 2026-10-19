@@ -68,8 +68,11 @@ class JobEventSubscriber
         // Each job is its own unit of work, so each gets its own trace: a long
         // lived worker would otherwise stamp every job with the first job's id.
         // The trace that dispatched it is kept as the parent, which is the only
-        // thing left joining the job to the request behind it.
+        // thing left joining the job to the request behind it. Started here
+        // rather than on first use, so a call the job makes to another
+        // application already has a trace to carry.
         TraceContext::startChild(JobTracePayload::parentIdFor($event->job));
+        TraceContext::id();
 
         // A worker runs one job at a time, so whatever is still open when the
         // next job off a real queue starts belongs to an attempt that ended

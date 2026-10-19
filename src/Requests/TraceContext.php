@@ -31,6 +31,15 @@ class TraceContext
     }
 
     /**
+     * Whether something in this execution has started a trace yet, without
+     * starting one the way id() would.
+     */
+    public static function started(): bool
+    {
+        return self::$traceId !== null;
+    }
+
+    /**
      * The execution that caused this one, or null when this one began on its
      * own: an untraced console command, or a request nobody we monitor made.
      */
