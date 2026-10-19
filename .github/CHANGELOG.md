@@ -2,6 +2,11 @@
 
 All notable changes to `larabug` will be documented in this file
 
+## 4.0.0-beta.10 - 2026-10-19
+
+- A job that fails itself with `$this->fail()` without throwing is now reported once, as `failed`. Laravel fires the processed event after the failed one for such a job, so it used to be followed by a `completed` record as well.
+- An attempt that ends without a processed, failed or release event, such as a job that releases itself and then throws, no longer leaves its times and duration in memory for the life of the worker. They are dropped when the next job off a real queue starts. The same goes for the duration kept for a job released after an exception. Such an attempt still sends no record of its own.
+
 ## 4.0.0-beta.9 - 2026-10-19
 
 - Completed and failed queue job records now always carry `available_at` and `reserved_at`. Both are recorded when a job starts, whether or not its processing record is sent, so under the default config (where `jobs.track_processing` is off) the server can still tell when a job was due and how long it waited. `jobs.track_processing` only decides whether the processing record itself is sent.

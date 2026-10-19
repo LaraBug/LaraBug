@@ -71,27 +71,31 @@ class JobEventSubscriber
         // thing left joining the job to the request behind it.
         TraceContext::startChild(JobTracePayload::parentIdFor($event->job));
 
-        $jobId = $event->job->getJobId() ?? spl_object_hash($event->job);
-
-        $this->timings[$jobId] = [
-            'start' => microtime(true),
-            'memory_start' => memory_get_usage(true),
-        ];
-
-        // A worker runs one job at a time, so mail still open when the next
-        // job off a real queue starts belongs to an attempt that ended with
-        // neither a processed nor a failed event: one that threw and was
-        // released for a retry. It goes with that attempt, which sends no
-        // record, rather than onto the job that comes next. A sync job is the
-        // exception: it runs inside whatever dispatched it, which may well be
-        // another job still in progress.
+        // A worker runs one job at a time, so whatever is still open when the
+        // next job off a real queue starts belongs to an attempt that ended
+        // with neither a processed nor a failed event: one that threw and was
+        // released for a retry, or that released itself and then threw. Its
+        // mail goes with that attempt, which sends no record, rather than onto
+        // the job that comes next. A sync job is the exception: it runs inside
+        // whatever dispatched it, which may well be another job still in
+        // progress.
         if (! $event->job instanceof SyncJob) {
             foreach ($this->mail as $stale) {
                 $this->mailListeners->close($stale);
             }
 
             $this->mail = [];
+            $this->timings = [];
+
+            $this->monitor->forgetUnfinishedAttempts();
         }
+
+        $jobId = $event->job->getJobId() ?? spl_object_hash($event->job);
+
+        $this->timings[$jobId] = [
+            'start' => microtime(true),
+            'memory_start' => memory_get_usage(true),
+        ];
 
         // Opened for every job, including the ones the monitor will not
         // record: an ignored job's mail is not ours to keep, and leaving it
@@ -112,6 +116,12 @@ class JobEventSubscriber
         $mail = $this->closeMail($event->job);
 
         unset($this->timings[$jobId]);
+
+        // A job that failed itself with $this->fail() without throwing is
+        // processed too, after its failed record has gone out.
+        if ($event->job->hasFailed()) {
+            return;
+        }
 
         // A job that called $this->release() is processed too, but it went
         // back onto the queue rather than completing. The worker draws the

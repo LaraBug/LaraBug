@@ -2,8 +2,11 @@
 
 namespace LaraBug\Tests;
 
+use ReflectionProperty;
 use LaraBug\Http\Client;
 use LaraBug\Requests\TraceContext;
+use LaraBug\Queue\JobDataCollector;
+use Workbench\App\Jobs\SendInvoice;
 use Workbench\App\Jobs\AwaitPayment;
 use Illuminate\Support\Facades\Queue;
 use LaraBug\Tests\Mocks\MeteredClient;
@@ -102,6 +105,19 @@ class SelfReleasedJobTest extends TestCase
         $this->assertCount(1, $records);
         $this->assertSame('released', $records[0]['status']);
         $this->assertSame(1.0, $records[0]['sample_rate']);
+    }
+
+    #[Test]
+    public function the_times_of_a_job_that_released_itself_and_then_threw_are_forgotten_when_the_next_job_starts()
+    {
+        Queue::push(new AwaitPayment(releasesFor: 60, throwsAfterwards: true));
+        Queue::push(new SendInvoice(sends: false));
+
+        $this->work();
+        $this->work();
+
+        $this->assertSame(['completed'], array_column($this->records(), 'status'));
+        $this->assertSame([], (new ReflectionProperty(JobDataCollector::class, 'attemptTimes'))->getValue());
     }
 
     protected function sampleNoCompletedJobs($app): void

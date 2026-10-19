@@ -165,6 +165,11 @@ class JobMonitor
         $this->collector->released($job, $backoff);
     }
 
+    public function forgetUnfinishedAttempts(): void
+    {
+        $this->collector->forgetAll();
+    }
+
     protected function shouldTrack(Job $job): bool
     {
         if (! ($this->config['jobs']['track_jobs'] ?? true)) {
