@@ -69,6 +69,18 @@ class CveScanCommandTest extends TestCase
     }
 
     #[Test]
+    public function it_says_so_when_the_project_is_rate_limited()
+    {
+        $client = $this->bindClient(new CveClient(429, '{"message":"Too Many Attempts."}'));
+
+        $this->artisan('larabug:scan')
+            ->expectsOutputToContain('rate limit')
+            ->assertExitCode(1);
+
+        $client->assertRequestsSent(1);
+    }
+
+    #[Test]
     public function it_reports_a_lockfile_it_cannot_read()
     {
         $this->bindClient(new CveClient());

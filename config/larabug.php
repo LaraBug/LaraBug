@@ -699,6 +699,8 @@ return [
 
         /*
         | Report buffer flush errors back to LaraBug (useful for debugging)
+        | Covers every telemetry buffer: the records any of them had to drop
+        | while a rate limit held them back are reported here too
         | Default: false
         */
         'report_buffer_errors' => env('LB_REPORT_BUFFER_ERRORS', false),
@@ -811,8 +813,10 @@ return [
         'batch_size' => env('LB_LOGS_BATCH_SIZE', 50),
 
         /*
-        | Retries on a 5xx. A refused batch (402, 403, 422) is never retried
-        | and stops collection for the rest of the process.
+        | Retries on a 5xx. A batch refused with a 403 or 422 is never retried
+        | and stops collection for the rest of the process. A 402 pauses it
+        | until the limit lifts, and a 429 keeps the batch and sends it once
+        | the rate limit window has passed.
         */
         'max_retries' => env('LB_LOGS_MAX_RETRIES', 3),
 

@@ -6,6 +6,7 @@ use Countable;
 use Throwable;
 use LaraBug\Http\Client;
 use LaraBug\Support\LimitBackoff;
+use LaraBug\Support\Concerns\RequeuesRateLimitedRecords;
 
 /**
  * In-memory event buffer for batching queue job events, inspired by Laravel
@@ -13,6 +14,8 @@ use LaraBug\Support\LimitBackoff;
  */
 class EventBuffer implements Countable
 {
+    use RequeuesRateLimitedRecords;
+
     protected array $buffer = [];
 
     protected readonly Client $client;
@@ -53,11 +56,13 @@ class EventBuffer implements Countable
 
         // The telemetry limit is reached for now. Collecting anyway would
         // only fill a buffer nobody may send.
-        if (! LimitBackoff::allows(LimitBackoff::TELEMETRY)) {
+        if (! LimitBackoff::collects(LimitBackoff::TELEMETRY)) {
             return;
         }
 
-        if (! $batchingEnabled) {
+        // Buffered during a rate limit even while load is low, so it goes out
+        // with the rest once the window passes.
+        if (! $batchingEnabled && LimitBackoff::allows(LimitBackoff::TELEMETRY)) {
             $this->sendImmediately($data);
 
             return;
@@ -97,7 +102,11 @@ class EventBuffer implements Countable
                 'job' => $data,
             ];
 
-            LimitBackoff::record($this->client->report($payload), LimitBackoff::TELEMETRY);
+            if ($this->refusedByLimit($this->client->report($payload), [$data])) {
+                return;
+            }
+
+            $this->reportDroppedRecords();
         } catch (Throwable $e) {
             // Fail silently to not break the user's application.
         }
@@ -106,6 +115,13 @@ class EventBuffer implements Countable
     public function flush(): void
     {
         if (empty($this->buffer)) {
+            return;
+        }
+
+        // Kept for the other side of the window rather than sent into it.
+        if (LimitBackoff::isRateLimited(LimitBackoff::TELEMETRY)) {
+            $this->requeue();
+
             return;
         }
 
@@ -135,12 +151,15 @@ class EventBuffer implements Countable
 
             $response = $this->client->report($payload);
 
-            // Over the telemetry limit for this billing period. Nothing
-            // more is sent until the window the server asked for has passed,
-            // and issues keep going in the meantime.
-            if (LimitBackoff::record($response, LimitBackoff::TELEMETRY)) {
+            // Over the telemetry limit for this billing period, or sending
+            // too fast. Nothing more is sent until the window the server asked
+            // for has passed, and issues keep going in the meantime. A rate
+            // limited batch waits in the buffer for the end of that window.
+            if ($this->refusedByLimit($response, $events)) {
                 return;
             }
+
+            $this->reportDroppedRecords();
 
             if ($response && method_exists($response, 'getStatusCode')) {
                 $statusCode = $response->getStatusCode();
@@ -169,27 +188,6 @@ class EventBuffer implements Countable
     }
 
     /**
-     * Report buffer errors back to LaraBug (ironic, but useful for debugging).
-     */
-    protected function reportError(Throwable $e, int $lostEvents): void
-    {
-        try {
-            if ($this->config['jobs']['report_buffer_errors'] ?? false) {
-                $this->client->report([
-                    'type' => 'buffer_error',
-                    'exception' => [
-                        'class' => $e::class,
-                        'message' => $e->getMessage(),
-                        'lost_events' => $lostEvents,
-                    ],
-                ]);
-            }
-        } catch (Throwable $ignored) {
-            // Never let error reporting break the app.
-        }
-    }
-
-    /**
      * Flush whatever is still buffered when the script ends.
      */
     protected function registerShutdownHandler(): void
@@ -206,6 +204,11 @@ class EventBuffer implements Countable
     public function count(): int
     {
         return count($this->buffer);
+    }
+
+    protected function batchSize(): int
+    {
+        return $this->batchSize;
     }
 
     public function isFull(): bool

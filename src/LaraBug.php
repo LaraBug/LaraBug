@@ -448,9 +448,10 @@ class LaraBug
 
     private function logError(array $exception): ?ResponseInterface
     {
-        // The issue limit is reached for the moment. Sending would collect
-        // another 402 and cost the application a round trip per exception,
-        // which is the worst moment to be slow. Resumes on its own.
+        // The issue limit is reached for the moment, or the account is being
+        // rate limited. Sending would collect another refusal and cost the
+        // application a round trip per exception, which is the worst moment to
+        // be slow. Resumes on its own: a rate limit within the minute.
         if (! LimitBackoff::allows(LimitBackoff::ISSUES)) {
             return null;
         }

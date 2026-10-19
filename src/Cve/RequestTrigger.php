@@ -159,9 +159,10 @@ class RequestTrigger
             return;
         }
 
-        // 402 is the issue limit for this billing period being reached. It
-        // holds off every sender of issues, not just this one, and it lifts by
-        // itself once the window passes.
+        // 402 is the issue limit for this billing period being reached, 429 the
+        // account sending too fast. Either holds off every sender of issues,
+        // not just this one, and lifts by itself once the window passes. The
+        // hash is left unsent, so the scan goes again after that.
         if (LimitBackoff::record($response, LimitBackoff::ISSUES)) {
             return;
         }

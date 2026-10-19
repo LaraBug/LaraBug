@@ -2,6 +2,14 @@
 
 All notable changes to `larabug` will be documented in this file
 
+## 4.0.0-beta.5 - 2026-10-19
+
+- A 429 from the server now holds the refused stream instead of being ignored. The hold follows `Retry-After` (seconds or an HTTP date), else `X-RateLimit-Reset`, else 30 seconds, and never lasts longer than a minute. Only the refused stream waits: exceptions keep being reported while telemetry is rate limited, and the other way round.
+- Telemetry refused with a 429 is no longer discarded. Queue jobs, log lines, requests, commands and scheduled tasks go back into their buffer, keep collecting during the hold, and are sent once it has passed. Each buffer holds at most ten batches. Past that the oldest records are dropped and, with `jobs.report_buffer_errors` on, reported as a `buffer_error` with `lost_events` once sending resumes. A web request that ends during a hold loses what it buffered rather than waiting.
+- An exception refused with a 429 holds exception reporting for the same short window, the way a 402 does for the billing limit. Exceptions raised inside that window are not sent.
+- `larabug:test` and `larabug:scan` say when the project is being rate limited.
+- A 402 behaves exactly as before.
+
 ## 4.0.0-beta.4 - 2026-10-19
 
 - Buffered queue job records are now sent once `jobs.flush_interval` has passed even while the worker sits idle. Before, the interval was only checked when the next job came in, so the tail of every burst waited for more work.
