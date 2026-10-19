@@ -2,6 +2,13 @@
 
 All notable changes to `larabug` will be documented in this file
 
+## 4.0.0-beta.8 - 2026-10-19
+
+- Without Horizon a queue job's `available_at` now comes from the payload's `createdAt`, which Laravel writes itself, plus its `delay`. Before, a job without Horizon's `pushedAt` reported the moment a worker picked it up, the same as its `reserved_at`. `pushedAt` is still preferred when it is there, and a job carrying neither still reports the moment it was picked up.
+- Laravel writes `createdAt` and `delay` into the payload from 12.11. On Laravel 11, and on 12 before 12.11, a job without Horizon still reports the moment it was picked up, and a delayed job pushed through Horizon reports its push time without the delay.
+- A job that throws and is released for a retry no longer repeats the first attempt's `reserved_at` and `available_at` when the same worker runs it again. Its next attempt's `available_at` is the release time plus the backoff, which Laravel puts on `JobReleasedAfterException` from 12.48. Before 12.48, or when another worker picks the retry up, the next attempt reports the `available_at` of the first dispatch.
+- A job that releases itself with `$this->release()` still reports the `available_at` of the first dispatch on its next attempt, since Laravel does not expose the delay it was released with.
+
 ## 4.0.0-beta.7 - 2026-10-19
 
 - A queue job's `available_at` is now when the job became due instead of when it was dispatched. For a job dispatched with a delay that is its push time plus the payload's `delay`, so a deliberately delayed job no longer looks like one that waited for a worker the whole time. A job dispatched without a delay reports its push time, as before.

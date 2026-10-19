@@ -62,9 +62,7 @@ class JobDataCollector
         if ($status === 'processing' && ! isset(static::$reservedAtCache[$jobId])) {
             $now = now();
 
-            $availableAt = isset($payload['pushedAt'])
-                ? $this->availableAt($payload['pushedAt'], $payload['delay'] ?? null)
-                : $now->toIso8601String();
+            $availableAt = static::$availableAtCache[$jobId] ?? $this->availableAtFromPayload($payload, $now);
 
             $reservedAt = $now->toIso8601String();
 
@@ -96,16 +94,53 @@ class JobDataCollector
     }
 
     /**
-     * A delayed job only became due its delay after it was pushed. pushedAt is
-     * microtime seconds, so the delay is added before it becomes a date.
+     * A job released after an exception goes back onto the queue with its
+     * payload unchanged, so only the release can say when its next attempt is
+     * due: the backoff after it. Without a backoff the next attempt reads the
+     * payload again, as an attempt picked up by another worker always does.
      */
-    protected function availableAt(mixed $pushedAt, mixed $delay): ?string
+    public function released(Job $job, ?int $backoff): void
     {
-        if (is_numeric($pushedAt) && is_numeric($delay)) {
-            return $this->convertTimestamp((float) $pushedAt + (float) $delay);
+        $jobId = $job->payload()['uuid'] ?? $job->getJobId();
+
+        unset(static::$reservedAtCache[$jobId]);
+        unset(static::$availableAtCache[$jobId]);
+
+        if ($backoff === null) {
+            return;
         }
 
-        return $this->convertTimestamp($pushedAt);
+        static::$availableAtCache[$jobId] = now()->addSeconds($backoff)->toIso8601String();
+    }
+
+    /**
+     * The dispatch time is Horizon's pushedAt, else the createdAt Laravel
+     * itself writes from 12.11. A job carrying neither is taken to be due from
+     * the moment a worker picked it up.
+     */
+    protected function availableAtFromPayload(array $payload, Carbon $now): ?string
+    {
+        $dispatchedAt = $payload['pushedAt'] ?? $payload['createdAt'] ?? null;
+
+        if ($dispatchedAt === null) {
+            return $now->toIso8601String();
+        }
+
+        return $this->availableAt($dispatchedAt, $payload['delay'] ?? null);
+    }
+
+    /**
+     * A delayed job only became due its delay after it was dispatched. The
+     * dispatch time is in seconds, so the delay is added before it becomes a
+     * date.
+     */
+    protected function availableAt(mixed $dispatchedAt, mixed $delay): ?string
+    {
+        if (is_numeric($dispatchedAt) && is_numeric($delay)) {
+            return $this->convertTimestamp((float) $dispatchedAt + (float) $delay);
+        }
+
+        return $this->convertTimestamp($dispatchedAt);
     }
 
     protected function convertTimestamp(mixed $timestamp): ?string

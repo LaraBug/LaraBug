@@ -117,6 +117,11 @@ class JobMonitor
         $this->send($data);
     }
 
+    public function trackJobReleased(Job $job, ?int $backoff): void
+    {
+        $this->collector->released($job, $backoff);
+    }
+
     protected function shouldTrack(Job $job): bool
     {
         if (! ($this->config['jobs']['track_jobs'] ?? true)) {

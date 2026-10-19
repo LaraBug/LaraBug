@@ -13,6 +13,7 @@ use Illuminate\Queue\Events\JobProcessed;
 use Illuminate\Queue\Events\JobProcessing;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Queue\Events\WorkerStopping;
+use Illuminate\Queue\Events\JobReleasedAfterException;
 
 class JobEventSubscriber
 {
@@ -38,6 +39,7 @@ class JobEventSubscriber
         $events->listen(JobProcessing::class, [$this, 'handleJobProcessing']);
         $events->listen(JobProcessed::class, [$this, 'handleJobProcessed']);
         $events->listen(JobFailed::class, [$this, 'handleJobFailed']);
+        $events->listen(JobReleasedAfterException::class, [$this, 'handleJobReleasedAfterException']);
         $events->listen(Looping::class, [$this, 'handleLooping']);
         $events->listen(WorkerStopping::class, [$this, 'handleWorkerStopping']);
     }
@@ -122,6 +124,18 @@ class JobEventSubscriber
         $this->monitor->trackJobFailed($event->job, $event->connectionName, $event->exception, $duration, $this->closeMail($event->job));
 
         unset($this->timings[$jobId]);
+    }
+
+    /**
+     * Fired when a job that threw goes back onto the queue for another attempt,
+     * which ends with neither a processed nor a failed event. The backoff is
+     * on the event from Laravel 12.48.
+     */
+    public function handleJobReleasedAfterException(JobReleasedAfterException $event): void
+    {
+        $backoff = $event->backoff ?? null;
+
+        $this->monitor->trackJobReleased($event->job, is_numeric($backoff) ? (int) $backoff : null);
     }
 
     /**
