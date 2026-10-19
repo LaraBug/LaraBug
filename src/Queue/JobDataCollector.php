@@ -117,6 +117,15 @@ class JobDataCollector
     }
 
     /**
+     * For the attempts that ended without saying so, which only the start of
+     * the next job can tell.
+     */
+    public function forgetAll(): void
+    {
+        static::$attemptTimes = [];
+    }
+
+    /**
      * A job released after an exception goes back onto the queue with its
      * payload unchanged, so only the release can say when its next attempt is
      * due: the backoff after it. Without a backoff the next attempt reads the

@@ -2,6 +2,7 @@
 
 namespace Workbench\App\Jobs;
 
+use RuntimeException;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Contracts\Queue\ShouldQueue;
 
@@ -15,6 +16,7 @@ class AwaitPayment implements ShouldQueue
 
     public function __construct(
         public int $releasesFor = 60,
+        public bool $throwsAfterwards = false,
     ) {
     }
 
@@ -22,6 +24,10 @@ class AwaitPayment implements ShouldQueue
     {
         if ($this->attempts() === 1) {
             $this->release($this->releasesFor);
+        }
+
+        if ($this->throwsAfterwards) {
+            throw new RuntimeException('Payment provider did not answer');
         }
     }
 }
