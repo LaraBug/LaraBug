@@ -118,6 +118,17 @@ class RequestBuffer implements Countable
         }
     }
 
+    /**
+     * A failure of the SDK's own work on a request record, such as an EXPLAIN
+     * the database refused. Reported the way a failed flush is, so it stays
+     * silent unless jobs.report_buffer_errors asks for it. Nothing was lost:
+     * the record goes out without what failed.
+     */
+    public function reportFailure(Throwable $e): void
+    {
+        $this->reportError($e, 0);
+    }
+
     protected function registerShutdownHandler(): void
     {
         if ($this->shutdownRegistered) {

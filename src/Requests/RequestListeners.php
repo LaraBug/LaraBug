@@ -32,6 +32,7 @@ class RequestListeners
     public function __construct(
         protected readonly RequestMonitor $monitor,
         protected readonly Sampler $sampler,
+        protected readonly ?QueryExplainer $explainer = null,
     ) {
     }
 
@@ -89,11 +90,17 @@ class RequestListeners
                 return;
             }
 
-            $this->monitor->recordQuery(
+            $index = $this->monitor->recordQuery(
                 (string) $event->sql,
                 (string) $event->connectionName,
                 (float) $event->time
             );
+
+            if ($index === null) {
+                return;
+            }
+
+            $this->explainer?->consider($index, $event);
         });
     }
 
@@ -326,6 +333,12 @@ class RequestListeners
 
     protected function guard(callable $callback): void
     {
+        // The SDK's own EXPLAIN, and the cache write claiming its interval,
+        // are not the application's work and never land on its record.
+        if ($this->explainer?->explaining()) {
+            return;
+        }
+
         try {
             $callback();
         } catch (Throwable) {

@@ -1,0 +1,5 @@
+[
+    {
+        "QUERY PLAN": "[\n  {\n    \"Plan\": {\n      \"Node Type\": \"Bitmap Heap Scan\",\n      \"Parallel Aware\": false,\n      \"Async Capable\": false,\n      \"Relation Name\": \"orders\",\n      \"Alias\": \"orders\",\n      \"Startup Cost\": 4.59,\n      \"Total Cost\": 16.09,\n      \"Plan Rows\": 40,\n      \"Plan Width\": 15,\n      \"Recheck Cond\": \"(user_id = 3)\",\n      \"Plans\": [\n        {\n          \"Node Type\": \"Bitmap Index Scan\",\n          \"Parent Relationship\": \"Outer\",\n          \"Parallel Aware\": false,\n          \"Async Capable\": false,\n          \"Index Name\": \"orders_user_id_index\",\n          \"Startup Cost\": 0.00,\n          \"Total Cost\": 4.58,\n          \"Plan Rows\": 40,\n          \"Plan Width\": 0,\n          \"Index Cond\": \"(user_id = 3)\"\n        }\n      ]\n    }\n  }\n]"
+    }
+]
