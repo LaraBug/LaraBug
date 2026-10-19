@@ -68,6 +68,12 @@ class ScanCommand extends Command
             return self::FAILURE;
         }
 
+        if ($status === 429) {
+            $this->error('This project is sending faster than its plan\'s rate limit, so the scan was refused. Try again in a minute.');
+
+            return self::FAILURE;
+        }
+
         if ($status >= 400) {
             $this->error("LaraBug returned HTTP {$status}: {$body}");
 

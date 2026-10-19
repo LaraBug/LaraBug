@@ -6,6 +6,7 @@ use Countable;
 use Throwable;
 use LaraBug\Http\Client;
 use LaraBug\Support\LimitBackoff;
+use LaraBug\Support\Concerns\RequeuesRateLimitedRecords;
 
 /**
  * Batches finished request records.
@@ -20,6 +21,8 @@ use LaraBug\Support\LimitBackoff;
  */
 class RequestBuffer implements Countable
 {
+    use RequeuesRateLimitedRecords;
+
     /** @var array<int, array<string, mixed>> */
     protected array $buffer = [];
 
@@ -49,7 +52,7 @@ class RequestBuffer implements Countable
     {
         // The telemetry limit is reached for now. Collecting anyway would
         // only fill a buffer nobody may send.
-        if (! LimitBackoff::allows(LimitBackoff::TELEMETRY)) {
+        if (! LimitBackoff::collects(LimitBackoff::TELEMETRY)) {
             return;
         }
 
@@ -63,6 +66,13 @@ class RequestBuffer implements Countable
     public function flush(): void
     {
         if ($this->buffer === []) {
+            return;
+        }
+
+        // Kept for the other side of the window rather than sent into it.
+        if (LimitBackoff::isRateLimited(LimitBackoff::TELEMETRY)) {
+            $this->requeue();
+
             return;
         }
 
@@ -84,8 +94,13 @@ class RequestBuffer implements Countable
 
         try {
             // A 402 means the telemetry limit is reached, which the backoff
-            // holds as a window rather than a flag.
-            LimitBackoff::record($this->client->reportRequests($records), LimitBackoff::TELEMETRY);
+            // holds as a window rather than a flag. A 429 is a rate limit, and
+            // the batch waits in the buffer for the end of its window.
+            if ($this->refusedByLimit($this->client->reportRequests($records), $records)) {
+                return;
+            }
+
+            $this->reportDroppedRecords();
         } catch (Throwable) {
             if ($attempt <= $this->maxRetries) {
                 // Linear, not exponential: this runs on shutdown while the
@@ -112,6 +127,11 @@ class RequestBuffer implements Countable
         $this->shutdownRegistered = true;
 
         register_shutdown_function($this->flush(...));
+    }
+
+    protected function batchSize(): int
+    {
+        return $this->batchSize;
     }
 
     public function count(): int

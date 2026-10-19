@@ -49,6 +49,9 @@ class TestCommand extends Command
                 $this->info("✓ [LaraBug] Sent exception to LaraBug with ID: {$response->id}");
             } elseif ($response === null) {
                 $this->info('✓ [LaraBug] Sent exception to LaraBug!');
+            } elseif (LimitBackoff::isRateLimited(LimitBackoff::ISSUES)) {
+                $this->error('✗ [LaraBug] This project is sending faster than its plan\'s rate limit, so the exception was refused');
+                $this->info('Reporting starts again by itself within a minute.');
             } elseif (LimitBackoff::resumesAt(LimitBackoff::ISSUES) !== null) {
                 $this->error('✗ [LaraBug] This project\'s issue limit is reached, so the exception was refused');
                 $this->info('Reporting starts again by itself once the limit lifts, no deploy needed.');

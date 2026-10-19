@@ -21,6 +21,12 @@ use Throwable;
  * or Horizon a flag would mute the application for as long as the worker lives.
  * Noticing that there is room again must not require a deploy.
  *
+ * A 429 is the other refusal held here: the account sent faster than its plan's
+ * rate limit allows. That lifts within the minute, so it is held for a short,
+ * capped window and remembered as a rate limit. The senders keep what they
+ * collect during one and send it once the window passes, where a 402 means
+ * nothing collected in the meantime could be sent anyway.
+ *
  * The state is static because the senders are several objects with several
  * lifetimes — a log buffer, a request buffer, a job buffer, the exception
  * reporter — and they are all spending against the same two limits.
@@ -43,8 +49,21 @@ class LimitBackoff
      */
     public const MAX_COOLDOWN = 3600;
 
+    /** How long to wait out a rate limit when the server does not say how long. */
+    public const DEFAULT_RATE_LIMIT_COOLDOWN = 30;
+
+    /**
+     * The longest a rate limit is waited out. The limit is per minute, so a
+     * longer ask is a mistake, and every second of it is telemetry held in
+     * memory and exceptions not reported.
+     */
+    public const MAX_RATE_LIMIT_COOLDOWN = 60;
+
     /** @var array<string, int> Stream name => epoch second at which sending may resume. */
     protected static array $resumeAt = [];
+
+    /** @var array<string, true> Streams whose current hold is a rate limit rather than a reached limit. */
+    protected static array $rateLimited = [];
 
     /**
      * May this stream be sent right now?
@@ -63,20 +82,53 @@ class LimitBackoff
 
         // The window has passed. Forgotten rather than kept around, so the next
         // refusal starts its own window from scratch.
-        unset(static::$resumeAt[$stream]);
+        unset(static::$resumeAt[$stream], static::$rateLimited[$stream]);
 
         return true;
     }
 
     /**
+     * Is this stream held back by a rate limit, as opposed to a reached limit?
+     */
+    public static function isRateLimited(string $stream): bool
+    {
+        if (static::allows($stream)) {
+            return false;
+        }
+
+        return isset(static::$rateLimited[$stream]);
+    }
+
+    /**
+     * May this stream be collected right now, even if it cannot be sent yet?
+     *
+     * Everything but a reached limit: a rate limit lifts within the minute, so
+     * what arrives in the meantime is kept for when it does.
+     */
+    public static function collects(string $stream): bool
+    {
+        if (static::allows($stream)) {
+            return true;
+        }
+
+        return static::isRateLimited($stream);
+    }
+
+    /**
+     * Is this response the server saying we are sending too fast?
+     */
+    public static function isRateLimitResponse(mixed $response): bool
+    {
+        return static::status($response) === 429;
+    }
+
+    /**
      * Note a refusal, if that is what this response is.
      *
-     * Returns true when the response was a 402, so a caller can tell a limit
-     * that has been reached apart from the answers it already handles. That
-     * stays the
-     * answer even when the server asked for no wait at all, because the batch
-     * in hand was refused either way. Every other status is somebody else's
-     * business.
+     * Returns true when the response was a 402 or a 429, so a caller can tell a
+     * refusal apart from the answers it already handles. That stays the answer
+     * even when the server asked for no wait at all, because the batch in hand
+     * was refused either way. Every other status is somebody else's business.
      *
      * @param  mixed  $response  The response as the senders hold it: a PSR-7
      *                           response, or null when the request never got off
@@ -87,15 +139,15 @@ class LimitBackoff
      */
     public static function record(mixed $response, string $stream): bool
     {
-        if (! $response || ! method_exists($response, 'getStatusCode')) {
-            return false;
+        $status = static::status($response);
+
+        if ($status === 429) {
+            static::holdForRateLimit(static::refusedStream($response, $stream), static::rateLimitCooldown($response));
+
+            return true;
         }
 
-        try {
-            if ($response->getStatusCode() !== 402) {
-                return false;
-            }
-        } catch (Throwable) {
+        if ($status !== 402) {
             return false;
         }
 
@@ -117,6 +169,22 @@ class LimitBackoff
     public static function hold(string $stream, int $seconds): void
     {
         static::$resumeAt[$stream] = time() + min(self::MAX_COOLDOWN, max(1, $seconds));
+
+        unset(static::$rateLimited[$stream]);
+    }
+
+    /**
+     * Stop sending this stream while a rate limit lasts, never less than one
+     * second and never more than MAX_RATE_LIMIT_COOLDOWN.
+     *
+     * A Retry-After of zero still holds the one second. Unlike a 402, nothing
+     * is given up on a 429, so asking straight back would only resend the
+     * same batch into the same limit.
+     */
+    public static function holdForRateLimit(string $stream, int $seconds): void
+    {
+        static::$resumeAt[$stream] = time() + min(self::MAX_RATE_LIMIT_COOLDOWN, max(1, $seconds));
+        static::$rateLimited[$stream] = true;
     }
 
     /**
@@ -137,12 +205,13 @@ class LimitBackoff
     public static function clear(): void
     {
         static::$resumeAt = [];
+        static::$rateLimited = [];
     }
 
     /**
      * Which limit the server says has been reached.
      *
-     * The 402 body carries a "stream" key. A body that names neither stream, or
+     * A 402 body carries a "stream" key. A body that names neither stream, or
      * no body at all, leaves the one that was being sent: better to mute the
      * stream we know was refused than to guess at the other one.
      */
@@ -155,43 +224,106 @@ class LimitBackoff
     }
 
     /**
-     * How long the server asked for, in seconds. Zero means it asked for no
-     * wait at all, which is not the same as it having asked for nothing.
-     *
-     * Retry-After carries either a count of seconds or an HTTP date, and both
-     * forms are read here. A date already past reads as zero, the same as the
-     * server sending one. Anything we cannot make sense of falls back to five
-     * minutes, since a limit that has been reached does not lift within the second.
+     * How long a 402 asked us to wait. Anything we cannot make sense of falls
+     * back to five minutes, since a limit that has been reached does not lift
+     * within the second.
      */
     protected static function cooldown(object $response): int
     {
-        try {
-            if (! method_exists($response, 'getHeaderLine')) {
-                return self::DEFAULT_COOLDOWN;
-            }
+        return static::retryAfter($response) ?? self::DEFAULT_COOLDOWN;
+    }
 
-            $retryAfter = trim($response->getHeaderLine('Retry-After'));
+    /**
+     * How long a 429 asked us to wait: Retry-After, else X-RateLimit-Reset,
+     * else a short default, since a rate limit lifts within the minute.
+     */
+    protected static function rateLimitCooldown(object $response): int
+    {
+        return static::retryAfter($response)
+            ?? static::rateLimitReset($response)
+            ?? self::DEFAULT_RATE_LIMIT_COOLDOWN;
+    }
 
-            if ($retryAfter === '') {
-                return self::DEFAULT_COOLDOWN;
-            }
+    /**
+     * How long the server asked for, in seconds, or null when it did not say
+     * in a form we can read. Zero means it asked for no wait at all, which is
+     * not the same as it having asked for nothing.
+     *
+     * Retry-After carries either a count of seconds or an HTTP date, and both
+     * forms are read here. A date already past reads as zero, the same as the
+     * server sending one.
+     */
+    protected static function retryAfter(object $response): ?int
+    {
+        $retryAfter = static::header($response, 'Retry-After');
 
-            if (ctype_digit($retryAfter)) {
-                return (int) $retryAfter;
-            }
-
-            $until = strtotime($retryAfter);
-
-            if ($until === false) {
-                return self::DEFAULT_COOLDOWN;
-            }
-
-            return max(0, $until - time());
-        } catch (Throwable) {
-            // A header we could not read is a header the server did not send.
+        if ($retryAfter === '') {
+            return null;
         }
 
-        return self::DEFAULT_COOLDOWN;
+        if (ctype_digit($retryAfter)) {
+            return (int) $retryAfter;
+        }
+
+        $until = strtotime($retryAfter);
+
+        if ($until === false) {
+            return null;
+        }
+
+        return max(0, $until - time());
+    }
+
+    /**
+     * Seconds until the rate limit window resets, or null when the header is
+     * missing or unreadable.
+     *
+     * Laravel sends the epoch second the window resets at, and some servers
+     * send the seconds left instead. No wait we would honour is anywhere near
+     * a billion seconds, so a value that large is read as a timestamp.
+     */
+    protected static function rateLimitReset(object $response): ?int
+    {
+        $reset = static::header($response, 'X-RateLimit-Reset');
+
+        if (! ctype_digit($reset)) {
+            return null;
+        }
+
+        $seconds = (int) $reset;
+
+        if ($seconds >= 1_000_000_000) {
+            return max(0, $seconds - time());
+        }
+
+        return $seconds;
+    }
+
+    protected static function header(object $response, string $name): string
+    {
+        try {
+            if (! method_exists($response, 'getHeaderLine')) {
+                return '';
+            }
+
+            return trim($response->getHeaderLine($name));
+        } catch (Throwable) {
+            // A header we could not read is a header the server did not send.
+            return '';
+        }
+    }
+
+    protected static function status(mixed $response): ?int
+    {
+        if (! $response || ! method_exists($response, 'getStatusCode')) {
+            return null;
+        }
+
+        try {
+            return $response->getStatusCode();
+        } catch (Throwable) {
+            return null;
+        }
     }
 
     /**

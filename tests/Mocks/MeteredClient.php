@@ -49,6 +49,25 @@ class MeteredClient extends \LaraBug\Http\Client
         ));
     }
 
+    /**
+     * Queue a "you are sending too fast" answer, shaped like Laravel's
+     * throttle middleware sends it.
+     *
+     * @param  string|null  $retryAfter  The Retry-After header, verbatim.
+     * @param  string|null  $reset  The X-RateLimit-Reset header, verbatim.
+     */
+    public function willRateLimit(?string $retryAfter = null, ?string $reset = null): static
+    {
+        $headers = array_filter([
+            'Retry-After' => $retryAfter,
+            'X-RateLimit-Reset' => $reset,
+            'X-RateLimit-Limit' => '60',
+            'X-RateLimit-Remaining' => '0',
+        ], fn (?string $value) => $value !== null);
+
+        return $this->willAnswer(new Response(429, $headers, json_encode(['message' => 'Too Many Attempts.'])));
+    }
+
     public function willRespondWith(int $status): static
     {
         return $this->willAnswer(new Response($status, [], '{}'));
