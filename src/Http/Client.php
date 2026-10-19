@@ -131,6 +131,34 @@ class Client
     }
 
     /**
+     * Report how much was waiting on each queue when the scheduler last looked.
+     *
+     * @param  array<int, array<string, mixed>>  $samples
+     */
+    public function reportQueueDepth(array $samples): ?ResponseInterface
+    {
+        try {
+            return $this->getGuzzleHttpClient()->request('POST', config('larabug.server'), [
+                'headers' => $this->headers(),
+                'json' => [
+                    'type' => 'queue_depth_batch',
+                    'project' => $this->project,
+                    'count' => count($samples),
+                    'samples' => $samples,
+                ],
+                'verify' => config('larabug.verify_ssl'),
+                // This runs every minute from the scheduler, and a server that
+                // has gone away should not hold the schedule open behind it.
+                'timeout' => 5,
+            ]);
+        } catch (RequestException $e) {
+            return $e->getResponse();
+        } catch (Exception) {
+            return null;
+        }
+    }
+
+    /**
      * The traceparent is what lets the receiving end continue this execution's
      * story rather than start one of its own. Built per call, because its span
      * names this one request.

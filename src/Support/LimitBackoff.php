@@ -8,10 +8,10 @@ use Throwable;
  * The "do not send until" clock, kept per stream.
  *
  * The server meters two limits apart: issues (exceptions and CVE findings)
- * and telemetry (requests, queries, logs, cache, mail, queue jobs, commands and
- * scheduled tasks). It refuses them independently with a 402, because an
- * application that has reached its telemetry limit must still be able to
- * report the exception that took it down. A backoff on one stream therefore
+ * and telemetry (requests, queries, logs, cache, mail, queue jobs, queue depth,
+ * commands and scheduled tasks). It refuses them independently with a 402,
+ * because an application that has reached its telemetry limit must still be
+ * able to report the exception that took it down. A backoff on one stream therefore
  * never touches the other.
  *
  * A 402 is remembered as a timestamp rather than a flag, because "over this
@@ -27,6 +27,11 @@ use Throwable;
  * collect during one and send it once the window passes, where a 402 means
  * nothing collected in the meantime could be sent anyway.
  *
+ * The scheduled queue depth sampler respects both, but runs as its own process
+ * every minute, so a window it records ends with that process. Unlike the
+ * buffers it keeps nothing back during a rate limit: the next minute measures
+ * again, and a stale sample is worth less than a fresh one.
+ *
  * The state is static because the senders are several objects with several
  * lifetimes — a log buffer, a request buffer, a job buffer, the exception
  * reporter — and they are all spending against the same two limits.
@@ -36,7 +41,7 @@ class LimitBackoff
     /** Exceptions and CVE findings. */
     public const ISSUES = 'issues';
 
-    /** Requests, queries, logs, cache, mail, queue jobs, commands, scheduled tasks. */
+    /** Requests, queries, logs, cache, mail, queue jobs, queue depth, commands, scheduled tasks. */
     public const TELEMETRY = 'telemetry';
 
     /** How long to stay quiet when the server does not say how long. */
