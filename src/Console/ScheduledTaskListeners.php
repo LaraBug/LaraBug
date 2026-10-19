@@ -50,6 +50,7 @@ class ScheduledTaskListeners
             // Each task is its own unit of work, so it gets its own trace, the
             // same as a queued job or a command.
             TraceContext::reset();
+            TraceContext::id();
 
             $task = $event->task ?? null;
 

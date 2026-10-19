@@ -21,6 +21,7 @@ use LaraBug\Console\CommandBuffer;
 use LaraBug\Logger\LaraBugHandler;
 use LaraBug\Queue\JobTracePayload;
 use LaraBug\Requests\RequestBuffer;
+use LaraBug\Requests\PropagateTrace;
 use LaraBug\Requests\RequestMonitor;
 use Illuminate\Contracts\Http\Kernel;
 use Illuminate\Support\Facades\Blade;
@@ -40,6 +41,7 @@ use LaraBug\Console\ScheduledTaskListeners;
 use LaraBug\Http\Middleware\CaptureRequest;
 use Illuminate\Foundation\Bus\PendingDispatch;
 use Illuminate\Contracts\Debug\ExceptionHandler;
+use Illuminate\Http\Client\Factory as HttpFactory;
 use Illuminate\Support\ServiceProvider as BaseServiceProvider;
 
 class ServiceProvider extends BaseServiceProvider
@@ -112,6 +114,14 @@ class ServiceProvider extends BaseServiceProvider
                 // differently, simply does not get request monitoring.
             }
         }
+
+        // The other half of the traceparent CaptureRequest reads: the
+        // application's own calls carry this execution's trace, to the hosts
+        // it was told to send it to. Not gated on request monitoring, because
+        // a job or a command calling another application is a parent too.
+        $this->callAfterResolving(HttpFactory::class, function (HttpFactory $factory) {
+            $factory->globalRequestMiddleware(new PropagateTrace());
+        });
 
         $this->registerLivewireListeners();
 
