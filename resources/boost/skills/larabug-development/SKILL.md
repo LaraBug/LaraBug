@@ -52,6 +52,7 @@ Read the config file before changing behaviour. Every key documents what it does
 | Livewire components | on | `LB_TRACK_LIVEWIRE` |
 | CVE scanning | on | `LB_CVE_ENABLED` |
 | Logs | off | name the `larabug-logs` channel in your log stack |
+| Deprecations | follows logs | `LB_LOG_DEPRECATIONS` |
 | HTTP requests | off | `LB_TRACK_REQUESTS` |
 | Artisan commands | off | `LB_TRACK_COMMANDS` |
 | Scheduled tasks | off | `LB_TRACK_SCHEDULED_TASKS` |
@@ -214,6 +215,17 @@ LB_LOGS_LEVEL=info
 ```
 
 Logs run at far higher volume than exceptions and count against the plan, so `debug` from production is rarely what anyone wants. Defining your own channel called `larabug-logs` overrides the package's.
+
+### Deprecations
+
+Laravel writes PHP and Laravel deprecations to a channel of their own (`LOG_DEPRECATIONS_CHANNEL`), which discards them unless the application names one. The package points that channel at LaraBug. If the application already sends deprecations somewhere, that destination keeps them and LaraBug is stacked next to it. `LOG_DEPRECATIONS_TRACE` works as it does in Laravel.
+
+A deprecation fires on every call, so each one is sent the first time it occurs in a process and after that at most once an hour, with the number of occurrences it stands for. They travel with the other log lines as warnings on the `deprecations` channel and count against the same allowance. They are on whenever logs are:
+
+```
+LB_LOG_DEPRECATIONS=false
+LB_LOG_DEPRECATIONS_INTERVAL=3600
+```
 
 ## CVE scanning
 

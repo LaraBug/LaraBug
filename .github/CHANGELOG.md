@@ -2,6 +2,13 @@
 
 All notable changes to `larabug` will be documented in this file
 
+## 4.0.0-beta.14 - 2026-10-19
+
+- PHP and Laravel deprecations are now shipped to LaraBug. Laravel writes them to the channel named by `logging.deprecations.channel` (`LOG_DEPRECATIONS_CHANNEL`), which is null by default, so they were discarded before the log stack ever saw them. When that setting is null, `'null'` or names a channel that does not exist, it now points at the package's `larabug-deprecations` channel. When it names a channel, that channel keeps writing and LaraBug is stacked next to it. A channel the application defines as `logging.channels.deprecations` itself is extended the same way. `logging.deprecations.trace` is left to Laravel, and a deprecation logged with its trace carries it in `context.trace`, with paths relative to the application.
+- A deprecation fires on every call, so it is not shipped once per occurrence. The first occurrence of each one in a process is sent, and after that at most one record per `logs.deprecations.interval` seconds (3600 by default) carrying the number of occurrences it stands for. A queue worker sends what it coalesced from its loop once the interval has passed, and all of it when it stops. Every process sends the rest when it shuts down.
+- Deprecation records go through the `logs_batch` stream as warnings on the `deprecations` channel, with the message stripped of Laravel's file and line. `extra.larabug_deprecation` carries the `fingerprint` (md5 of message, file and line), the `file` relative to the application (a package keeps its `vendor/` path), the `line`, the `count` and the `source`. The source is `php` for a deprecation raised by PHP and handed over by Laravel's error handler, and `laravel` for a line written to the deprecations channel directly.
+- They count against the same telemetry allowance as other log lines. `LB_LOG_DEPRECATIONS=false` turns them off, and they follow `LB_LOGS_ENABLED` otherwise. A deprecations channel that is a stack including `larabug-logs` no longer ships them through it, so they are never sent once per occurrence as ordinary lines.
+
 ## 4.0.0-beta.13 - 2026-10-19
 
 - Slow SELECTs can now carry a summary of their query plan, so the server can tell a statement that scans a whole table for want of an index from one that is merely slow. This is opt-in and off by default: set `LB_QUERY_EXPLAIN=true` (`queries.explain.enabled`). When on, LaraBug runs plain `EXPLAIN` on MySQL and MariaDB, and `EXPLAIN (FORMAT JSON)` on Postgres, against the same connection with the original bindings. It never runs `EXPLAIN ANALYZE`, so the query is not executed again. Other drivers are never explained.
