@@ -2,6 +2,12 @@
 
 All notable changes to `larabug` will be documented in this file
 
+## 4.0.0-beta.7 - 2026-10-19
+
+- A queue job's `available_at` is now when the job became due instead of when it was dispatched. For a job dispatched with a delay that is its push time plus the payload's `delay`, so a deliberately delayed job no longer looks like one that waited for a worker the whole time. A job dispatched without a delay reports its push time, as before.
+- The push time is the payload's `pushedAt`, which Horizon writes. Without it `available_at` is still the moment a worker picked the job up.
+- A job released back onto the queue keeps its original payload, so its later attempts report the `available_at` of the first dispatch, not the end of the release backoff.
+
 ## 4.0.0-beta.6 - 2026-10-19
 
 - Queue depth is now sampled from the scheduler once a minute by `larabug:queue-depth` and sent as a `queue_depth_batch`. Each sample carries the pending, delayed and reserved counts and when the oldest pending job was queued, so a queue nobody drains shows up even though no worker reports on it. The finer counts are null on Laravel versions whose queues do not provide them.

@@ -56,14 +56,14 @@ class JobDataCollector
             'created_at' => now()->toIso8601String(),
         ];
 
-        // available_at (when the job was pushed) and reserved_at (when a worker
+        // available_at (when the job became due) and reserved_at (when a worker
         // picked it up) are set on the first processing event and cached, so
         // completed/failed events report the same values.
         if ($status === 'processing' && ! isset(static::$reservedAtCache[$jobId])) {
             $now = now();
 
             $availableAt = isset($payload['pushedAt'])
-                ? $this->convertTimestamp($payload['pushedAt'])
+                ? $this->availableAt($payload['pushedAt'], $payload['delay'] ?? null)
                 : $now->toIso8601String();
 
             $reservedAt = $now->toIso8601String();
@@ -93,6 +93,19 @@ class JobDataCollector
         }
 
         return array_merge($data, $extra);
+    }
+
+    /**
+     * A delayed job only became due its delay after it was pushed. pushedAt is
+     * microtime seconds, so the delay is added before it becomes a date.
+     */
+    protected function availableAt(mixed $pushedAt, mixed $delay): ?string
+    {
+        if (is_numeric($pushedAt) && is_numeric($delay)) {
+            return $this->convertTimestamp((float) $pushedAt + (float) $delay);
+        }
+
+        return $this->convertTimestamp($pushedAt);
     }
 
     protected function convertTimestamp(mixed $timestamp): ?string
