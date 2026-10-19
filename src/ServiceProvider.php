@@ -31,6 +31,7 @@ use LaraBug\Logger\LaraBugLogHandler;
 use LaraBug\Queue\JobEventSubscriber;
 use Illuminate\Foundation\AliasLoader;
 use LaraBug\Requests\RequestListeners;
+use LaraBug\Commands\QueueDepthCommand;
 use LaraBug\Livewire\LivewireListeners;
 use Illuminate\Console\Scheduling\Event;
 use LaraBug\Console\ScheduledTaskBuffer;
@@ -63,6 +64,7 @@ class ServiceProvider extends BaseServiceProvider
         $this->commands([
             TestCommand::class,
             ScanCommand::class,
+            QueueDepthCommand::class,
         ]);
 
         $this->mapLaraBugApiRoutes();
@@ -120,6 +122,21 @@ class ServiceProvider extends BaseServiceProvider
             // that dispatched it has ended, so the trace it came out of is
             // written into the job's payload while that execution is still up.
             JobTracePayload::register();
+        }
+
+        // A queue whose workers have stopped is one no worker reports on, so its
+        // depth is read from the scheduler instead. On one server, because the
+        // queues are shared and one sample a minute says all there is to say.
+        // Released after five minutes rather than a day, so a sampler that died
+        // holding the lock does not stop sampling until tomorrow.
+        if (config('larabug.jobs.depth.enabled', true)) {
+            $this->app->booted(function () {
+                $this->app->make(Schedule::class)
+                    ->command('larabug:queue-depth')
+                    ->everyMinute()
+                    ->withoutOverlapping(5)
+                    ->onOneServer();
+            });
         }
 
         // Command monitoring. The inverse of request monitoring: a command runs

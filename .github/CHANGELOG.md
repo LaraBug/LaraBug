@@ -2,6 +2,12 @@
 
 All notable changes to `larabug` will be documented in this file
 
+## 4.0.0-beta.6 - 2026-10-19
+
+- Queue depth is now sampled from the scheduler once a minute by `larabug:queue-depth` and sent as a `queue_depth_batch`. Each sample carries the pending, delayed and reserved counts and when the oldest pending job was queued, so a queue nobody drains shows up even though no worker reports on it. The finer counts are null on Laravel versions whose queues do not provide them.
+- The default connection's queue is measured, along with every queue Horizon supervises in the current environment. `jobs.depth.queues` takes a list of `connection:queue` strings that replaces that discovery. `LB_QUEUE_DEPTH=false` turns it off, and it follows `LB_TRACK_JOBS` otherwise. It needs `schedule:run` to be running.
+- The command exits with a failure code when the samples could not be sent. A server that does not know the type yet answers 422, which is not treated as a failure.
+
 ## 4.0.0-beta.5 - 2026-10-19
 
 - A 429 from the server now holds the refused stream instead of being ignored. The hold follows `Retry-After` (seconds or an HTTP date), else `X-RateLimit-Reset`, else 30 seconds, and never lasts longer than a minute. Only the refused stream waits: exceptions keep being reported while telemetry is rate limited, and the other way round.

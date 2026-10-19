@@ -48,6 +48,7 @@ Read the config file before changing behaviour. Every key documents what it does
 |---|---|---|
 | Exceptions | on | `larabug.register_exception_handler` |
 | Queue jobs | on | `LB_TRACK_JOBS` |
+| Queue depth | follows queue jobs | `LB_QUEUE_DEPTH`, needs `schedule:run` |
 | Livewire components | on | `LB_TRACK_LIVEWIRE` |
 | CVE scanning | on | `LB_CVE_ENABLED` |
 | Logs | off | name the `larabug-logs` channel in your log stack |
@@ -152,6 +153,8 @@ dispatch_tracked(new ProcessPayment($order));
 
 Filter volume with `jobs.only_queues`, `jobs.ignore_queues` and `jobs.ignore_jobs` before reaching for `sample_rate`.
 
+A queue whose workers have stopped sends no job records at all, so the scheduler also measures queue depth once a minute (`jobs.depth`). It measures the default connection's queue and every queue Horizon supervises in the current environment. Set `jobs.depth.queues` to a list of `connection:queue` strings, such as `['redis:default', 'redis:emails']`, to measure exactly those instead.
+
 ## Livewire
 
 On by default, and free in an application that does not have Livewire installed: nothing loads a Livewire class or runs unless the container has one.
@@ -199,6 +202,7 @@ The client posts to `/larabug-api/javascript-report`, which every visitor can re
 
 - `php artisan larabug:test` sends a deliberate exception to verify credentials and connectivity. Reach for this first when reporting appears broken.
 - `php artisan larabug:scan` runs a CVE scan now.
+- `php artisan larabug:queue-depth --show` prints the queue depth samples instead of sending them.
 
 ## Testing
 

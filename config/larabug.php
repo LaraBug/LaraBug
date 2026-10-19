@@ -542,6 +542,42 @@ return [
 
         /*
         |--------------------------------------------------------------------------
+        | Queue Depth
+        |--------------------------------------------------------------------------
+        |
+        | Everything above is reported by a worker touching a job, so a queue
+        | whose workers have stopped sends nothing at all. Once a minute the
+        | scheduler measures each queue instead: how many jobs are ready,
+        | delayed and reserved, and when the oldest ready one was queued.
+        |
+        | Runs from the scheduler, so it needs `schedule:run` to be running. One
+        | small request a minute, sent from one server when the cache can hold
+        | a lock across them.
+        |
+        */
+        'depth' => [
+            /*
+            | Enable or disable queue depth sampling
+            | Set LB_QUEUE_DEPTH=false to stop sampling
+            | Default: follows track_jobs
+            */
+            'enabled' => env('LB_QUEUE_DEPTH', env('LB_TRACK_JOBS', true)),
+
+            /*
+            | Which queues to measure, as connection:queue strings
+            | Example: ['redis:default', 'redis:emails']
+            | Left null the default connection's own queue is measured, along
+            | with every queue Horizon supervises in this environment
+            | A list replaces that discovery entirely
+            | Connections that run jobs immediately (sync, null, deferred,
+            | background) have no queue to measure and are skipped
+            | Default: null
+            */
+            'queues' => null,
+        ],
+
+        /*
+        |--------------------------------------------------------------------------
         | Dynamic Batching (Automatic Load-Based)
         |--------------------------------------------------------------------------
         |

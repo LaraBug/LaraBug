@@ -93,6 +93,11 @@ class MeteredClient extends \LaraBug\Http\Client
         return $this->answer(['type' => 'scheduled_tasks_batch', 'scheduled_tasks' => $records]);
     }
 
+    public function reportQueueDepth(array $samples): Response
+    {
+        return $this->answer(['type' => 'queue_depth_batch', 'samples' => $samples]);
+    }
+
     /**
      * @return array<int, array<string, mixed>>
      */
