@@ -182,7 +182,13 @@ class JobAvailableAtTest extends TestCase
 
     private function collect(array $payload, string $status): array
     {
-        return (new JobDataCollector(config('larabug')))->collect($this->job($payload), 'redis', $status);
+        $collector = new JobDataCollector(config('larabug'));
+
+        if ($status === 'processing') {
+            $collector->started($this->job($payload));
+        }
+
+        return $collector->collect($this->job($payload), 'redis', $status);
     }
 
     private function job(array $payload): SyncJob

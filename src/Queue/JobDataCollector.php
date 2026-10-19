@@ -15,14 +15,20 @@ class JobDataCollector
     protected readonly DataFilter $filterer;
 
     /**
-     * Timestamps by job id, cached for the lifetime of the worker process.
+     * When the current attempt of each job became due and was picked up, by
+     * job id. Recorded when the attempt starts and forgotten when it ends.
+     *
+     * @var array<string, array{available_at: ?string, reserved_at: string}>
+     */
+    protected static array $attemptTimes = [];
+
+    /**
+     * When the next attempt of a job released after an exception is due, by
+     * job id, kept until that attempt starts.
      *
      * @var array<string, string>
      */
-    protected static array $reservedAtCache = [];
-
-    /** @var array<string, string> */
-    protected static array $availableAtCache = [];
+    protected static array $nextDueAt = [];
 
     public function __construct(array $config)
     {
@@ -56,41 +62,58 @@ class JobDataCollector
             'created_at' => now()->toIso8601String(),
         ];
 
-        // available_at (when the job became due) and reserved_at (when a worker
-        // picked it up) are set on the first processing event and cached, so
-        // completed/failed events report the same values.
-        if ($status === 'processing' && ! isset(static::$reservedAtCache[$jobId])) {
-            $now = now();
-
-            $availableAt = static::$availableAtCache[$jobId] ?? $this->availableAtFromPayload($payload, $now);
-
-            $reservedAt = $now->toIso8601String();
-
-            static::$availableAtCache[$jobId] = $availableAt;
-            static::$reservedAtCache[$jobId] = $reservedAt;
-
-            $data['available_at'] = $availableAt;
-            $data['reserved_at'] = $reservedAt;
-        } elseif (isset(static::$reservedAtCache[$jobId])) {
-            $data['available_at'] = static::$availableAtCache[$jobId] ?? null;
-            $data['reserved_at'] = static::$reservedAtCache[$jobId];
+        if (isset(static::$attemptTimes[$jobId])) {
+            $data['available_at'] = static::$attemptTimes[$jobId]['available_at'];
+            $data['reserved_at'] = static::$attemptTimes[$jobId]['reserved_at'];
         }
 
         if ($status === 'completed') {
             $data['completed_at'] = now()->toIso8601String();
-
-            unset(static::$reservedAtCache[$jobId]);
-            unset(static::$availableAtCache[$jobId]);
         }
 
         if ($status === 'failed') {
             $data['failed_at'] = now()->toIso8601String();
+        }
 
-            unset(static::$reservedAtCache[$jobId]);
-            unset(static::$availableAtCache[$jobId]);
+        // A job that released itself goes back onto the queue with a delay
+        // Laravel does not keep, so all that is known of when it is due again
+        // is when it was released.
+        if ($status === 'released') {
+            $data['available_at'] = now()->toIso8601String();
         }
 
         return array_merge($data, $extra);
+    }
+
+    /**
+     * Records when the attempt that is starting became due and was picked up,
+     * so every record of the attempt carries the same times. An attempt always
+     * starts fresh: only the backoff of a release after an exception carries
+     * over from the attempt before it.
+     */
+    public function started(Job $job): void
+    {
+        $jobId = $this->jobId($job);
+
+        $now = now();
+
+        $availableAt = static::$nextDueAt[$jobId] ?? $this->availableAtFromPayload($job->payload() ?? [], $now);
+
+        unset(static::$nextDueAt[$jobId]);
+
+        static::$attemptTimes[$jobId] = [
+            'available_at' => $availableAt,
+            'reserved_at' => $now->toIso8601String(),
+        ];
+    }
+
+    /**
+     * Called whenever an attempt ends, reported or not, so a long running
+     * worker does not keep the times of every job it ever ran.
+     */
+    public function forget(Job $job): void
+    {
+        unset(static::$attemptTimes[$this->jobId($job)]);
     }
 
     /**
@@ -101,16 +124,26 @@ class JobDataCollector
      */
     public function released(Job $job, ?int $backoff): void
     {
-        $jobId = $job->payload()['uuid'] ?? $job->getJobId();
-
-        unset(static::$reservedAtCache[$jobId]);
-        unset(static::$availableAtCache[$jobId]);
+        $this->forget($job);
 
         if ($backoff === null) {
             return;
         }
 
-        static::$availableAtCache[$jobId] = now()->addSeconds($backoff)->toIso8601String();
+        static::$nextDueAt[$this->jobId($job)] = now()->addSeconds($backoff)->toIso8601String();
+
+        // The retry may well be picked up by another worker, leaving its due
+        // time here unclaimed, so only the most recent releases are kept.
+        $maxPendingReleases = 1000;
+
+        if (count(static::$nextDueAt) > $maxPendingReleases) {
+            static::$nextDueAt = array_slice(static::$nextDueAt, -$maxPendingReleases, preserve_keys: true);
+        }
+    }
+
+    protected function jobId(Job $job): string
+    {
+        return (string) ($job->payload()['uuid'] ?? $job->getJobId());
     }
 
     /**
