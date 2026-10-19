@@ -220,11 +220,12 @@ Logs run at far higher volume than exceptions and count against the plan, so `de
 
 Laravel writes PHP and Laravel deprecations to a channel of their own (`LOG_DEPRECATIONS_CHANNEL`), which discards them unless the application names one. The package points that channel at LaraBug. If the application already sends deprecations somewhere, that destination keeps them and LaraBug is stacked next to it. `LOG_DEPRECATIONS_TRACE` works as it does in Laravel.
 
-A deprecation fires on every call, so each one is sent the first time it occurs in a process and after that at most once an hour, with the number of occurrences it stands for. They travel with the other log lines as warnings on the `deprecations` channel and count against the same allowance. They are on whenever logs are:
+A deprecation fires on every call, so each one is sent at most once an hour for the whole application, with the number of occurrences it stands for. The count is kept in the default cache store across requests and processes. With an `array` or `null` store each process sends its own record, so point `LB_LOG_DEPRECATIONS_CACHE_STORE` at a shared store if the default is not one. They travel with the other log lines as warnings on the `deprecations` channel and count against the same allowance. They are on whenever logs are:
 
 ```
 LB_LOG_DEPRECATIONS=false
 LB_LOG_DEPRECATIONS_INTERVAL=3600
+LB_LOG_DEPRECATIONS_CACHE_STORE=redis
 ```
 
 ## CVE scanning

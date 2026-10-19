@@ -2,13 +2,16 @@
 
 namespace LaraBug\Tests;
 
+use Mockery;
 use ErrorException;
-use ReflectionProperty;
+use RuntimeException;
 use LaraBug\Http\Client;
 use LaraBug\ServiceProvider;
 use LaraBug\Logger\LogBuffer;
+use Illuminate\Cache\Repository;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Queue\Events\Looping;
+use Illuminate\Support\Facades\Cache;
 use LaraBug\Logger\DeprecationBuffer;
 use LaraBug\Tests\Mocks\LaraBugClient;
 use PHPUnit\Framework\Attributes\Test;
@@ -265,7 +268,7 @@ class DeprecationShippingTest extends TestCase
             $this->deprecate('Old thing is deprecated', base_path('app/Legacy.php'), 12);
         }
 
-        $this->intervalHasPassed();
+        $this->travel(3600)->seconds();
 
         $this->deprecate('Old thing is deprecated', base_path('app/Legacy.php'), 12);
         $this->app[LogBuffer::class]->flush();
@@ -280,7 +283,7 @@ class DeprecationShippingTest extends TestCase
             $this->deprecate('Old thing is deprecated', base_path('app/Legacy.php'), 12);
         }
 
-        $this->intervalHasPassed();
+        $this->travel(3600)->seconds();
 
         event(new Looping('redis', 'default'));
 
@@ -315,7 +318,7 @@ class DeprecationShippingTest extends TestCase
     }
 
     #[Test]
-    public function a_line_written_to_the_channel_directly_comes_from_laravel()
+    public function a_line_written_to_the_channel_directly_is_located_at_its_caller()
     {
         $line = __LINE__ + 1;
         Log::channel('larabug-deprecations')->warning('Pass a string instead');
@@ -323,9 +326,146 @@ class DeprecationShippingTest extends TestCase
 
         $deprecation = $this->records()[0]['extra']['larabug_deprecation'];
 
-        $this->assertSame('laravel', $deprecation['source']);
+        $this->assertSame('php', $deprecation['source']);
         $this->assertSame('DeprecationShippingTest.php', $deprecation['file']);
         $this->assertSame($line, $deprecation['line']);
+    }
+
+    #[Test]
+    public function a_deprecation_repeated_across_requests_is_sent_once_per_interval()
+    {
+        $this->shareTheCache();
+
+        $this->request(3);
+        $this->request(2);
+
+        $this->assertSame([1], $this->counts());
+
+        $this->travel(3600)->seconds();
+
+        $this->request(1);
+
+        $this->assertSame([1, 5], $this->counts());
+    }
+
+    #[Test]
+    public function a_request_that_repeats_a_deprecation_sends_one_record()
+    {
+        $this->shareTheCache();
+
+        $this->request(50);
+        $this->deprecations()->flush();
+
+        $this->assertSame([1], $this->counts());
+    }
+
+    #[Test]
+    public function a_worker_that_takes_the_lock_sends_what_requests_counted()
+    {
+        $this->shareTheCache();
+
+        $this->request(2);
+
+        $this->newProcess();
+
+        foreach (range(1, 3) as $occurrence) {
+            $this->deprecate('Old thing is deprecated', base_path('app/Legacy.php'), 12);
+        }
+
+        event(new Looping('redis', 'default'));
+
+        $this->assertSame([1], $this->counts());
+
+        $this->travel(3600)->seconds();
+
+        event(new Looping('redis', 'default'));
+
+        $this->assertSame([1, 4], $this->counts());
+    }
+
+    #[Test]
+    public function a_stopping_worker_hands_its_count_to_the_next_record()
+    {
+        $this->shareTheCache();
+
+        $this->request(1);
+
+        $this->newProcess();
+
+        foreach (range(1, 3) as $occurrence) {
+            $this->deprecate('Old thing is deprecated', base_path('app/Legacy.php'), 12);
+        }
+
+        event(new WorkerStopping());
+
+        $this->assertSame([1], $this->counts());
+
+        $this->travel(3600)->seconds();
+
+        $this->request(1);
+
+        $this->assertSame([1, 4], $this->counts());
+    }
+
+    #[Test]
+    public function without_a_shared_cache_each_process_sends_its_own_record()
+    {
+        $this->request(1);
+        $this->deprecations()->flush();
+
+        $this->newProcess();
+
+        $this->request(1);
+
+        $this->assertSame([1, 1], $this->counts());
+    }
+
+    #[Test]
+    public function a_cache_that_fails_leaves_the_process_counting_for_itself()
+    {
+        $cache = Mockery::mock(Repository::class);
+        $cache->shouldReceive('add')->andThrow(new RuntimeException('Cache is down'));
+
+        $this->app->instance(DeprecationBuffer::class, new DeprecationBuffer($this->app[LogBuffer::class], 3600, $cache));
+
+        foreach (range(1, 3) as $occurrence) {
+            $this->deprecate('Old thing is deprecated', base_path('app/Legacy.php'), 12);
+        }
+
+        $this->deprecations()->flush();
+
+        $this->assertSame([1, 2], $this->counts());
+    }
+
+    protected function shareTheCache(): void
+    {
+        config(['larabug.logs.deprecations.cache_store' => 'file']);
+
+        Cache::store('file')->flush();
+
+        $this->beforeApplicationDestroyed(fn () => Cache::store('file')->flush());
+    }
+
+    /**
+     * A request served by a PHP-FPM process of its own, which forgets
+     * everything in memory once it ends.
+     */
+    protected function request(int $occurrences): void
+    {
+        $this->newProcess();
+
+        foreach (range(1, $occurrences) as $occurrence) {
+            $this->deprecate('Old thing is deprecated', base_path('app/Legacy.php'), 12);
+        }
+
+        $this->deprecations()->terminate();
+    }
+
+    protected function newProcess(): void
+    {
+        $this->app->forgetInstance(DeprecationBuffer::class);
+
+        $this->app['log']->forgetChannel('deprecations');
     }
 
     protected function deprecate(string $message, string $file, int $line): void
@@ -352,21 +492,6 @@ class DeprecationShippingTest extends TestCase
     protected function counts(): array
     {
         return array_map(fn ($record) => $record['extra']['larabug_deprecation']['count'], $this->records());
-    }
-
-    /**
-     * Move every send into the past rather than sleeping through the interval.
-     */
-    protected function intervalHasPassed(): void
-    {
-        $property = new ReflectionProperty(DeprecationBuffer::class, 'deprecations');
-
-        $deprecations = array_map(
-            fn ($deprecation) => [...$deprecation, 'sent_at' => time() - 3600],
-            $property->getValue($this->deprecations())
-        );
-
-        $property->setValue($this->deprecations(), $deprecations);
     }
 
     /**

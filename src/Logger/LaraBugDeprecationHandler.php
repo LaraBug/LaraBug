@@ -47,7 +47,7 @@ class LaraBugDeprecationHandler extends LaraBugLogHandler
     }
 
     /**
-     * @return array{message: string, file: string, line: int, source: string, trace: ?string, fingerprint: string}
+     * @return array{message: string, file: string, line: int, trace: ?string, fingerprint: string}
      */
     protected function deprecation(array|ArrayAccess $record): array
     {
@@ -60,7 +60,7 @@ class LaraBugDeprecationHandler extends LaraBugLogHandler
     }
 
     /**
-     * @return array{message: string, file: string, line: int, source: string, trace: ?string}
+     * @return array{message: string, file: string, line: int, trace: ?string}
      */
     protected function parse(array|ArrayAccess $record): array
     {
@@ -74,7 +74,6 @@ class LaraBugDeprecationHandler extends LaraBugLogHandler
                 'message' => $message,
                 'file' => $exception->getFile(),
                 'line' => $exception->getLine(),
-                'source' => 'php',
                 'trace' => $exception->getTraceAsString(),
             ];
         }
@@ -86,7 +85,6 @@ class LaraBugDeprecationHandler extends LaraBugLogHandler
                 'message' => $matches[1],
                 'file' => $matches[2],
                 'line' => (int) $matches[3],
-                'source' => 'php',
                 'trace' => $matches[4],
             ];
         }
@@ -96,26 +94,24 @@ class LaraBugDeprecationHandler extends LaraBugLogHandler
                 'message' => $matches[1],
                 'file' => $matches[2],
                 'line' => (int) $matches[3],
-                'source' => 'php',
                 'trace' => null,
             ];
         }
 
-        // Not raised by PHP and handed over by Laravel's error handler, but
-        // written to the deprecations channel by code that called it directly.
+        // Written to the deprecations channel by code that called it directly,
+        // so the file and line are the caller's.
         [$file, $line] = $this->caller();
 
         return [
             'message' => $message,
             'file' => $file,
             'line' => $line,
-            'source' => 'laravel',
             'trace' => null,
         ];
     }
 
     /**
-     * @param  array{message: string, file: string, line: int, source: string, trace: ?string, fingerprint: string}  $deprecation
+     * @param  array{message: string, file: string, line: int, trace: ?string, fingerprint: string}  $deprecation
      */
     protected function toDeprecationPayload(array|ArrayAccess $record, array $deprecation): array
     {
@@ -136,7 +132,9 @@ class LaraBugDeprecationHandler extends LaraBugLogHandler
             'file' => $deprecation['file'],
             'line' => $deprecation['line'],
             'count' => 1,
-            'source' => $deprecation['source'],
+            // Laravel has no deprecation path of its own to tell apart from
+            // PHP's. One inside the framework shows by its vendor path.
+            'source' => 'php',
         ];
 
         return $payload;
