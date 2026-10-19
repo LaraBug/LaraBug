@@ -2,6 +2,14 @@
 
 All notable changes to `larabug` will be documented in this file
 
+## 4.0.0-beta.9 - 2026-10-19
+
+- Completed and failed queue job records now always carry `available_at` and `reserved_at`. Both are recorded when a job starts, whether or not its processing record is sent, so under the default config (where `jobs.track_processing` is off) the server can still tell when a job was due and how long it waited. `jobs.track_processing` only decides whether the processing record itself is sent.
+- A job that releases itself with `$this->release()` is now reported with status `released` instead of `completed`. The record carries the attempt's `duration_ms`, `memory_usage` and mail, and no `completed_at`. Laravel does not keep the delay a job releases itself with, so the `available_at` of a released record is the moment the job was released, not the moment it is due again.
+- A released record is never sampled out by `jobs.sample_rate`, and it is sent with `jobs.track_completed` off too, so the server does not keep the attempt before it as the job's last state.
+- The attempt after a release reports its own `reserved_at`. Its `available_at` is the first dispatch's, as in beta.8, unless it was released after an exception with a backoff Laravel reports.
+- The times of an attempt are forgotten once it ends, including when its record is sampled out or not sent. Before, with `jobs.track_processing` on, a completed record that was sampled out kept them for the life of the worker. The due time of a retry released after an exception is kept for the 1000 most recent releases only, since another worker may pick the retry up.
+
 ## 4.0.0-beta.8 - 2026-10-19
 
 - Without Horizon a queue job's `available_at` now comes from the payload's `createdAt`, which Laravel writes itself, plus its `delay`. Before, a job without Horizon's `pushedAt` reported the moment a worker picked it up, the same as its `reserved_at`. `pushedAt` is still preferred when it is there, and a job carrying neither still reports the moment it was picked up.

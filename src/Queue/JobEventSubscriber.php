@@ -109,9 +109,21 @@ class JobEventSubscriber
         $duration = $timing ? (microtime(true) - $timing['start']) * 1000 : null;
         $memory = $timing ? memory_get_usage(true) - $timing['memory_start'] : null;
 
-        $this->monitor->trackJobCompleted($event->job, $event->connectionName, $duration, $memory, $this->closeMail($event->job));
+        $mail = $this->closeMail($event->job);
 
         unset($this->timings[$jobId]);
+
+        // A job that called $this->release() is processed too, but it went
+        // back onto the queue rather than completing. The worker draws the
+        // same line before it fires JobReleased: a job deleted after its
+        // release is gone, so it did complete.
+        if ($event->job->isReleased() && ! $event->job->isDeleted()) {
+            $this->monitor->trackJobReleasedItself($event->job, $event->connectionName, $duration, $memory, $mail);
+
+            return;
+        }
+
+        $this->monitor->trackJobCompleted($event->job, $event->connectionName, $duration, $memory, $mail);
     }
 
     public function handleJobFailed(JobFailed $event): void

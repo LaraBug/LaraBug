@@ -31,6 +31,10 @@ class JobMonitor
             return;
         }
 
+        // Recorded whether or not the processing record is sent, since the
+        // record the attempt ends with carries them too.
+        $this->collector->started($job);
+
         if (! ($this->config['jobs']['track_processing'] ?? false)) {
             return;
         }
@@ -47,28 +51,63 @@ class JobMonitor
         ?int $memoryUsed,
         ExecutionMail $mail = new ExecutionMail(),
     ): void {
-        if (! $this->shouldTrack($job)) {
-            return;
+        try {
+            if (! $this->shouldTrack($job)) {
+                return;
+            }
+
+            if (! ($this->config['jobs']['track_completed'] ?? true)) {
+                return;
+            }
+
+            if (! $this->shouldSample()) {
+                return;
+            }
+
+            $data = $this->collector->collect($job, $connectionName, 'completed', [
+                'duration_ms' => $durationMs,
+                'memory_usage' => $memoryUsed,
+                ...$mail->toArray(),
+                // What the mail on it is weighted by: a completed record stands in
+                // for every job of its kind that sampling dropped.
+                'sample_rate' => $this->sampleRate(),
+            ]);
+
+            $this->send($data);
+        } finally {
+            $this->collector->forget($job);
         }
+    }
 
-        if (! ($this->config['jobs']['track_completed'] ?? true)) {
-            return;
+    /**
+     * A job that released itself with $this->release() ends its attempt with
+     * the same processed event as one that completed. It is never sampled out:
+     * it says the job is back on the queue, and dropping it would leave the
+     * attempt before it as the job's last known state.
+     */
+    public function trackJobReleasedItself(
+        Job $job,
+        string $connectionName,
+        ?float $durationMs,
+        ?int $memoryUsed,
+        ExecutionMail $mail = new ExecutionMail(),
+    ): void {
+        try {
+            if (! $this->shouldTrack($job)) {
+                return;
+            }
+
+            $data = $this->collector->collect($job, $connectionName, 'released', [
+                'duration_ms' => $durationMs,
+                'memory_usage' => $memoryUsed,
+                ...$mail->toArray(),
+                'sample_rate' => 1.0,
+            ]);
+
+            $this->send($data);
+        } finally {
+            $this->collector->forget($job);
         }
-
-        if (! $this->shouldSample()) {
-            return;
-        }
-
-        $data = $this->collector->collect($job, $connectionName, 'completed', [
-            'duration_ms' => $durationMs,
-            'memory_usage' => $memoryUsed,
-            ...$mail->toArray(),
-            // What the mail on it is weighted by: a completed record stands in
-            // for every job of its kind that sampling dropped.
-            'sample_rate' => $this->sampleRate(),
-        ]);
-
-        $this->send($data);
     }
 
     public function trackJobFailed(
@@ -78,43 +117,47 @@ class JobMonitor
         ?float $durationMs,
         ExecutionMail $mail = new ExecutionMail(),
     ): void {
-        if (! $this->shouldTrack($job)) {
-            return;
+        try {
+            if (! $this->shouldTrack($job)) {
+                return;
+            }
+
+            if (! ($this->config['jobs']['track_failed'] ?? true)) {
+                return;
+            }
+
+            $storage = [
+                'SERVER' => [
+                    'USER' => $_SERVER['USER'] ?? null,
+                    'HTTP_USER_AGENT' => $_SERVER['HTTP_USER_AGENT'] ?? 'CLI',
+                    'SERVER_PROTOCOL' => $_SERVER['SERVER_PROTOCOL'] ?? null,
+                    'SERVER_SOFTWARE' => $_SERVER['SERVER_SOFTWARE'] ?? null,
+                    'PHP_VERSION' => PHP_VERSION,
+                ],
+                'HEADERS' => getallheaders() ?: [],
+            ];
+
+            $data = $this->collector->collect($job, $connectionName, 'failed', [
+                'duration_ms' => $durationMs,
+                'exception' => [
+                    'class' => $exception::class,
+                    'message' => $exception->getMessage(),
+                    'code' => $exception->getCode(),
+                    'file' => $exception->getFile(),
+                    'line' => $exception->getLine(),
+                    'error' => $exception->getTraceAsString(), // Stack trace goes in the error field
+                    'storage' => array_filter($storage), // Server/headers data goes in the storage field
+                    'environment' => config('app.env', 'production'),
+                ],
+                ...$mail->toArray(),
+                // A failure is never sampled out, so it stands for itself alone.
+                'sample_rate' => 1.0,
+            ]);
+
+            $this->send($data);
+        } finally {
+            $this->collector->forget($job);
         }
-
-        if (! ($this->config['jobs']['track_failed'] ?? true)) {
-            return;
-        }
-
-        $storage = [
-            'SERVER' => [
-                'USER' => $_SERVER['USER'] ?? null,
-                'HTTP_USER_AGENT' => $_SERVER['HTTP_USER_AGENT'] ?? 'CLI',
-                'SERVER_PROTOCOL' => $_SERVER['SERVER_PROTOCOL'] ?? null,
-                'SERVER_SOFTWARE' => $_SERVER['SERVER_SOFTWARE'] ?? null,
-                'PHP_VERSION' => PHP_VERSION,
-            ],
-            'HEADERS' => getallheaders() ?: [],
-        ];
-
-        $data = $this->collector->collect($job, $connectionName, 'failed', [
-            'duration_ms' => $durationMs,
-            'exception' => [
-                'class' => $exception::class,
-                'message' => $exception->getMessage(),
-                'code' => $exception->getCode(),
-                'file' => $exception->getFile(),
-                'line' => $exception->getLine(),
-                'error' => $exception->getTraceAsString(), // Stack trace goes in the error field
-                'storage' => array_filter($storage), // Server/headers data goes in the storage field
-                'environment' => config('app.env', 'production'),
-            ],
-            ...$mail->toArray(),
-            // A failure is never sampled out, so it stands for itself alone.
-            'sample_rate' => 1.0,
-        ]);
-
-        $this->send($data);
     }
 
     public function trackJobReleased(Job $job, ?int $backoff): void
