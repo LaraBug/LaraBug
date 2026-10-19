@@ -235,4 +235,9 @@ class JobMonitor
     {
         $this->buffer?->flush();
     }
+
+    public function flushIfDue(): void
+    {
+        $this->buffer?->flushIfDue();
+    }
 }

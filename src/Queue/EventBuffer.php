@@ -71,9 +71,21 @@ class EventBuffer implements Countable
             return;
         }
 
-        if (time() - $this->lastFlushTime >= $this->flushInterval) {
-            $this->flush();
+        $this->flushIfDue();
+    }
+
+    /**
+     * Flush once the interval has passed since the last flush. Checked as
+     * events arrive and on every loop of the worker, so an idle worker still
+     * sends the tail of a burst instead of holding it until the next job.
+     */
+    public function flushIfDue(): void
+    {
+        if (time() - $this->lastFlushTime < $this->flushInterval) {
+            return;
         }
+
+        $this->flush();
     }
 
     protected function sendImmediately(array $data): void
