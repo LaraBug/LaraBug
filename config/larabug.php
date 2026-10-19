@@ -957,13 +957,17 @@ return [
         | application names one. LaraBug is added to that channel, next to
         | whatever the application already sends them to.
         |
-        | A deprecation fires on every call, so each one is sent the first time
-        | it occurs in a process, and after that at most once per interval
-        | (in seconds) with the number of occurrences it stands for.
+        | A deprecation fires on every call, so each one is sent once per
+        | interval (in seconds) with the number of occurrences it stands for.
+        | The count is kept in the cache store named below, the default store
+        | when null, so it holds across requests and processes. An `array` or
+        | `null` store is not shared between processes, and each process then
+        | sends its own record.
         */
         'deprecations' => [
             'enabled' => env('LB_LOG_DEPRECATIONS', true),
             'interval' => env('LB_LOG_DEPRECATIONS_INTERVAL', 3600),
+            'cache_store' => env('LB_LOG_DEPRECATIONS_CACHE_STORE'),
         ],
     ],
 ];

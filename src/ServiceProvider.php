@@ -14,6 +14,7 @@ use LaraBug\Requests\Sampler;
 use Illuminate\Log\LogManager;
 use LaraBug\Cve\RequestTrigger;
 use LaraBug\Mail\MailListeners;
+use Illuminate\Cache\Repository;
 use LaraBug\Commands\ScanCommand;
 use LaraBug\Commands\TestCommand;
 use LaraBug\Queue\DispatchMacros;
@@ -114,7 +115,7 @@ class ServiceProvider extends BaseServiceProvider
         // most requests. Monolog's own close() covers the CLI case.
         $this->app->terminating(function () {
             if ($this->app->resolved(DeprecationBuffer::class)) {
-                $this->app[DeprecationBuffer::class]->flushIfDue();
+                $this->app[DeprecationBuffer::class]->terminate();
             }
 
             if ($this->app->resolved(LogBuffer::class)) {
@@ -581,7 +582,8 @@ class ServiceProvider extends BaseServiceProvider
 
         $this->app->singleton(DeprecationBuffer::class, fn ($app) => new DeprecationBuffer(
             $app[LogBuffer::class],
-            (int) $app['config']->get('larabug.logs.deprecations.interval', 3600)
+            (int) $app['config']->get('larabug.logs.deprecations.interval', 3600),
+            $this->deprecationCache(),
         ));
 
         if ($this->app['log'] instanceof LogManager) {
@@ -666,6 +668,31 @@ class ServiceProvider extends BaseServiceProvider
         if (method_exists(PendingDispatch::class, 'macro')) {
             DispatchMacros::register();
         }
+    }
+
+    /**
+     * The cache deprecations are coalesced through between processes, none
+     * when the store is not shared between them: an `array` store lives and
+     * dies with its process, and a `null` store never keeps anything.
+     *
+     * Without the store's events, so a deprecation's bookkeeping never shows
+     * up as a cache call on the request it happened in.
+     */
+    protected function deprecationCache(): ?Repository
+    {
+        $config = $this->app['config'];
+
+        $store = $config->get('larabug.logs.deprecations.cache_store') ?? $config->get('cache.default');
+
+        if (! in_array($config->get("cache.stores.{$store}.driver"), ['array', 'null', null], true)) {
+            try {
+                return new Repository($this->app['cache']->store($store)->getStore());
+            } catch (Throwable) {
+                // A store that cannot be built leaves each process counting for itself.
+            }
+        }
+
+        return null;
     }
 
     protected function mapLaraBugApiRoutes(): void

@@ -2,6 +2,14 @@
 
 All notable changes to `larabug` will be documented in this file
 
+## 4.0.0-beta.16 - 2026-10-19
+
+- Deprecations are now coalesced across requests and processes through the application's cache, instead of within one process. A request served by PHP-FPM forgets everything when it ends, so a deprecation on a hot path used to be sent at least once per request, and twice when it repeated within one. Now one record per deprecation is sent per `logs.deprecations.interval` for the whole application (or per server with the `file` store), carrying the occurrences every process counted since the last one.
+- Whichever process first hits a deprecation once the interval has passed takes a lock in the cache and sends the record, with its own occurrences plus the shared count. Every other process adds what it counted to the shared count when its request ends, when a worker stops, or when it shuts down. The cache is used once per deprecation per request, never per occurrence, and without the store's events, so it never shows up as a cache call on the request. With the `database` store it does run a few queries.
+- The store is the default cache store, or the one named by `logs.deprecations.cache_store` (`LB_LOG_DEPRECATIONS_CACHE_STORE`). An `array` or `null` store is not shared between processes, so each process then counts for itself as in beta.14. A store that fails does the same for the rest of the process.
+- The first record of a deprecation can now carry a `count` above 1, when other processes counted occurrences while another held the lock. Occurrences counted after a deprecation's last record are only sent once it occurs again after the interval, so a deprecation that stops occurring loses that tail. The shared count expires after a week, or twice the interval if that is longer.
+- `source` is now always `php`. Laravel has no deprecation path of its own to tell apart from PHP's, and `laravel` only ever labelled lines written to the deprecations channel directly. A deprecation inside the framework shows by its `vendor/laravel/framework/` path.
+
 ## 4.0.0-beta.15 - 2026-10-19
 
 - The Boost skill and guideline now say that HTTP requests (sampled at a tenth), artisan commands, scheduled tasks and logs are on by default, which they already were. They used to call these streams opt-in and told an agent never to switch one on. Query plans (`LB_QUERY_EXPLAIN`) remain the one opt-in.
