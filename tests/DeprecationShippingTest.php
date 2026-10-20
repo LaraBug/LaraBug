@@ -187,7 +187,8 @@ class DeprecationShippingTest extends TestCase
         $this->assertSame('deprecations', $record['channel']);
         $this->assertSame('Old thing is deprecated', $record['message']);
         $this->assertSame([
-            'fingerprint' => md5('Old thing is deprecated|app/Legacy.php|12'),
+            'fingerprint' => md5('app/Legacy.php|12|Old thing is deprecated'),
+            'normalised_message' => 'Old thing is deprecated',
             'file' => 'app/Legacy.php',
             'line' => 12,
             'count' => 1,
@@ -206,7 +207,7 @@ class DeprecationShippingTest extends TestCase
         $record = $this->records()[0];
 
         $this->assertSame('Old thing is deprecated', $record['message']);
-        $this->assertSame(md5('Old thing is deprecated|app/Legacy.php|12'), $record['extra']['larabug_deprecation']['fingerprint']);
+        $this->assertSame(md5('app/Legacy.php|12|Old thing is deprecated'), $record['extra']['larabug_deprecation']['fingerprint']);
         $this->assertStringContainsString('#0', $record['context']['trace']);
         $this->assertStringNotContainsString(base_path().'/', $record['context']['trace']);
     }
@@ -225,7 +226,7 @@ class DeprecationShippingTest extends TestCase
 
         [$first, $coalesced] = $this->records();
 
-        $this->assertSame(md5('Old thing is deprecated|app/Legacy.php|12'), $first['extra']['larabug_deprecation']['fingerprint']);
+        $this->assertSame(md5('app/Legacy.php|12|Old thing is deprecated'), $first['extra']['larabug_deprecation']['fingerprint']);
         $this->assertSame($first['extra']['larabug_deprecation']['fingerprint'], $coalesced['extra']['larabug_deprecation']['fingerprint']);
         $this->assertSame('Old thing is deprecated', $coalesced['message']);
         $this->assertSame(2, $coalesced['extra']['larabug_deprecation']['count']);
@@ -248,6 +249,123 @@ class DeprecationShippingTest extends TestCase
 
         $this->assertSame([1, 1, 4], $this->counts());
         $this->assertSame('Old thing is deprecated', $this->records()[2]['message']);
+    }
+
+    #[Test]
+    public function values_in_the_message_do_not_split_a_deprecation()
+    {
+        $this->deprecate('Implicit conversion from float 6360.067887183333 to int loses precision', base_path('app/Legacy.php'), 12);
+        $this->deprecate('Implicit conversion from float 12.5 to int loses precision', base_path('app/Legacy.php'), 12);
+        $this->deprecate('Implicit conversion from float -1.0E+25 to int loses precision', base_path('app/Legacy.php'), 12);
+        $this->deprecations()->flush();
+
+        $this->assertSame([1, 2], $this->counts());
+
+        [$first, $coalesced] = $this->records();
+
+        $this->assertSame(
+            md5('app/Legacy.php|12|Implicit conversion from float {number} to int loses precision'),
+            $first['extra']['larabug_deprecation']['fingerprint']
+        );
+        $this->assertSame($first['extra']['larabug_deprecation']['fingerprint'], $coalesced['extra']['larabug_deprecation']['fingerprint']);
+    }
+
+    #[Test]
+    public function the_raw_message_is_sent_next_to_the_normalised_one()
+    {
+        $this->deprecate('Implicit conversion from float 6360.067887183333 to int loses precision', base_path('app/Legacy.php'), 12);
+        $this->deprecations()->flush();
+
+        $record = $this->records()[0];
+
+        $this->assertSame('Implicit conversion from float 6360.067887183333 to int loses precision', $record['message']);
+        $this->assertSame(
+            'Implicit conversion from float {number} to int loses precision',
+            $record['extra']['larabug_deprecation']['normalised_message']
+        );
+    }
+
+    #[Test]
+    public function the_same_message_on_different_lines_stays_separate()
+    {
+        $this->deprecate('Implicit conversion from float 1.5 to int loses precision', base_path('app/Legacy.php'), 12);
+        $this->deprecate('Implicit conversion from float 2.5 to int loses precision', base_path('app/Legacy.php'), 20);
+        $this->deprecations()->flush();
+
+        $fingerprints = array_map(fn ($record) => $record['extra']['larabug_deprecation']['fingerprint'], $this->records());
+
+        $this->assertCount(2, $fingerprints);
+        $this->assertNotSame($fingerprints[0], $fingerprints[1]);
+    }
+
+    #[Test]
+    public function messages_are_normalised()
+    {
+        $messages = [
+            'Implicit conversion from float 6360.067887183333 to int loses precision' => 'Implicit conversion from float {number} to int loses precision',
+            'Implicit conversion from float 1.0E+25 to int loses precision' => 'Implicit conversion from float {number} to int loses precision',
+            'Implicit conversion from float -0.5 to int loses precision' => 'Implicit conversion from float {number} to int loses precision',
+            'Value 0x1F and 42 are deprecated' => 'Value {number} and {number} are deprecated',
+            'Implicit conversion from float-string "6360.06" to int loses precision' => 'Implicit conversion from float-string {string} to int loses precision',
+            "Passing 'some value' to foo() is deprecated" => 'Passing {string} to foo() is deprecated',
+            'Don\'t pass "a" or \'b\' anymore' => 'Don\'t pass {string} or {string} anymore',
+            'Creation of dynamic property App\Models\V2User::$bar1 is deprecated' => 'Creation of dynamic property App\Models\V2User::$bar1 is deprecated',
+            'Method "App\Foo::bar()" might add "void" as a native return type' => 'Method "App\Foo::bar()" might add {string} as a native return type',
+            'str_replace(): Passing null to parameter #3 ($subject) of type array|string is deprecated' => 'str_replace(): Passing null to parameter #{number} ($subject) of type array|string is deprecated',
+            'Base64 encoding is deprecated since 8.5.' => 'Base64 encoding is deprecated since {number}.',
+        ];
+
+        foreach (array_keys($messages) as $line => $message) {
+            $this->deprecate($message, base_path('app/Legacy.php'), $line + 1);
+        }
+
+        $this->deprecations()->flush();
+
+        $this->assertSame(
+            array_values($messages),
+            array_map(fn ($record) => $record['extra']['larabug_deprecation']['normalised_message'], $this->records())
+        );
+    }
+
+    #[Test]
+    public function class_and_property_names_keep_deprecations_apart()
+    {
+        $this->deprecate('Creation of dynamic property App\Foo::$bar is deprecated', base_path('app/Legacy.php'), 12);
+        $this->deprecate('Creation of dynamic property App\Foo::$baz is deprecated', base_path('app/Legacy.php'), 12);
+        $this->deprecate('Creation of dynamic property App\Qux::$bar is deprecated', base_path('app/Legacy.php'), 12);
+        $this->deprecations()->flush();
+
+        $this->assertSame([1, 1, 1], $this->counts());
+        $this->assertSame(
+            'Creation of dynamic property App\Foo::$bar is deprecated',
+            $this->records()[0]['extra']['larabug_deprecation']['normalised_message']
+        );
+    }
+
+    #[Test]
+    public function values_in_the_message_do_not_split_a_deprecation_across_requests()
+    {
+        $this->shareTheCache();
+
+        foreach ([1.5, 2.25, 3.125] as $value) {
+            $this->newProcess();
+
+            $this->deprecate("Implicit conversion from float {$value} to int loses precision", base_path('app/Legacy.php'), 12);
+            $this->deprecate('Implicit conversion from float 9.75 to int loses precision', base_path('app/Legacy.php'), 12);
+
+            $this->deprecations()->terminate();
+        }
+
+        $this->travel(3600)->seconds();
+
+        $this->newProcess();
+
+        $this->deprecate('Implicit conversion from float 0.5 to int loses precision', base_path('app/Legacy.php'), 12);
+
+        $this->deprecations()->terminate();
+
+        $this->assertSame([1, 6], $this->counts());
+        $this->assertSame('Implicit conversion from float 1.5 to int loses precision', $this->records()[0]['message']);
     }
 
     #[Test]

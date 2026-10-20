@@ -2,6 +2,12 @@
 
 All notable changes to `larabug` will be documented in this file
 
+## 4.0.0-beta.17 - 2026-10-20
+
+- A deprecation's fingerprint no longer changes with the values in its message. PHP puts the value in many of them, such as `Implicit conversion from float 6360.067887183333 to int loses precision`, so one line of code raised a new deprecation for every value. That defeated the coalescing, sent every occurrence, and opened an issue per value on the server. Numbers (integers, floats, scientific notation and hex) are now replaced with `{number}` and quoted strings with `{string}` before fingerprinting. Class, property and method names are kept, quoted ones included, since they tell one deprecation from another.
+- The fingerprint is now the md5 of the file, the line and the normalised message, in that order. Every deprecation therefore gets a new fingerprint once after upgrading.
+- `message` is still the message as raised, so an issue shows a real example. `extra.larabug_deprecation` gains `normalised_message`, which the server may ignore.
+
 ## 4.0.0-beta.16 - 2026-10-19
 
 - Deprecations are now coalesced across requests and processes through the application's cache, instead of within one process. A request served by PHP-FPM forgets everything when it ends, so a deprecation on a hot path used to be sent at least once per request, and twice when it repeated within one. Now one record per deprecation is sent per `logs.deprecations.interval` for the whole application (or per server with the `file` store), carrying the occurrences every process counted since the last one.
