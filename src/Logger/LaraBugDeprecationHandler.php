@@ -47,16 +47,40 @@ class LaraBugDeprecationHandler extends LaraBugLogHandler
     }
 
     /**
-     * @return array{message: string, file: string, line: int, trace: ?string, fingerprint: string}
+     * @return array{message: string, file: string, line: int, trace: ?string, normalised_message: string, fingerprint: string}
      */
     protected function deprecation(array|ArrayAccess $record): array
     {
         $deprecation = $this->parse($record);
 
         $deprecation['file'] = $this->relativePath($deprecation['file']);
-        $deprecation['fingerprint'] = md5("{$deprecation['message']}|{$deprecation['file']}|{$deprecation['line']}");
+        $deprecation['normalised_message'] = $this->normalise($deprecation['message']);
+        $deprecation['fingerprint'] = md5("{$deprecation['file']}|{$deprecation['line']}|{$deprecation['normalised_message']}");
 
         return $deprecation;
+    }
+
+    /**
+     * The message without the values it was raised with, so a line of code
+     * that deprecates with a different value every time keeps one fingerprint.
+     *
+     * A quoted class or member, such as Symfony puts in its messages, is kept:
+     * it is what tells one deprecation raised from a shared line from another.
+     * Digits inside a name are kept too, since a number has to start a word.
+     */
+    protected function normalise(string $message): string
+    {
+        $message = preg_replace_callback(
+            '/(?<!\w)(["\'])(.*?)\1/s',
+            fn (array $matches) => preg_match('/\\\\|::/', $matches[2]) ? $matches[0] : '{string}',
+            $message,
+        ) ?? $message;
+
+        return preg_replace(
+            '/(?<![\w.])[-+]?(?:0x[0-9a-f]+|(?:\d+(?:\.\d+)?|\.\d+)(?:e[-+]?\d+)?)(?!\w)/i',
+            '{number}',
+            $message,
+        ) ?? $message;
     }
 
     /**
@@ -111,7 +135,7 @@ class LaraBugDeprecationHandler extends LaraBugLogHandler
     }
 
     /**
-     * @param  array{message: string, file: string, line: int, trace: ?string, fingerprint: string}  $deprecation
+     * @param  array{message: string, file: string, line: int, trace: ?string, normalised_message: string, fingerprint: string}  $deprecation
      */
     protected function toDeprecationPayload(array|ArrayAccess $record, array $deprecation): array
     {
@@ -129,6 +153,7 @@ class LaraBugDeprecationHandler extends LaraBugLogHandler
 
         $payload['extra']['larabug_deprecation'] = [
             'fingerprint' => $deprecation['fingerprint'],
+            'normalised_message' => $deprecation['normalised_message'],
             'file' => $deprecation['file'],
             'line' => $deprecation['line'],
             'count' => 1,
