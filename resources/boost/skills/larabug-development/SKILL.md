@@ -51,6 +51,7 @@ Read the config file before changing behaviour. Every key documents what it does
 | Queue depth | follows queue jobs | `LB_QUEUE_DEPTH`, needs `schedule:run` |
 | Livewire components | on | `LB_TRACK_LIVEWIRE` |
 | CVE scanning | on | `LB_CVE_ENABLED` |
+| npm lockfile in CVE scans | on | `LB_CVE_NPM` |
 | Logs | on, from `info` up | `LB_LOGS_ENABLED`, `LB_LOGS_LEVEL` |
 | Deprecations | follows logs | `LB_LOG_DEPRECATIONS` |
 | HTTP requests | on, sampled at a tenth | `LB_TRACK_REQUESTS`, `LB_REQUEST_SAMPLE_RATE` |
@@ -230,7 +231,9 @@ LB_LOG_DEPRECATIONS_CACHE_STORE=redis
 
 ## CVE scanning
 
-Scans `composer.lock` against LaraBug's database and raises findings as issues. Only package names, versions and a hash of the lock file leave the application.
+Scans `composer.lock` and the JavaScript lockfile against LaraBug's database and raises findings as issues. Only package names, versions and a hash of each lock file leave the application.
+
+The JavaScript lockfile is the first of `package-lock.json`, `pnpm-lock.yaml` and `yarn.lock` in the application's root. `pnpm-lock.yaml` is only read when `symfony/yaml` is installed; do not add it just for this unless you were asked to. `LB_CVE_NPM=false` scans `composer.lock` alone.
 
 `LB_CVE_ENABLED` alone does not start scanning: the project also has to have CVE scanning enabled in LaraBug. Until it does, the server answers 403 and the client backs off for an hour, so leaving it on is close to free. Triggering is by request piggyback, the scheduler, or both (`LB_CVE_TRIGGER`).
 

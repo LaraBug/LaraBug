@@ -843,10 +843,20 @@ return [
         | 403 and the client backs off for an hour, so leaving this on costs at
         | most one request an hour.
         |
-        | Only package names, versions and a hash of composer.lock ever leave the
+        | Only package names, versions and a hash of the lockfile ever leave the
         | app. No source, no paths, no env values.
         */
         'enabled' => env('LB_CVE_ENABLED', true),
+
+        /*
+        | Also scan the JavaScript lockfile in the app's root, so npm advisories
+        | are raised next to Composer ones. The first of package-lock.json,
+        | pnpm-lock.yaml and yarn.lock is sent, dev packages included and
+        | flagged as such. pnpm-lock.yaml is only read when symfony/yaml is
+        | installed. Set LB_CVE_NPM=false to scan composer.lock alone.
+        | Default: true
+        */
+        'npm' => env('LB_CVE_NPM', true),
 
         /*
         | How scans get triggered:

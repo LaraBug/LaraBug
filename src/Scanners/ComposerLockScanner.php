@@ -56,6 +56,22 @@ class ComposerLockScanner
     }
 
     /**
+     * The same hash scan() puts in content_hash, without parsing the lockfile.
+     */
+    public function hash(?string $lockPath = null): ?string
+    {
+        $path = $lockPath ?: base_path('composer.lock');
+
+        if (! is_file($path) || ! is_readable($path)) {
+            return null;
+        }
+
+        $hash = hash_file('sha256', $path);
+
+        return $hash === false ? null : $hash;
+    }
+
+    /**
      * @param  array<string, mixed>  $lock
      * @return array<string, string>
      */

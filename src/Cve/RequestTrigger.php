@@ -4,6 +4,7 @@ namespace LaraBug\Cve;
 
 use LaraBug\Http\Client;
 use LaraBug\Support\LimitBackoff;
+use LaraBug\Scanners\NpmLockScanner;
 use LaraBug\Scanners\ComposerLockScanner;
 use Illuminate\Contracts\Cache\Repository as CacheRepository;
 
@@ -12,19 +13,24 @@ use Illuminate\Contracts\Cache\Repository as CacheRepository;
  *
  * Wired up via `app()->terminating(...)` from the ServiceProvider, so it runs
  * after the response is sent to the user — zero perceptible latency. Cached
- * heavily so the hot path is a single Cache::get on most requests: the
- * lockfile payload is memoized per process, the last sent hash is cached for
- * `request_throttle_hours`, and a short-lived cache lock prevents a thundering
- * herd of concurrent requests all triggering scans simultaneously.
+ * heavily so the hot path is hashing the lockfiles and a few Cache::gets on
+ * most requests: the last sent hash of each lockfile is cached for
+ * `request_throttle_hours`, a lockfile is only parsed once its hash says a
+ * scan is due, and a short-lived cache lock prevents a thundering herd of
+ * concurrent requests all triggering scans simultaneously.
  */
 class RequestTrigger
 {
-    /** @var array<string, mixed>|null Memoized lockfile payload for this process. */
+    /** @var array<string, array<string, mixed>>|null Memoized lockfile payloads for this process, keyed by ecosystem. */
     protected static ?array $cachedPayload = null;
 
     protected static bool $alreadyFired = false;
 
-    private string $lastSentHashCacheKey = 'larabug.cve.last_sent_hash';
+    /** @var array<string, string> */
+    private array $lastSentHashCacheKeys = [
+        'composer_lock' => 'larabug.cve.last_sent_hash',
+        'npm_lock' => 'larabug.cve.last_sent_npm_hash',
+    ];
 
     private string $lastSentAtCacheKey = 'larabug.cve.last_sent_at';
 
@@ -32,7 +38,8 @@ class RequestTrigger
 
     public function __construct(
         protected readonly CacheRepository $cache,
-        protected readonly ComposerLockScanner $scanner,
+        protected readonly ComposerLockScanner $composerScanner,
+        protected readonly NpmLockScanner $npmScanner,
         protected readonly Client $client,
     ) {
     }
@@ -56,13 +63,19 @@ class RequestTrigger
 
         self::$alreadyFired = true;
 
-        $payload = $this->payload();
+        $hashes = $this->hashes();
 
-        if ($payload === null) {
+        if ($hashes === []) {
             return;
         }
 
-        if (! $this->shouldFire($payload['content_hash'])) {
+        if (! $this->shouldFire($hashes)) {
+            return;
+        }
+
+        $payload = $this->payload();
+
+        if ($payload === []) {
             return;
         }
 
@@ -83,28 +96,54 @@ class RequestTrigger
     }
 
     /**
-     * @return array<string, mixed>|null
+     * Hashing a lockfile is far cheaper than parsing it, so the hashes alone
+     * decide whether a scan is due.
+     *
+     * @return array<string, string>
      */
-    protected function payload(): ?array
+    protected function hashes(): array
+    {
+        return array_filter([
+            'composer_lock' => $this->composerScanner->hash(config('larabug.cve.lock_path')),
+            'npm_lock' => config('larabug.cve.npm', true)
+                ? $this->npmScanner->hash()
+                : null,
+        ]);
+    }
+
+    /**
+     * @return array<string, array<string, mixed>>
+     */
+    protected function payload(): array
     {
         if (self::$cachedPayload !== null) {
             return self::$cachedPayload;
         }
 
-        $payload = $this->scanner->scan(
-            config('larabug.cve.lock_path'),
-            (bool) config('larabug.cve.include_dev', false),
-            config('larabug.cve.environment') ?: config('app.env'),
-        );
+        $environment = config('larabug.cve.environment') ?: config('app.env');
 
-        if ($payload !== null) {
+        $payload = array_filter([
+            'composer_lock' => $this->composerScanner->scan(
+                config('larabug.cve.lock_path'),
+                (bool) config('larabug.cve.include_dev', false),
+                $environment,
+            ),
+            'npm_lock' => config('larabug.cve.npm', true)
+                ? $this->npmScanner->scan($environment)
+                : null,
+        ]);
+
+        if ($payload !== []) {
             self::$cachedPayload = $payload;
         }
 
         return $payload;
     }
 
-    protected function shouldFire(string $currentHash): bool
+    /**
+     * @param  array<string, string>  $hashes
+     */
+    protected function shouldFire(array $hashes): bool
     {
         // A CVE finding is an issue, and the issue limit is reached for now.
         if (! LimitBackoff::allows(LimitBackoff::ISSUES)) {
@@ -118,10 +157,10 @@ class RequestTrigger
             return false;
         }
 
-        $lastHash = $this->cache->get($this->lastSentHashCacheKey);
-
-        if ($lastHash !== $currentHash) {
-            return true;
+        foreach ($hashes as $ecosystem => $hash) {
+            if ($this->cache->get($this->lastSentHashCacheKeys[$ecosystem]) !== $hash) {
+                return true;
+            }
         }
 
         $lastSentAt = (int) $this->cache->get($this->lastSentAtCacheKey, 0);
@@ -131,13 +170,13 @@ class RequestTrigger
     }
 
     /**
-     * @param  array<string, mixed>  $payload
+     * @param  array<string, array<string, mixed>>  $payload
      */
     protected function send(array $payload): void
     {
         $response = $this->client->report([
             'type' => 'cve_scan',
-            'composer_lock' => $payload,
+            ...$payload,
         ]);
 
         $status = $response && method_exists($response, 'getStatusCode')
@@ -153,7 +192,11 @@ class RequestTrigger
         // Only 2xx and "skipped" count as the scan having landed.
         if (($status >= 200 && $status < 300) || $unchanged) {
             $ttl = max(1, (int) config('larabug.cve.request_throttle_hours', 24)) * 3600;
-            $this->cache->put($this->lastSentHashCacheKey, $payload['content_hash'], $ttl);
+
+            foreach ($payload as $ecosystem => $lock) {
+                $this->cache->put($this->lastSentHashCacheKeys[$ecosystem], $lock['content_hash'], $ttl);
+            }
+
             $this->cache->put($this->lastSentAtCacheKey, time(), $ttl);
 
             return;

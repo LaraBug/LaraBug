@@ -2,6 +2,15 @@
 
 All notable changes to `larabug` will be documented in this file
 
+## 4.0.0-beta.18 - 2026-10-23
+
+- CVE scans now include the application's JavaScript lockfile, so npm advisories can be raised next to Composer ones. The first of `package-lock.json`, `pnpm-lock.yaml` and `yarn.lock` in the application's root is sent as `npm_lock` in the same `cve_scan` as `composer_lock`, which is unchanged. A project without a `composer.lock` sends `npm_lock` alone. A server that does not know `npm_lock` ignores it.
+- `npm_lock` carries the `content_hash` (sha256 of the raw lockfile), the `lockfile` it came from, the unique pairs of `name` and `version` in `packages` with a `dev` flag, the `node_version` from `.nvmrc` or `engines.node` in `package.json` (null when neither is there), the `environment` and `source` set to `php-sdk`. One name can appear with several versions. A pair is only dev when every copy of it is.
+- `package-lock.json` is read in lockfile v1, v2 and v3, and `yarn.lock` in both the v1 and the berry format, without new dependencies. `pnpm-lock.yaml` is only read when the application has `symfony/yaml` installed. Without it pnpm is skipped with a debug log line and the next lockfile is tried. `yarn.lock` has no dev flags, so there, and in pnpm v9, a package is marked dev when `package.json` lists it in `devDependencies` only, which reaches the top level names and not what they pull in. Git, file and link dependencies are left out, since no advisory matches them and their version can name a private repository. A malformed lockfile is not sent and never throws.
+- Dev packages are always sent and flagged, whatever `cve.include_dev` says, which still only applies to `composer.lock`.
+- The request trigger keeps a last sent hash per lockfile, so a change to either one sends a scan again. Upgrading sends one scan for an application with an npm lockfile. The trigger now hashes the lockfiles first and only parses one when a scan is due, so a request no longer parses `composer.lock` (or the npm lockfile) every time. `larabug:scan` says how many npm packages it sent and from which lockfile.
+- `LB_CVE_NPM=false` (`cve.npm`) scans `composer.lock` alone. `LB_CVE_ENABLED=false` still turns all CVE scanning off.
+
 ## 4.0.0-beta.17 - 2026-10-20
 
 - A deprecation's fingerprint no longer changes with the values in its message. PHP puts the value in many of them, such as `Implicit conversion from float 6360.067887183333 to int loses precision`, so one line of code raised a new deprecation for every value. That defeated the coalescing, sent every occurrence, and opened an issue per value on the server. Numbers (integers, floats, scientific notation and hex) are now replaced with `{number}` and quoted strings with `{string}` before fingerprinting. Class, property and method names are kept, quoted ones included, since they tell one deprecation from another.
