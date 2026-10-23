@@ -306,6 +306,25 @@ class NpmLockScannerTest extends TestCase
     }
 
     #[Test]
+    public function it_hashes_the_lockfile_it_would_scan_without_parsing_it()
+    {
+        $this->assertSame(
+            $this->scanFixture('pnpm-v9')['content_hash'],
+            (new NpmLockScanner(__DIR__ . '/Fixtures/npm/pnpm-v9'))->hash(),
+        );
+
+        $this->copyFixture('pnpm-v9', 'pnpm-lock.yaml');
+        $this->copyFixture('yarn-v1', 'yarn.lock');
+
+        $this->assertSame(
+            hash_file('sha256', "{$this->directory}/yarn.lock"),
+            $this->scannerWithoutYaml()->hash(),
+        );
+
+        $this->assertNull((new NpmLockScanner(__DIR__ . '/Fixtures/npm/does-not-exist'))->hash());
+    }
+
+    #[Test]
     public function it_sends_the_agreed_payload_shape_and_nothing_more()
     {
         $this->app['config']['app.env'] = 'local';

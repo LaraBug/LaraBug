@@ -13,11 +13,11 @@ use Illuminate\Contracts\Cache\Repository as CacheRepository;
  *
  * Wired up via `app()->terminating(...)` from the ServiceProvider, so it runs
  * after the response is sent to the user — zero perceptible latency. Cached
- * heavily so the hot path is a few Cache::gets on most requests: the
- * lockfile payload is memoized per process, the last sent hash of each
- * lockfile is cached for `request_throttle_hours`, and a short-lived cache
- * lock prevents a thundering herd of concurrent requests all triggering scans
- * simultaneously.
+ * heavily so the hot path is hashing the lockfiles and a few Cache::gets on
+ * most requests: the last sent hash of each lockfile is cached for
+ * `request_throttle_hours`, a lockfile is only parsed once its hash says a
+ * scan is due, and a short-lived cache lock prevents a thundering herd of
+ * concurrent requests all triggering scans simultaneously.
  */
 class RequestTrigger
 {
@@ -63,13 +63,19 @@ class RequestTrigger
 
         self::$alreadyFired = true;
 
-        $payload = $this->payload();
+        $hashes = $this->hashes();
 
-        if ($payload === []) {
+        if ($hashes === []) {
             return;
         }
 
-        if (! $this->shouldFire($payload)) {
+        if (! $this->shouldFire($hashes)) {
+            return;
+        }
+
+        $payload = $this->payload();
+
+        if ($payload === []) {
             return;
         }
 
@@ -87,6 +93,22 @@ class RequestTrigger
         } finally {
             $lock?->release();
         }
+    }
+
+    /**
+     * Hashing a lockfile is far cheaper than parsing it, so the hashes alone
+     * decide whether a scan is due.
+     *
+     * @return array<string, string>
+     */
+    protected function hashes(): array
+    {
+        return array_filter([
+            'composer_lock' => $this->composerScanner->hash(config('larabug.cve.lock_path')),
+            'npm_lock' => config('larabug.cve.npm', true)
+                ? $this->npmScanner->hash()
+                : null,
+        ]);
     }
 
     /**
@@ -119,9 +141,9 @@ class RequestTrigger
     }
 
     /**
-     * @param  array<string, array<string, mixed>>  $payload
+     * @param  array<string, string>  $hashes
      */
-    protected function shouldFire(array $payload): bool
+    protected function shouldFire(array $hashes): bool
     {
         // A CVE finding is an issue, and the issue limit is reached for now.
         if (! LimitBackoff::allows(LimitBackoff::ISSUES)) {
@@ -135,8 +157,8 @@ class RequestTrigger
             return false;
         }
 
-        foreach ($payload as $ecosystem => $lock) {
-            if ($this->cache->get($this->lastSentHashCacheKeys[$ecosystem]) !== $lock['content_hash']) {
+        foreach ($hashes as $ecosystem => $hash) {
+            if ($this->cache->get($this->lastSentHashCacheKeys[$ecosystem]) !== $hash) {
                 return true;
             }
         }

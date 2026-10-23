@@ -112,6 +112,15 @@ class ComposerLockScannerTest extends TestCase
     }
 
     #[Test]
+    public function it_hashes_the_lockfile_without_parsing_it()
+    {
+        $result = $this->scan(['packages' => [['name' => 'laravel/framework', 'version' => 'v12.0.1']]]);
+
+        $this->assertSame($result['content_hash'], (new ComposerLockScanner())->hash($this->lockPath));
+        $this->assertNull((new ComposerLockScanner())->hash('/tmp/a-lockfile-that-is-not-there.lock'));
+    }
+
+    #[Test]
     public function it_detects_the_framework_and_its_version()
     {
         $laravel = $this->scan(['packages' => [['name' => 'laravel/framework', 'version' => 'v12.0.1']]]);

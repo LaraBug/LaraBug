@@ -408,4 +408,45 @@ class CveRequestTriggerTest extends TestCase
 
         $second->assertRequestsSent(1);
     }
+
+    #[Test]
+    public function it_does_not_parse_a_lockfile_whose_hash_says_no_scan_is_due()
+    {
+        $this->writeNpmLock('4.17.21');
+
+        $first = new CveClient();
+        $this->trigger($first)->maybeTrigger();
+        $first->assertRequestsSent(1);
+
+        $this->resetStaticState();
+
+        $composerScanner = new class () extends ComposerLockScanner {
+            public int $scans = 0;
+
+            public function scan(?string $lockPath = null, bool $includeDev = false, ?string $environment = null): ?array
+            {
+                $this->scans++;
+
+                return parent::scan($lockPath, $includeDev, $environment);
+            }
+        };
+
+        $npmScanner = new class ($this->npmDirectory) extends NpmLockScanner {
+            public int $scans = 0;
+
+            public function scan(?string $environment = null): ?array
+            {
+                $this->scans++;
+
+                return parent::scan($environment);
+            }
+        };
+
+        $second = new CveClient();
+        (new RequestTrigger($this->app['cache']->store('array'), $composerScanner, $npmScanner, $second))->maybeTrigger();
+
+        $second->assertRequestsSent(0);
+        $this->assertSame(0, $composerScanner->scans);
+        $this->assertSame(0, $npmScanner->scans);
+    }
 }

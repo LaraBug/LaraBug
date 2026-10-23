@@ -32,7 +32,7 @@ class NpmLockScanner
      */
     public function scan(?string $environment = null): ?array
     {
-        $directory = rtrim($this->directory ?: base_path(), '/');
+        $directory = $this->directory();
 
         $lockfile = $this->locate($directory);
 
@@ -72,6 +72,29 @@ class NpmLockScanner
             'environment' => $environment ?: config('app.env'),
             'source' => 'php-sdk',
         ];
+    }
+
+    /**
+     * The same hash scan() puts in content_hash, without parsing the lockfile.
+     */
+    public function hash(): ?string
+    {
+        $directory = $this->directory();
+
+        $lockfile = $this->locate($directory);
+
+        if ($lockfile === null) {
+            return null;
+        }
+
+        $hash = hash_file('sha256', "{$directory}/{$lockfile}");
+
+        return $hash === false ? null : $hash;
+    }
+
+    protected function directory(): string
+    {
+        return rtrim($this->directory ?: base_path(), '/');
     }
 
     protected function locate(string $directory): ?string
