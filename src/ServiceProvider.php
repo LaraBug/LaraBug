@@ -210,7 +210,7 @@ class ServiceProvider extends BaseServiceProvider
             }
 
             // Request-piggyback trigger: fires after the response is sent.
-            // Detects composer.lock changes ~immediately and works without cron.
+            // Detects lockfile changes ~immediately and works without cron.
             if (in_array($trigger, ['request', 'both'], true) && ! $this->app->runningInConsole()) {
                 $this->app->terminating(function () {
                     try {
