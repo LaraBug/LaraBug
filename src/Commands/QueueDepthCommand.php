@@ -18,6 +18,8 @@ class QueueDepthCommand extends Command
         if ($this->option('show')) {
             $this->line(json_encode($sampler->sample(), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
 
+            $this->reportSkipped($sampler);
+
             return self::SUCCESS;
         }
 
@@ -39,6 +41,8 @@ class QueueDepthCommand extends Command
 
         $samples = $sampler->sample();
 
+        $this->reportSkipped($sampler);
+
         if ($samples === []) {
             $this->info('[LaraBug] No queue could be sampled, nothing sent');
 
@@ -47,10 +51,14 @@ class QueueDepthCommand extends Command
 
         $response = $client->reportQueueDepth($samples);
 
+        // Nothing failed on this side when LaraBug cannot be reached or cannot
+        // take the samples. Exiting with an error would have the scheduler
+        // report it to that same server, every minute it lasts. The samples are
+        // not kept: the next minute measures again.
         if ($response === null) {
-            $this->error('[LaraBug] Could not reach the server');
+            $this->warn('[LaraBug] Could not reach the server, the samples were not sent');
 
-            return self::FAILURE;
+            return self::SUCCESS;
         }
 
         // A refusal the server will lift on its own. Failing on it would have the
@@ -76,15 +84,24 @@ class QueueDepthCommand extends Command
         }
 
         if ($status < 200 || $status >= 300) {
-            $this->error("[LaraBug] Server answered {$status}");
+            $this->warn("[LaraBug] Server answered {$status}, the samples were not sent");
 
-            return self::FAILURE;
+            return self::SUCCESS;
         }
 
         $count = count($samples);
 
-        $this->info("[LaraBug] Sent the depth of {$count} ".str('queue')->plural($count));
+        $queues = str('queue')->plural($count);
+
+        $this->info("[LaraBug] Sent the depth of {$count} {$queues}");
 
         return self::SUCCESS;
+    }
+
+    protected function reportSkipped(QueueDepthSampler $sampler): void
+    {
+        foreach ($sampler->skipped() as ['connection' => $connection, 'queue' => $queue, 'reason' => $reason]) {
+            $this->comment("[LaraBug] Skipped {$connection}:{$queue}, {$reason}");
+        }
     }
 }

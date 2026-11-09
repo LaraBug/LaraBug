@@ -2,6 +2,12 @@
 
 All notable changes to `larabug` will be documented in this file
 
+## Unreleased
+
+- `larabug:queue-depth` no longer exits with code 1 when the LaraBug server cannot be reached, times out or answers with an error. It warns, sends nothing and exits 0, so the scheduler stops reporting `Scheduled command [...] larabug:queue-depth failed with exit code [1]` for an outage on the server's side. The samples are not kept: the next minute measures again.
+- The command now says which queues it skipped and why: a connection that is not configured, a driver with no queue to measure (`sync`, `null`, `deferred`, `background`), a failover connection that sends to one of those first, or a broker that could not be measured (an unreachable Redis, a missing `jobs` table), with the exception's class and message. Those queues were already left out silently. `QueueDepthSampler::skipped()` returns the same list after `sample()`.
+- An exception that is not about measuring a queue or reaching the server still reaches Laravel's exception handler, and so LaraBug, as before.
+
 ## 4.0.0-beta.18 - 2026-10-23
 
 - CVE scans now include the application's JavaScript lockfile, so npm advisories can be raised next to Composer ones. The first of `package-lock.json`, `pnpm-lock.yaml` and `yarn.lock` in the application's root is sent as `npm_lock` in the same `cve_scan` as `composer_lock`, which is unchanged. A project without a `composer.lock` sends `npm_lock` alone. A server that does not know `npm_lock` ignores it.

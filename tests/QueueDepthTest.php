@@ -3,6 +3,7 @@
 namespace LaraBug\Tests;
 
 use Carbon\Carbon;
+use LogicException;
 use LaraBug\Http\Client;
 use GuzzleHttp\Middleware;
 use GuzzleHttp\HandlerStack;
@@ -20,6 +21,7 @@ use Illuminate\Support\Facades\Schema;
 use LaraBug\Tests\Mocks\MeasuredQueue;
 use LaraBug\Tests\Mocks\MeteredClient;
 use PHPUnit\Framework\Attributes\Test;
+use Psr\Http\Message\ResponseInterface;
 use Illuminate\Database\Schema\Blueprint;
 use GuzzleHttp\Exception\ConnectException;
 use Illuminate\Console\Scheduling\Schedule;
@@ -431,19 +433,33 @@ class QueueDepthTest extends TestCase
     }
 
     #[Test]
-    public function it_fails_when_the_server_answers_with_an_error()
+    public function a_server_error_does_not_fail_the_scheduler()
     {
         $this->driver('redis', new SizedQueue(['default' => 4]));
 
         $this->client->willRespondWith(500);
 
         $this->artisan('larabug:queue-depth')
-            ->expectsOutput('[LaraBug] Server answered 500')
-            ->assertExitCode(1);
+            ->expectsOutput('[LaraBug] Server answered 500, the samples were not sent')
+            ->assertExitCode(0);
+
+        $this->client->assertRequestsSent(1);
     }
 
     #[Test]
-    public function it_fails_when_the_server_cannot_be_reached()
+    public function a_refused_key_does_not_fail_the_scheduler()
+    {
+        $this->driver('redis', new SizedQueue(['default' => 4]));
+
+        $this->client->willRespondWith(401);
+
+        $this->artisan('larabug:queue-depth')
+            ->expectsOutput('[LaraBug] Server answered 401, the samples were not sent')
+            ->assertExitCode(0);
+    }
+
+    #[Test]
+    public function an_unreachable_server_does_not_fail_the_scheduler()
     {
         $this->driver('redis', new SizedQueue(['default' => 4]));
 
@@ -454,8 +470,134 @@ class QueueDepthTest extends TestCase
         ], $sent));
 
         $this->artisan('larabug:queue-depth')
-            ->expectsOutput('[LaraBug] Could not reach the server')
-            ->assertExitCode(1);
+            ->expectsOutput('[LaraBug] Could not reach the server, the samples were not sent')
+            ->assertExitCode(0);
+    }
+
+    #[Test]
+    public function a_server_that_times_out_does_not_fail_the_scheduler()
+    {
+        $this->driver('redis', new SizedQueue(['default' => 4]));
+
+        $sent = [];
+
+        $this->app->instance(Client::class, $this->guzzleBackedClient([
+            new ConnectException(
+                'cURL error 28: Operation timed out after 5001 milliseconds',
+                new Request('POST', 'https://www.larabug.com/api/log')
+            ),
+        ], $sent));
+
+        $this->artisan('larabug:queue-depth')
+            ->expectsOutput('[LaraBug] Could not reach the server, the samples were not sent')
+            ->assertExitCode(0);
+    }
+
+    #[Test]
+    public function a_server_answering_through_guzzle_with_an_error_does_not_fail_the_scheduler()
+    {
+        $this->driver('redis', new SizedQueue(['default' => 4]));
+
+        $sent = [];
+
+        $this->app->instance(Client::class, $this->guzzleBackedClient([
+            new Response(503, [], '{"message":"Service Unavailable"}'),
+        ], $sent));
+
+        $this->artisan('larabug:queue-depth')
+            ->expectsOutput('[LaraBug] Server answered 503, the samples were not sent')
+            ->assertExitCode(0);
+    }
+
+    #[Test]
+    public function it_says_which_queues_it_skipped_and_why()
+    {
+        config([
+            'queue.connections.failover-to-sync' => ['driver' => 'failover', 'connections' => ['sync', 'redis']],
+            'larabug.jobs.depth.queues' => [
+                'redis:default',
+                'redis:unreachable',
+                'sync:default',
+                'missing:default',
+                'failover-to-sync:default',
+            ],
+        ]);
+
+        $this->driver('redis', new SizedQueue(['default' => 4]));
+
+        $this->artisan('larabug:queue-depth')
+            ->expectsOutput('[LaraBug] Skipped redis:unreachable, it could not be measured (RuntimeException: Could not reach the broker for [unreachable].)')
+            ->expectsOutput('[LaraBug] Skipped sync:default, the sync driver has no queue to measure')
+            ->expectsOutput('[LaraBug] Skipped missing:default, the connection is not configured')
+            ->expectsOutput('[LaraBug] Skipped failover-to-sync:default, the failover connection sends to sync first, whose sync driver has no queue to measure')
+            ->expectsOutput('[LaraBug] Sent the depth of 1 queue')
+            ->assertExitCode(0);
+
+        $this->assertSame(['default'], array_column($this->client->lastRequest()['samples'], 'queue'));
+    }
+
+    #[Test]
+    public function a_queue_whose_broker_is_down_is_skipped_without_failing_the_scheduler()
+    {
+        $this->driver('redis', new SizedQueue());
+
+        $this->artisan('larabug:queue-depth')
+            ->expectsOutput('[LaraBug] Skipped redis:default, it could not be measured (RuntimeException: Could not reach the broker for [default].)')
+            ->expectsOutput('[LaraBug] No queue could be sampled, nothing sent')
+            ->assertExitCode(0);
+
+        $this->client->assertRequestsSent(0);
+    }
+
+    #[Test]
+    public function a_database_queue_without_its_jobs_table_is_skipped_without_failing_the_scheduler()
+    {
+        config([
+            'queue.default' => 'database',
+            'queue.connections.database' => ['driver' => 'database', 'table' => 'jobs', 'queue' => 'default'],
+        ]);
+
+        $this->artisan('larabug:queue-depth')
+            ->expectsOutputToContain('[LaraBug] Skipped database:default, it could not be measured (QueryException:')
+            ->expectsOutput('[LaraBug] No queue could be sampled, nothing sent')
+            ->assertExitCode(0);
+    }
+
+    #[Test]
+    public function the_sampler_keeps_only_the_last_runs_skips()
+    {
+        config(['larabug.jobs.depth.queues' => ['sync:default']]);
+
+        $sampler = $this->sampler();
+
+        $sampler->sample();
+        $sampler->sample();
+
+        $this->assertSame([
+            ['connection' => 'sync', 'queue' => 'default', 'reason' => 'the sync driver has no queue to measure'],
+        ], $sampler->skipped());
+    }
+
+    #[Test]
+    public function an_error_in_the_package_itself_is_not_swallowed()
+    {
+        $this->driver('redis', new SizedQueue(['default' => 4]));
+
+        $this->app->instance(Client::class, new class () extends Client {
+            public function __construct()
+            {
+                parent::__construct('login-key', 'project-key');
+            }
+
+            public function reportQueueDepth(array $samples): ?ResponseInterface
+            {
+                throw new LogicException('A bug in the package');
+            }
+        });
+
+        $this->expectException(LogicException::class);
+
+        $this->artisan('larabug:queue-depth')->run();
     }
 
     #[Test]
