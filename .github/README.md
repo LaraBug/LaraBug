@@ -6,7 +6,6 @@ Official Laravel SDK for [larabug.com](https://www.larabug.com). Captures unhand
 
 [![Software License](https://poser.pugx.org/larabug/larabug/license.svg)](../LICENSE.md)
 [![Latest Version on Packagist](https://poser.pugx.org/larabug/larabug/v/stable.svg)](https://packagist.org/packages/larabug/larabug)
-[![Build Status](https://github.com/larabug/larabug/workflows/tests/badge.svg)](https://github.com/larabug/larabug/actions)
 [![Total Downloads](https://poser.pugx.org/larabug/larabug/d/total.svg)](https://packagist.org/packages/larabug/larabug)
 
 ## Installation

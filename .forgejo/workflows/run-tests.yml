@@ -1,14 +1,20 @@
 name: tests
 
+# Runs on the Forgejo mirror at git.intil.li, not on GitHub. The mirror syncs
+# on every GitHub push and only ever sees pushes, so there is no pull_request
+# trigger: every branch is tested on push, and the result is reported back to
+# the commit on GitHub as a status. The nightly schedule only fires for the
+# mirror's default branch.
 on:
   push:
-  pull_request:
   schedule:
     - cron: '0 0 * * *'
 
 jobs:
   php-tests:
-    runs-on: ${{ matrix.os }}
+    # Forgejo runners are Linux only, so there is no os matrix: no Windows or
+    # macOS jobs. ubuntu-latest is the runner's own image, not GitHub's.
+    runs-on: ubuntu-latest
 
     strategy:
       fail-fast: false
@@ -16,7 +22,6 @@ jobs:
         php: [ 8.4, 8.3, 8.2 ]
         laravel: [ 13.*, 12.*, 11.* ]
         dependency-version: [ prefer-lowest, prefer-stable ]
-        os: [ ubuntu-latest ]
         include:
           - laravel: 13.*
             testbench: 11.*
@@ -39,12 +44,16 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # Only the extensions the package and its tests use. The runner image is
+      # not GitHub's, so extensions that need system libraries (imagick, gd,
+      # intl, soap) would have to be built here for nothing. No coverage
+      # driver either: the suite runs without coverage.
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
           php-version: ${{ matrix.php }}
-          extensions: dom, curl, libxml, mbstring, zip, pcntl, pdo, sqlite, pdo_sqlite, bcmath, soap, intl, gd, exif, iconv, imagick
-          coverage: xdebug
+          extensions: dom, curl, libxml, mbstring, zip, pdo, sqlite, pdo_sqlite
+          coverage: none
 
       - name: Install dependencies
         run: |
