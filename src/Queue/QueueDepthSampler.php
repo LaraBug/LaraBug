@@ -30,6 +30,9 @@ class QueueDepthSampler
      */
     protected array $unsizableDrivers = ['sync', 'null', 'deferred', 'background'];
 
+    /** @var array<int, array{connection: string, queue: string, reason: string}> */
+    protected array $skipped = [];
+
     public function __construct(protected readonly Factory $queues)
     {
     }
@@ -50,8 +53,14 @@ class QueueDepthSampler
     {
         $samples = [];
 
+        $this->skipped = [];
+
         foreach ($this->queues() as ['connection' => $connection, 'queue' => $queue]) {
-            if (! $this->isSizable($connection)) {
+            $reason = $this->unsizableReason($connection);
+
+            if ($reason !== null) {
+                $this->skip($connection, $queue, $reason);
+
                 continue;
             }
 
@@ -63,6 +72,16 @@ class QueueDepthSampler
         }
 
         return $samples;
+    }
+
+    /**
+     * The queues the last sample() left out, and why.
+     *
+     * @return array<int, array{connection: string, queue: string, reason: string}>
+     */
+    public function skipped(): array
+    {
+        return $this->skipped;
     }
 
     /**
@@ -175,36 +194,52 @@ class QueueDepthSampler
     }
 
     /**
-     * A failover connection is only as sizable as the connection it sends to
-     * first, since that is the one its own size() asks.
+     * Why a connection cannot be measured, or null when it can. A failover
+     * connection is only as sizable as the connection it sends to first,
+     * since that is the one its own size() asks.
      */
-    protected function isSizable(string $connection): bool
+    protected function unsizableReason(string $connection): ?string
     {
         $driver = $this->driver($connection);
 
         if ($driver === null) {
-            return false;
+            return 'the connection is not configured';
         }
 
         if (in_array($driver, $this->unsizableDrivers, true)) {
-            return false;
+            return "the {$driver} driver has no queue to measure";
         }
 
         if ($driver !== 'failover') {
-            return true;
+            return null;
         }
 
         $first = config("queue.connections.{$connection}.connections.0");
 
         if (! is_string($first)) {
-            return false;
+            return 'the failover connection names no connection to send to';
         }
 
         $firstDriver = $this->driver($first);
 
-        return $firstDriver !== null
-            && $firstDriver !== 'failover'
-            && ! in_array($firstDriver, $this->unsizableDrivers, true);
+        if ($firstDriver === null) {
+            return "the failover connection sends to {$first} first, which is not configured";
+        }
+
+        if ($firstDriver === 'failover') {
+            return "the failover connection sends to {$first} first, another failover connection";
+        }
+
+        if (in_array($firstDriver, $this->unsizableDrivers, true)) {
+            return "the failover connection sends to {$first} first, whose {$firstDriver} driver has no queue to measure";
+        }
+
+        return null;
+    }
+
+    protected function skip(string $connection, string $queue, string $reason): void
+    {
+        $this->skipped[] = ['connection' => $connection, 'queue' => $queue, 'reason' => $reason];
     }
 
     protected function driver(string $connection): ?string
@@ -241,9 +276,14 @@ class QueueDepthSampler
             $oldestPendingAt = method_exists($instance, 'creationTimeOfOldestPendingJob')
                 ? $instance->creationTimeOfOldestPendingJob($queue)
                 : null;
-        } catch (Throwable) {
-            // An unreachable broker, or a driver that cannot be counted. Left out
-            // rather than sent as zero: nothing measured is not nothing waiting.
+        } catch (Throwable $exception) {
+            // An unreachable broker, a missing jobs table, or a driver that cannot
+            // be counted. Left out rather than sent as zero: nothing measured is
+            // not nothing waiting.
+            $error = class_basename($exception);
+
+            $this->skip($connection, $queue, "it could not be measured ({$error}: {$exception->getMessage()})");
+
             return null;
         }
 
