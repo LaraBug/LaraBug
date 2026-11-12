@@ -2,7 +2,7 @@
 
 All notable changes to `larabug` will be documented in this file
 
-## Unreleased
+## 4.0.0-beta.21 - 2026-11-12
 
 - Events the LaraBug server could not take are no longer lost. On a 5xx, or when the server cannot be reached at all, the payload is written to a retry buffer on local disk (`storage/larabug/retry-buffer` by default, `retry_buffer.path` or `LB_RETRY_BUFFER_PATH`) and sent again, oldest first, on the next send that succeeds. A web request sends it on shutdown, after the response has gone out. A console process sends up to 50 right away.
 - `larabug:flush` sends everything waiting. It is scheduled every minute on every server, and only starts when something is waiting. It takes a file lock, so two processes never send the same event, stops at the first 5xx, unreachable server or 429, and always exits 0.
