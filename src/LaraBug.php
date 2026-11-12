@@ -3,6 +3,7 @@
 namespace LaraBug;
 
 use Throwable;
+use Carbon\Carbon;
 use LaraBug\Http\Client;
 use LaraBug\Filters\DataFilter;
 use LaraBug\Concerns\Larabugable;
@@ -68,6 +69,11 @@ class LaraBug
 
         self::$capturing = true;
 
+        // Taken before anything else, so it is the moment of capture. Sent as
+        // is, a report kept in the retry buffer still lands at the time it
+        // happened rather than the time it was flushed.
+        $occurredAt = Carbon::now('UTC')->format('Y-m-d\TH:i:s.uP');
+
         try {
             if ($this->isSkipEnvironment()) {
                 return false;
@@ -110,7 +116,7 @@ class LaraBug
                 $data['frames'] = [];
             }
 
-            $rawResponse = $this->logError($data);
+            $rawResponse = $this->logError($data, $occurredAt);
 
             if (! $rawResponse) {
                 return false;
@@ -446,7 +452,12 @@ class LaraBug
         return 'larabug.'.md5($string);
     }
 
-    private function logError(array $exception): ?ResponseInterface
+    /**
+     * @param  array<string, mixed>  $exception
+     * @param  string  $occurredAt  ISO 8601 in UTC. A server that predates the
+     *                              field ignores it and uses the arrival time.
+     */
+    private function logError(array $exception, string $occurredAt): ?ResponseInterface
     {
         // The issue limit is reached for the moment, or the account is being
         // rate limited. Sending would collect another refusal and cost the
@@ -459,6 +470,7 @@ class LaraBug
         $response = $this->client->report([
             'exception' => $exception,
             'user' => $this->getUser(),
+            'occurred_at' => $occurredAt,
         ]);
 
         LimitBackoff::record($response, LimitBackoff::ISSUES);

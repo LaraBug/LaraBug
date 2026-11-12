@@ -3,6 +3,7 @@
 namespace LaraBug\Tests;
 
 use Exception;
+use Carbon\Carbon;
 use LaraBug\LaraBug;
 use LaraBug\Http\Client;
 use GuzzleHttp\Middleware;
@@ -270,6 +271,74 @@ class RetryBufferTest extends TestCase
             (string) $this->sent[0]['request']->getBody(),
             (string) $this->sent[1]['request']->getBody(),
         );
+    }
+
+    #[Test]
+    public function a_captured_exception_carries_the_time_it_happened()
+    {
+        Carbon::setTestNow(Carbon::parse('2026-11-12 08:15:30.250000', 'UTC'));
+
+        $client = $this->client([new Response(200)]);
+
+        (new LaraBug($client))->handle(new Exception('Stamped'));
+
+        $payload = $this->sentPayloads()[0];
+
+        $this->assertSame('2026-11-12T08:15:30.250000+00:00', $payload['occurred_at']);
+        $this->assertArrayNotHasKey('occurred_at', $payload['exception']);
+    }
+
+    #[Test]
+    public function a_javascript_error_carries_the_time_it_happened()
+    {
+        Carbon::setTestNow(Carbon::parse('2026-11-12 08:15:30', 'UTC'));
+
+        $client = $this->client([new Response(200)]);
+
+        (new LaraBug($client))->handle(new Exception('Uncaught TypeError'), 'javascript', [
+            'url' => 'https://example.com/checkout',
+            'file' => 'https://example.com/app.js',
+            'message' => 'Uncaught TypeError',
+            'stack' => 'at app.js:1:1',
+            'line' => 1,
+        ]);
+
+        $this->assertSame('2026-11-12T08:15:30.000000+00:00', $this->sentPayloads()[0]['occurred_at']);
+    }
+
+    #[Test]
+    public function a_kept_exception_is_flushed_with_the_time_it_happened()
+    {
+        Carbon::setTestNow(Carbon::parse('2026-11-12 08:15:30', 'UTC'));
+
+        $client = $this->client([new Response(503), new Response(200)]);
+
+        (new LaraBug($client))->handle(new Exception('During the outage'));
+
+        $this->assertSame('2026-11-12T08:15:30.000000+00:00', $this->kept()[0]['occurred_at']);
+
+        Carbon::setTestNow(Carbon::parse('2026-11-12 10:45:00', 'UTC'));
+
+        RetryBuffer::fromConfig()->flush($client);
+
+        $this->assertSame('2026-11-12T08:15:30.000000+00:00', $this->sentPayloads()[1]['occurred_at']);
+        $this->assertSame('During the outage', $this->sentPayloads()[1]['exception']['exception']);
+    }
+
+    #[Test]
+    public function telemetry_is_not_stamped_with_an_occurrence_time()
+    {
+        $client = $this->client([new Response(200), new Response(200)]);
+
+        $client->reportRequests([['uri' => '/orders']]);
+
+        $logs = new LogBuffer($client, ['project_key' => 'project-key']);
+        $logs->add(['message' => 'Line one']);
+        $logs->flush();
+
+        foreach ($this->sentPayloads() as $payload) {
+            $this->assertArrayNotHasKey('occurred_at', $payload);
+        }
     }
 
     #[Test]

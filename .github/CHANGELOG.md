@@ -8,6 +8,7 @@ All notable changes to `larabug` will be documented in this file
 - `larabug:flush` sends everything waiting. It is scheduled every minute on every server, and only starts when something is waiting. It takes a file lock, so two processes never send the same event, stops at the first 5xx, unreachable server or 429, and always exits 0.
 - A `Retry-After` on a 5xx is honoured: until then nothing is sent and new events go straight to the buffer. The wait is capped at 10 minutes.
 - The buffer holds at most 500 events, 5 MB and a day by default (`retry_buffer.max_events`, `max_bytes`, `max_age`). Past a bound the oldest are dropped. A 4xx is never kept, and a 429 or 402 is still left to the backoff. CVE scans and queue depth samples are never kept. What is written is the payload as it would have been sent, after the data filters, and never the login key. Every failure in the buffer is swallowed.
+- Exception and JavaScript error reports now carry a top level `occurred_at` (ISO 8601, UTC), taken when the exception is captured, so one sent late from the retry buffer keeps the time it happened. A server that does not know the field ignores it and uses the time the report arrived. Telemetry streams are unchanged, since their records carry their own times.
 - With the buffer on, a log or queue job batch refused with a 5xx is no longer retried in process (`logs.max_retries`, `jobs.max_retries`), since the buffer already keeps it. Set `LB_RETRY_BUFFER_ENABLED=false` to go back to dropping, and to those retries.
 
 ## 4.0.0-beta.19 - 2026-11-09
