@@ -164,7 +164,9 @@ class EventBuffer implements Countable
             if ($response && method_exists($response, 'getStatusCode')) {
                 $statusCode = $response->getStatusCode();
 
-                if ($statusCode >= 500 && $attempt < $maxRetries) {
+                // The client has kept the batch to send once the server is
+                // back, so sending it again now could deliver it twice.
+                if ($statusCode >= 500 && $attempt < $maxRetries && ! $this->client->keepsFailedSends()) {
                     usleep(100000 * $attempt); // Backoff: 100ms, 200ms, 300ms
 
                     $this->sendBatch($events, $attempt + 1);

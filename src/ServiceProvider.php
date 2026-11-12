@@ -8,6 +8,7 @@ use SplObjectStorage;
 use LaraBug\Http\Client;
 use LaraBug\Support\Dsn;
 use InvalidArgumentException;
+use LaraBug\Http\RetryBuffer;
 use LaraBug\Logger\LogBuffer;
 use LaraBug\Queue\JobMonitor;
 use LaraBug\Requests\Sampler;
@@ -18,6 +19,7 @@ use Illuminate\Cache\Repository;
 use LaraBug\Commands\ScanCommand;
 use LaraBug\Commands\TestCommand;
 use LaraBug\Queue\DispatchMacros;
+use LaraBug\Commands\FlushCommand;
 use LaraBug\Console\CommandBuffer;
 use LaraBug\Logger\LaraBugHandler;
 use LaraBug\Queue\JobTracePayload;
@@ -73,6 +75,7 @@ class ServiceProvider extends BaseServiceProvider
             TestCommand::class,
             ScanCommand::class,
             QueueDepthCommand::class,
+            FlushCommand::class,
         ]);
 
         $this->mapLaraBugApiRoutes();
@@ -170,6 +173,22 @@ class ServiceProvider extends BaseServiceProvider
                     ->everyMinute()
                     ->withoutOverlapping(5)
                     ->onOneServer();
+            });
+        }
+
+        // Events kept while the server could not take them go out again on the
+        // next send that succeeds, and from here for an application that has
+        // nothing else to send. Checked before the scheduler starts a process,
+        // so an empty buffer costs nothing. On every server, not one: each one
+        // keeps its own buffer on its own disk. Not withoutOverlapping either,
+        // since that mutex is shared between servers through the cache. The
+        // buffer's own lock keeps two flushes on one server apart.
+        if (config('larabug.retry_buffer.enabled', true) && config('larabug.retry_buffer.schedule', true)) {
+            $this->app->booted(function () {
+                $this->app->make(Schedule::class)
+                    ->command('larabug:flush')
+                    ->everyMinute()
+                    ->when(fn () => RetryBuffer::fromConfig()?->hasEntries() ?? false);
             });
         }
 

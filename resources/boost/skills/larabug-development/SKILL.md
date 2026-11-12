@@ -58,6 +58,7 @@ Read the config file before changing behaviour. Every key documents what it does
 | Artisan commands | on | `LB_TRACK_COMMANDS` |
 | Scheduled tasks | on | `LB_TRACK_SCHEDULED_TASKS` |
 | Query plans for slow SELECTs | off | `LB_QUERY_EXPLAIN` |
+| Retry buffer for 5xx and unreachable server | on | `LB_RETRY_BUFFER_ENABLED`, flushed by `larabug:flush` on `schedule:run` |
 
 Every stream is collected out of the box, so an installation never looks healthy while silently reporting errors only. Each one still spends the account's event quota, so reach for its sample rate or level before switching it off, and never raise a sample rate or switch on query plans unless you were asked to.
 
