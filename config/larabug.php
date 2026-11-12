@@ -206,17 +206,20 @@ return [
     | on local disk instead of dropped. It is sent again on the next send that
     | succeeds, and from `larabug:flush`, which the package schedules every
     | minute while something is waiting (so it needs `schedule:run`). A 5xx
-    | with a Retry-After header holds every send until then, up to 10 minutes.
+    | with a Retry-After header holds every send until then, up to 10 minutes,
+    | and a server that cannot be reached holds them for 30 seconds, so only
+    | the first send pays the timeout and the rest go straight to the buffer.
     |
     | Only what would have gone over the wire is written, after every filter
     | above has been applied, and never the login key. A 4xx is never kept:
     | it will not get better. CVE scans and queue depth samples are never
     | kept either, since both are sent fresh soon enough.
     |
-    | Bounded by count, total bytes and age in seconds. Past a bound the
-    | oldest events are dropped. Every server keeps its own buffer, so the
-    | path must be on local disk, writable by both the web server and the
-    | scheduler's user.
+    | Bounded by count, total bytes and age in seconds. Past the age an event
+    | is dropped. Past the count or size the oldest telemetry goes first, and
+    | exceptions only once there is no telemetry left to drop. Every server
+    | keeps its own buffer, so the path must be on local disk, writable by
+    | both the web server and the scheduler's user.
     |
     */
     'retry_buffer' => [

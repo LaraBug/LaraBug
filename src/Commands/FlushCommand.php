@@ -50,7 +50,7 @@ class FlushCommand extends Command
 
         match ($result->stoppedBy) {
             FlushStop::Locked => $this->comment('[LaraBug] Another process is sending them right now'),
-            FlushStop::Paused => $this->warn('[LaraBug] The server asked not to be sent anything until '.date('H:i:s', $retryBuffer->pausedUntil())),
+            FlushStop::Paused => $this->warn('[LaraBug] The server was down or asked to wait, nothing is sent until '.date('H:i:s', $retryBuffer->pausedUntil())),
             FlushStop::Unreachable => $this->warn('[LaraBug] Could not reach the server, the rest is kept for the next run'),
             FlushStop::ServerError => $this->warn('[LaraBug] The server answered with an error again, the rest is kept for the next run'),
             FlushStop::RateLimited => $this->warn('[LaraBug] This project is sending faster than its plan\'s rate limit, the rest is kept for the next run'),

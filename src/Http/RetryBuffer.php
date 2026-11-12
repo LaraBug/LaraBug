@@ -24,7 +24,11 @@ use GuzzleHttp\Exception\TransferException;
  * so it has already been through every filter the SDK applies. The request's
  * headers, the login key among them, are never written.
  *
- * Bounded by count, total size and age. Past a bound the oldest go first.
+ * Bounded by count, total size and age. Past the age bound an event goes.
+ * Past the count or size bound the oldest telemetry goes first and the oldest
+ * exception after it, so an outage's worth of request and log batches cannot
+ * push out the exceptions that happened during it. The stream is in the file
+ * name, so trimming never has to read an event.
  *
  * Nothing in here may reach the application. Every public method swallows
  * whatever goes wrong: a buffer that cannot be written loses the event, which
@@ -56,6 +60,7 @@ class RetryBuffer
         protected readonly int $maxBytes = 5 * 1024 * 1024,
         protected readonly int $maxAge = 86400,
         protected readonly int $maxPause = 600,
+        protected readonly int $unreachablePause = 30,
     ) {
     }
 
@@ -110,7 +115,17 @@ class RetryBuffer
         try {
             $status = $response?->getStatusCode();
 
-            if ($status === null || $status >= 500) {
+            if ($status === null) {
+                if ($this->accepts($payload)) {
+                    $this->keep($payload);
+                }
+
+                $this->pause($this->unreachablePause);
+
+                return;
+            }
+
+            if ($status >= 500) {
                 if ($this->accepts($payload)) {
                     $this->keep($payload);
                 }
@@ -155,7 +170,14 @@ class RetryBuffer
             $now = microtime(true);
             $seconds = (int) $now;
             $microseconds = (int) (($now - $seconds) * 1_000_000);
-            $name = sprintf('%s/%010d.%06d-%s', $this->path, $seconds, $microseconds, bin2hex(random_bytes(4)));
+            $name = sprintf(
+                '%s/%010d.%06d-%s-%s',
+                $this->path,
+                $seconds,
+                $microseconds,
+                bin2hex(random_bytes(4)),
+                $this->streamOf($payload),
+            );
 
             if (@file_put_contents("{$name}.tmp", $json) === false) {
                 @unlink("{$name}.tmp");
@@ -325,7 +347,7 @@ class RetryBuffer
                 continue;
             }
 
-            $stream = isset($payload['type']) ? LimitBackoff::TELEMETRY : LimitBackoff::ISSUES;
+            $stream = $this->streamOf($payload);
 
             // That stream is held back in this process. The event waits for
             // the window to pass, and the other stream carries on.
@@ -338,6 +360,7 @@ class RetryBuffer
             try {
                 $response = $client->resend($json);
             } catch (TransferException) {
+                $this->pause($this->unreachablePause);
                 $stoppedBy = FlushStop::Unreachable;
 
                 break;
@@ -434,11 +457,29 @@ class RetryBuffer
             return;
         }
 
+        $this->pause(min($this->maxPause, $seconds));
+    }
+
+    /**
+     * Hold every send that the buffer would keep for this many seconds, in
+     * every process. A server that cannot be reached would otherwise cost each
+     * of them a timeout of its own, up to fifteen seconds for an exception,
+     * where now the first one pays it and the rest go straight to the buffer.
+     *
+     * Never shortens a pause already in place: an unreachable server noticed
+     * by a CVE scan must not cut short the wait a Retry-After asked for.
+     */
+    protected function pause(int $seconds): void
+    {
         if (! $this->ensureDirectoryExists()) {
             return;
         }
 
-        $until = time() + min($this->maxPause, $seconds);
+        $until = time() + $seconds;
+
+        if ($until <= $this->pausedUntil()) {
+            return;
+        }
 
         @file_put_contents("{$this->path}/.retry-after", (string) $until, LOCK_EX);
     }
@@ -475,7 +516,10 @@ class RetryBuffer
         $count = count($sizes);
         $bytes = array_sum($sizes);
 
-        foreach ($sizes as $file => $size) {
+        $telemetry = array_filter($sizes, fn (string $file) => str_ends_with($file, '-'.LimitBackoff::TELEMETRY.'.json'), ARRAY_FILTER_USE_KEY);
+        $issues = array_diff_key($sizes, $telemetry);
+
+        foreach ($telemetry + $issues as $file => $size) {
             if ($count <= $this->maxEvents && $bytes <= $this->maxBytes) {
                 break;
             }
@@ -512,6 +556,17 @@ class RetryBuffer
         } catch (Throwable) {
             return [];
         }
+    }
+
+    /**
+     * Which limit an event counts against: exceptions are sent without a
+     * type, every telemetry batch names one.
+     *
+     * @param  array<string, mixed>  $payload
+     */
+    protected function streamOf(array $payload): string
+    {
+        return isset($payload['type']) ? LimitBackoff::TELEMETRY : LimitBackoff::ISSUES;
     }
 
     protected function writtenAt(string $file): int
