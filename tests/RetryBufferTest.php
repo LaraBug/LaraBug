@@ -199,6 +199,37 @@ class RetryBufferTest extends TestCase
     }
 
     #[Test]
+    public function past_a_bound_telemetry_is_dropped_before_exceptions()
+    {
+        config(['larabug.retry_buffer.max_events' => 3]);
+
+        $buffer = RetryBuffer::fromConfig();
+
+        $buffer->keep(['exception' => ['exception' => 'First'], 'number' => 1]);
+        $buffer->keep(['type' => 'requests_batch', 'number' => 2]);
+        $buffer->keep(['type' => 'logs_batch', 'number' => 3]);
+        $buffer->keep(['exception' => ['exception' => 'Second'], 'number' => 4]);
+        $buffer->keep(['type' => 'logs_batch', 'number' => 5]);
+
+        $this->assertSame([1, 4, 5], array_column($this->kept(), 'number'));
+    }
+
+    #[Test]
+    public function exceptions_go_oldest_first_once_no_telemetry_is_left_to_drop()
+    {
+        config(['larabug.retry_buffer.max_events' => 2]);
+
+        $buffer = RetryBuffer::fromConfig();
+
+        $buffer->keep(['type' => 'logs_batch', 'number' => 1]);
+        $buffer->keep(['exception' => ['exception' => 'First'], 'number' => 2]);
+        $buffer->keep(['exception' => ['exception' => 'Second'], 'number' => 3]);
+        $buffer->keep(['exception' => ['exception' => 'Third'], 'number' => 4]);
+
+        $this->assertSame([3, 4], array_column($this->kept(), 'number'));
+    }
+
+    #[Test]
     public function an_event_bigger_than_the_whole_buffer_is_not_kept()
     {
         config(['larabug.retry_buffer.max_bytes' => 100]);
@@ -444,6 +475,47 @@ class RetryBufferTest extends TestCase
 
         $this->assertSame(FlushStop::Paused, $result->stoppedBy);
         $this->assertCount(1, $this->sent);
+    }
+
+    #[Test]
+    public function an_unreachable_server_holds_every_send_for_thirty_seconds()
+    {
+        $client = $this->client([$this->connectionFailure()]);
+
+        $laraBug = new LaraBug($client);
+        $laraBug->handle(new Exception('Paid the timeout'));
+        $laraBug->handle(new Exception('Went straight to the buffer'));
+
+        $this->assertCount(1, $this->sent);
+        $this->assertCount(2, $this->kept());
+        $this->assertEqualsWithDelta(time() + 30, RetryBuffer::fromConfig()->pausedUntil(), 1);
+    }
+
+    #[Test]
+    public function an_unreachable_server_never_shortens_the_wait_a_retry_after_asked_for()
+    {
+        $client = $this->client([
+            new Response(503, ['Retry-After' => '300']),
+            $this->connectionFailure(),
+        ]);
+
+        $client->reportCommands([['command' => 'inspire']]);
+        $client->report(['type' => 'cve_scan', 'composer_lock' => []]);
+
+        $this->assertCount(2, $this->sent);
+        $this->assertEqualsWithDelta(time() + 300, RetryBuffer::fromConfig()->pausedUntil(), 1);
+    }
+
+    #[Test]
+    public function a_flush_that_cannot_reach_the_server_holds_sends_for_thirty_seconds()
+    {
+        $this->writeEntry(time() - 10, ['type' => 'logs_batch', 'number' => 1]);
+
+        $client = $this->client([$this->connectionFailure()]);
+
+        RetryBuffer::fromConfig()->flush($client);
+
+        $this->assertEqualsWithDelta(time() + 30, RetryBuffer::fromConfig()->pausedUntil(), 1);
     }
 
     #[Test]
