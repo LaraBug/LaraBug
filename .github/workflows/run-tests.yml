@@ -129,8 +129,13 @@ jobs:
           extensions: dom, curl, libxml, mbstring, zip, pcntl, pdo, sqlite, pdo_sqlite, bcmath, soap, intl, gd, exif, iconv, imagick
           coverage: xdebug
 
+      # Composer refuses to install any release with a security advisory, and
+      # every Laravel 6 to 11 release has one, so those rows would not resolve
+      # at all. The matrix tests the versions composer.json claims to support;
+      # which of them an application may install is that application's call.
       - name: Install dependencies
         run: |
+          composer config --global policy.advisories.block false
           composer require "laravel/framework:${{ matrix.laravel }}" "orchestra/testbench:${{ matrix.testbench }}" --no-interaction --no-update
           composer update --${{ matrix.dependency-version }} --prefer-dist --no-interaction --no-suggest
 
