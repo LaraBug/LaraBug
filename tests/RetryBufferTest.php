@@ -462,6 +462,10 @@ class RetryBufferTest extends TestCase
     #[Test]
     public function a_read_only_buffer_never_reaches_the_application()
     {
+        if (function_exists('posix_geteuid') && posix_geteuid() === 0) {
+            $this->markTestSkipped('Root writes to a read-only directory regardless of its mode.');
+        }
+
         mkdir($this->retryBufferPath);
         chmod($this->retryBufferPath, 0555);
 
