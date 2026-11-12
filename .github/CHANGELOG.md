@@ -2,6 +2,10 @@
 
 All notable changes to `larabug` will be documented in this file
 
+## 4.0.0-beta.20 - 2026-11-12
+
+- The README shows the test status of `v4`, as the Forgejo runner reports it on the commit. No change to the package itself.
+
 ## 4.0.0-beta.19 - 2026-11-09
 
 - `larabug:queue-depth` no longer exits with code 1 when the LaraBug server cannot be reached, times out or answers with an error. It warns, sends nothing and exits 0, so the scheduler stops reporting `Scheduled command [...] larabug:queue-depth failed with exit code [1]` for an outage on the server's side. The samples are not kept: the next minute measures again.
