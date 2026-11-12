@@ -198,6 +198,38 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Retry buffer
+    |--------------------------------------------------------------------------
+    |
+    | When the LaraBug server answers with a 5xx or cannot be reached at all,
+    | during a deploy, maintenance or an outage, what was being sent is kept
+    | on local disk instead of dropped. It is sent again on the next send that
+    | succeeds, and from `larabug:flush`, which the package schedules every
+    | minute while something is waiting (so it needs `schedule:run`). A 5xx
+    | with a Retry-After header holds every send until then, up to 10 minutes.
+    |
+    | Only what would have gone over the wire is written, after every filter
+    | above has been applied, and never the login key. A 4xx is never kept:
+    | it will not get better. CVE scans and queue depth samples are never
+    | kept either, since both are sent fresh soon enough.
+    |
+    | Bounded by count, total bytes and age in seconds. Past a bound the
+    | oldest events are dropped. Every server keeps its own buffer, so the
+    | path must be on local disk, writable by both the web server and the
+    | scheduler's user.
+    |
+    */
+    'retry_buffer' => [
+        'enabled' => env('LB_RETRY_BUFFER_ENABLED', true),
+        'path' => env('LB_RETRY_BUFFER_PATH', storage_path('larabug/retry-buffer')),
+        'max_events' => env('LB_RETRY_BUFFER_MAX_EVENTS', 500),
+        'max_bytes' => env('LB_RETRY_BUFFER_MAX_BYTES', 5 * 1024 * 1024),
+        'max_age' => env('LB_RETRY_BUFFER_MAX_AGE', 86400),
+        'schedule' => env('LB_RETRY_BUFFER_SCHEDULE', true),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Job Monitoring Configuration
     |--------------------------------------------------------------------------
     |
@@ -710,6 +742,8 @@ return [
         /*
         | Maximum retry attempts for failed API calls
         | Each retry uses exponential backoff (100ms, 200ms, 300ms)
+        | Only used while the retry buffer is disabled: with it, a batch
+        | refused with a 5xx is kept and sent again later instead.
         | Default: 3 retries
         */
         'max_retries' => env('LB_MAX_RETRIES', 3),
@@ -941,10 +975,11 @@ return [
         'batch_size' => env('LB_LOGS_BATCH_SIZE', 50),
 
         /*
-        | Retries on a 5xx. A batch refused with a 403 or 422 is never retried
-        | and stops collection for the rest of the process. A 402 pauses it
-        | until the limit lifts, and a 429 keeps the batch and sends it once
-        | the rate limit window has passed.
+        | Retries on a 5xx while the retry buffer is disabled. With it, the
+        | batch is kept and sent again later instead. A batch refused with a
+        | 403 or 422 is never retried and stops collection for the rest of the
+        | process. A 402 pauses it until the limit lifts, and a 429 keeps the
+        | batch and sends it once the rate limit window has passed.
         */
         'max_retries' => env('LB_LOGS_MAX_RETRIES', 3),
 

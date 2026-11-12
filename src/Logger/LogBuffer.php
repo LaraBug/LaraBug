@@ -115,7 +115,9 @@ class LogBuffer
                     return;
                 }
 
-                if ($status >= 500 && $attempt < $maxRetries) {
+                // The client has kept the batch to send once the server is
+                // back, so sending it again now could deliver it twice.
+                if ($status >= 500 && $attempt < $maxRetries && ! $this->client->keepsFailedSends()) {
                     usleep(100000 * $attempt);
                     $this->sending = false;
                     $this->send($records, $attempt + 1);

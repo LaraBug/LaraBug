@@ -258,7 +258,7 @@ class LimitBackoff
      * forms are read here. A date already past reads as zero, the same as the
      * server sending one.
      */
-    protected static function retryAfter(object $response): ?int
+    public static function retryAfter(object $response): ?int
     {
         $retryAfter = static::header($response, 'Retry-After');
 
