@@ -127,7 +127,7 @@ class ServiceProvider extends BaseServiceProvider
     {
         $this->handlersRegistered = new \SplObjectStorage();
 
-        $this->callAfterResolving(ExceptionHandler::class, function ($handler) {
+        $register = function ($handler) {
             // A handler that does not extend Laravel's own has no reportable(),
             // in which case the application keeps calling handle() itself.
             if (! method_exists($handler, 'reportable')) {
@@ -150,7 +150,14 @@ class ServiceProvider extends BaseServiceProvider
                 // everything it skips.
                 $this->app['larabug']->handle($exception);
             });
-        });
+        };
+
+        // What callAfterResolving() does, which Laravel only has from 6.10 on.
+        $this->app->afterResolving(ExceptionHandler::class, $register);
+
+        if ($this->app->resolved(ExceptionHandler::class)) {
+            $register($this->app->make(ExceptionHandler::class));
+        }
     }
 
     /**
