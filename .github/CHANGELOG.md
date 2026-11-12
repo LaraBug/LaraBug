@@ -11,6 +11,10 @@ All notable changes to `larabug` will be documented in this file
 - Exception and JavaScript error reports now carry a top level `occurred_at` (ISO 8601, UTC), taken when the exception is captured, so one sent late from the retry buffer keeps the time it happened. A server that does not know the field ignores it and uses the time the report arrived. Telemetry streams are unchanged, since their records carry their own times.
 - With the buffer on, a log or queue job batch refused with a 5xx is no longer retried in process (`logs.max_retries`, `jobs.max_retries`), since the buffer already keeps it. Set `LB_RETRY_BUFFER_ENABLED=false` to go back to dropping, and to those retries.
 
+## 4.0.0-beta.20 - 2026-11-12
+
+- The README shows the test status of `v4`, as the Forgejo runner reports it on the commit. No change to the package itself.
+
 ## 4.0.0-beta.19 - 2026-11-09
 
 - `larabug:queue-depth` no longer exits with code 1 when the LaraBug server cannot be reached, times out or answers with an error. It warns, sends nothing and exits 0, so the scheduler stops reporting `Scheduled command [...] larabug:queue-depth failed with exit code [1]` for an outage on the server's side. The samples are not kept: the next minute measures again.
