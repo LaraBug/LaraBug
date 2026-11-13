@@ -3,6 +3,7 @@
 namespace LaraBug\Http;
 
 use GuzzleHttp\ClientInterface;
+use LaraBug\Support\SdkVersion;
 
 class Client
 {
@@ -40,7 +41,8 @@ class Client
                     'Authorization' => 'Bearer '.$this->login,
                     'Content-Type' => 'application/json',
                     'Accept' => 'application/json',
-                    'User-Agent' => 'LaraBug-Package'
+                    'User-Agent' => 'LaraBug-Package',
+                    'X-LaraBug-Sdk' => SdkVersion::header(),
                 ],
                 'json' => array_merge([
                     'project' => $this->project,
