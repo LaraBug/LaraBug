@@ -4,15 +4,23 @@ namespace LaraBug\Tests;
 
 use LaraBug\Http\Client;
 use LaraBug\Tests\Mocks\CveClient;
+use LaraBug\Scanners\NpmLockScanner;
+use PHPUnit\Framework\Attributes\Test;
 
 class CveScanCommandTest extends TestCase
 {
-    /** @var string */
-    protected $lockPath;
+    protected string $lockPath;
+
+    protected string $npmDirectory;
 
     public function setUp(): void
     {
         parent::setUp();
+
+        $this->npmDirectory = sys_get_temp_dir() . '/larabug-scan-cmd-npm-' . uniqid();
+        mkdir($this->npmDirectory);
+
+        $this->app->instance(NpmLockScanner::class, new NpmLockScanner($this->npmDirectory));
 
         $this->lockPath = sys_get_temp_dir() . '/larabug-scan-cmd-' . uniqid() . '.lock';
         file_put_contents($this->lockPath, json_encode([
@@ -24,6 +32,7 @@ class CveScanCommandTest extends TestCase
 
         $this->app['config']['larabug.cve.enabled'] = true;
         $this->app['config']['larabug.cve.lock_path'] = $this->lockPath;
+        $this->app['config']['larabug.cve.npm'] = true;
     }
 
     public function tearDown(): void
@@ -32,7 +41,18 @@ class CveScanCommandTest extends TestCase
             unlink($this->lockPath);
         }
 
+        foreach (glob("{$this->npmDirectory}/*") as $file) {
+            unlink($file);
+        }
+
+        rmdir($this->npmDirectory);
+
         parent::tearDown();
+    }
+
+    protected function copyNpmFixture(string $fixture, string $file): void
+    {
+        copy(__DIR__ . "/Fixtures/npm/{$fixture}/{$file}", "{$this->npmDirectory}/{$file}");
     }
 
     protected function bindClient(CveClient $client): CveClient
@@ -42,7 +62,7 @@ class CveScanCommandTest extends TestCase
         return $client;
     }
 
-    /** @test */
+    #[Test]
     public function it_refuses_to_run_while_the_feature_is_disabled()
     {
         $this->app['config']['larabug.cve.enabled'] = false;
@@ -56,7 +76,31 @@ class CveScanCommandTest extends TestCase
         $client->assertRequestsSent(0);
     }
 
-    /** @test */
+    #[Test]
+    public function it_says_so_when_the_issue_limit_is_reached()
+    {
+        $client = $this->bindClient(new CveClient(402, '{"stream":"issues"}'));
+
+        $this->artisan('larabug:scan')
+            ->expectsOutputToContain('limit is reached')
+            ->assertExitCode(1);
+
+        $client->assertRequestsSent(1);
+    }
+
+    #[Test]
+    public function it_says_so_when_the_project_is_rate_limited()
+    {
+        $client = $this->bindClient(new CveClient(429, '{"message":"Too Many Attempts."}'));
+
+        $this->artisan('larabug:scan')
+            ->expectsOutputToContain('rate limit')
+            ->assertExitCode(1);
+
+        $client->assertRequestsSent(1);
+    }
+
+    #[Test]
     public function it_reports_a_lockfile_it_cannot_read()
     {
         $this->bindClient(new CveClient());
@@ -66,7 +110,7 @@ class CveScanCommandTest extends TestCase
             ->assertExitCode(1);
     }
 
-    /** @test */
+    #[Test]
     public function it_reports_a_queued_scan_with_its_snapshot_id()
     {
         $this->bindClient(new CveClient(202, '{"queued":true,"snapshot_id":"snap-42"}'));
@@ -77,7 +121,7 @@ class CveScanCommandTest extends TestCase
             ->assertExitCode(0);
     }
 
-    /** @test */
+    #[Test]
     public function it_reports_an_unchanged_lockfile_as_skipped()
     {
         $this->bindClient(new CveClient(200, '{"skipped":"unchanged","snapshot_id":"snap-1"}'));
@@ -87,7 +131,7 @@ class CveScanCommandTest extends TestCase
             ->assertExitCode(0);
     }
 
-    /** @test */
+    #[Test]
     public function it_explains_a_403_as_the_feature_being_off_for_the_project()
     {
         $this->bindClient(new CveClient(403, '{"error":"feature_disabled","feature":"cve"}'));
@@ -97,7 +141,7 @@ class CveScanCommandTest extends TestCase
             ->assertExitCode(1);
     }
 
-    /** @test */
+    #[Test]
     public function it_surfaces_any_other_server_error()
     {
         $this->bindClient(new CveClient(503, 'service unavailable'));
@@ -107,7 +151,7 @@ class CveScanCommandTest extends TestCase
             ->assertExitCode(1);
     }
 
-    /** @test */
+    #[Test]
     public function it_only_includes_dev_packages_when_told_to()
     {
         file_put_contents($this->lockPath, json_encode([
@@ -125,6 +169,67 @@ class CveScanCommandTest extends TestCase
 
         $this->artisan('larabug:scan --include-dev')
             ->expectsOutput('Scanning 2 packages against LaraBug CVE database...')
+            ->assertExitCode(0);
+    }
+
+    #[Test]
+    public function it_says_how_many_npm_packages_it_sends_and_from_which_lockfile()
+    {
+        $this->copyNpmFixture('yarn-v1', 'yarn.lock');
+
+        $client = $this->bindClient(new CveClient());
+
+        $this->artisan('larabug:scan')
+            ->expectsOutput('Scanning 2 packages against LaraBug CVE database...')
+            ->expectsOutput('Scanning 6 npm packages from yarn.lock against LaraBug CVE database...')
+            ->assertExitCode(0);
+
+        $sent = $client->lastRequest();
+
+        $this->assertSame(['type', 'composer_lock', 'npm_lock'], array_keys($sent));
+        $this->assertSame('yarn.lock', $sent['npm_lock']['lockfile']);
+        $this->assertCount(6, $sent['npm_lock']['packages']);
+    }
+
+    #[Test]
+    public function it_scans_the_npm_lockfile_alone_when_there_is_no_composer_lock()
+    {
+        $this->copyNpmFixture('package-lock-v3', 'package-lock.json');
+
+        $client = $this->bindClient(new CveClient());
+
+        $this->artisan('larabug:scan --lock=/tmp/larabug-nope.lock')
+            ->expectsOutput('Could not read composer.lock at /tmp/larabug-nope.lock, so only package-lock.json is scanned.')
+            ->expectsOutput('Scanning 7 npm packages from package-lock.json against LaraBug CVE database...')
+            ->assertExitCode(0);
+
+        $this->assertSame(['type', 'npm_lock'], array_keys($client->lastRequest()));
+    }
+
+    #[Test]
+    public function it_leaves_the_npm_lockfile_out_when_npm_scanning_is_off()
+    {
+        $this->app['config']['larabug.cve.npm'] = false;
+        $this->copyNpmFixture('package-lock-v3', 'package-lock.json');
+
+        $client = $this->bindClient(new CveClient());
+
+        $this->artisan('larabug:scan')
+            ->doesntExpectOutputToContain('npm packages')
+            ->assertExitCode(0);
+
+        $this->assertSame(['type', 'composer_lock'], array_keys($client->lastRequest()));
+    }
+
+    #[Test]
+    public function it_names_every_lockfile_the_server_skipped_as_unchanged()
+    {
+        $this->copyNpmFixture('package-lock-v3', 'package-lock.json');
+
+        $this->bindClient(new CveClient(200, '{"skipped":"unchanged","snapshot_id":"snap-1"}'));
+
+        $this->artisan('larabug:scan')
+            ->expectsOutput('composer.lock and package-lock.json unchanged since last scan — skipped.')
             ->assertExitCode(0);
     }
 }

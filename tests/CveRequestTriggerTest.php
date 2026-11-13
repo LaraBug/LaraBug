@@ -2,15 +2,18 @@
 
 namespace LaraBug\Tests;
 
-use LaraBug\Cve\RequestTrigger;
-use LaraBug\Scanners\ComposerLockScanner;
-use LaraBug\Tests\Mocks\CveClient;
 use ReflectionClass;
+use LaraBug\Cve\RequestTrigger;
+use LaraBug\Tests\Mocks\CveClient;
+use LaraBug\Scanners\NpmLockScanner;
+use PHPUnit\Framework\Attributes\Test;
+use LaraBug\Scanners\ComposerLockScanner;
 
 class CveRequestTriggerTest extends TestCase
 {
-    /** @var string */
-    protected $lockPath;
+    protected string $lockPath;
+
+    protected string $npmDirectory;
 
     public function setUp(): void
     {
@@ -19,13 +22,16 @@ class CveRequestTriggerTest extends TestCase
         $this->lockPath = sys_get_temp_dir() . '/larabug-trigger-' . uniqid() . '.lock';
         $this->writeLock('v12.0.1');
 
+        $this->npmDirectory = sys_get_temp_dir() . '/larabug-trigger-npm-' . uniqid();
+        mkdir($this->npmDirectory);
+
         $this->app['config']['larabug.cve.enabled'] = true;
         $this->app['config']['larabug.cve.trigger'] = 'both';
         $this->app['config']['larabug.cve.lock_path'] = $this->lockPath;
         $this->app['config']['larabug.cve.request_throttle_hours'] = 24;
+        $this->app['config']['larabug.cve.npm'] = true;
 
-        // The trigger memoises per process; without this each test would inherit
-        // the previous one's "already fired" and cached payload.
+        // The trigger memoises per process; without a reset each test would inherit the previous one's state.
         $this->resetStaticState();
     }
 
@@ -34,6 +40,12 @@ class CveRequestTriggerTest extends TestCase
         if (is_file($this->lockPath)) {
             unlink($this->lockPath);
         }
+
+        foreach (glob("{$this->npmDirectory}/*") as $file) {
+            unlink($file);
+        }
+
+        rmdir($this->npmDirectory);
 
         $this->resetStaticState();
 
@@ -45,9 +57,7 @@ class CveRequestTriggerTest extends TestCase
         $reflection = new ReflectionClass(RequestTrigger::class);
 
         foreach (['cachedPayload' => null, 'alreadyFired' => false] as $name => $value) {
-            $property = $reflection->getProperty($name);
-            $property->setAccessible(true);
-            $property->setValue(null, $value);
+            $reflection->getProperty($name)->setValue(null, $value);
         }
     }
 
@@ -58,12 +68,28 @@ class CveRequestTriggerTest extends TestCase
         ]));
     }
 
-    protected function trigger(CveClient $client): RequestTrigger
+    protected function writeNpmLock(string $version): void
     {
-        return new RequestTrigger($this->app['cache']->store('array'), new ComposerLockScanner(), $client);
+        file_put_contents("{$this->npmDirectory}/package-lock.json", json_encode([
+            'lockfileVersion' => 3,
+            'packages' => [
+                '' => ['name' => 'app'],
+                'node_modules/lodash' => ['version' => $version],
+            ],
+        ]));
     }
 
-    /** @test */
+    protected function trigger(CveClient $client): RequestTrigger
+    {
+        return new RequestTrigger(
+            $this->app['cache']->store('array'),
+            new ComposerLockScanner(),
+            new NpmLockScanner($this->npmDirectory),
+            $client,
+        );
+    }
+
+    #[Test]
     public function it_does_nothing_when_the_feature_is_disabled()
     {
         $this->app['config']['larabug.cve.enabled'] = false;
@@ -74,7 +100,7 @@ class CveRequestTriggerTest extends TestCase
         $client->assertRequestsSent(0);
     }
 
-    /** @test */
+    #[Test]
     public function it_does_nothing_when_the_trigger_is_scheduled_only()
     {
         $this->app['config']['larabug.cve.trigger'] = 'schedule';
@@ -85,7 +111,7 @@ class CveRequestTriggerTest extends TestCase
         $client->assertRequestsSent(0);
     }
 
-    /** @test */
+    #[Test]
     public function it_sends_the_lockfile_payload_tagged_as_a_cve_scan()
     {
         $client = new CveClient();
@@ -100,7 +126,7 @@ class CveRequestTriggerTest extends TestCase
         $this->assertSame(64, strlen($sent['composer_lock']['content_hash']));
     }
 
-    /** @test */
+    #[Test]
     public function it_only_fires_once_per_process()
     {
         $client = new CveClient();
@@ -113,7 +139,7 @@ class CveRequestTriggerTest extends TestCase
         $client->assertRequestsSent(1);
     }
 
-    /** @test */
+    #[Test]
     public function it_stays_quiet_while_the_lockfile_is_unchanged_and_the_throttle_holds()
     {
         $first = new CveClient();
@@ -129,7 +155,7 @@ class CveRequestTriggerTest extends TestCase
         $second->assertRequestsSent(0);
     }
 
-    /** @test */
+    #[Test]
     public function it_fires_again_as_soon_as_the_lockfile_changes()
     {
         $first = new CveClient();
@@ -145,7 +171,7 @@ class CveRequestTriggerTest extends TestCase
         $second->assertRequestsSent(1);
     }
 
-    /** @test */
+    #[Test]
     public function it_fires_again_once_the_throttle_has_expired()
     {
         $first = new CveClient();
@@ -167,7 +193,7 @@ class CveRequestTriggerTest extends TestCase
         $second->assertRequestsSent(1);
     }
 
-    /** @test */
+    #[Test]
     public function it_remembers_a_scan_the_server_says_it_already_has()
     {
         $client = new CveClient(200, '{"skipped":"unchanged","snapshot_id":"snap-1"}');
@@ -176,11 +202,10 @@ class CveRequestTriggerTest extends TestCase
         $this->assertSame(64, strlen($this->app['cache']->store('array')->get('larabug.cve.last_sent_hash')));
     }
 
-    /** @test */
+    #[Test]
     public function it_does_not_remember_a_rejected_scan_as_a_success()
     {
-        // A 403 must not look like a delivered scan: the lockfile it describes
-        // has not been recorded, so nothing should claim it has.
+        // A 403 must not look like a delivered scan; nothing may claim its lockfile was recorded.
         $client = new CveClient(403, '{"error":"feature_disabled","feature":"cve"}');
         $this->trigger($client)->maybeTrigger();
 
@@ -188,11 +213,10 @@ class CveRequestTriggerTest extends TestCase
         $this->assertNull($this->app['cache']->store('array')->get('larabug.cve.last_sent_hash'));
     }
 
-    /** @test */
+    #[Test]
     public function it_is_on_for_a_config_that_predates_the_feature()
     {
-        // A config file published before CVE scanning existed has no cve.enabled
-        // key at all. Scanning is opt-out, so an absent key still scans.
+        // A config published before the feature has no cve.enabled key; scanning is opt-out, so an absent key still scans.
         $cve = $this->app['config']['larabug.cve'];
         unset($cve['enabled']);
         $this->app['config']['larabug.cve'] = $cve;
@@ -205,12 +229,10 @@ class CveRequestTriggerTest extends TestCase
         $client->assertRequestsSent(1);
     }
 
-    /** @test */
+    #[Test]
     public function it_backs_off_after_a_403_instead_of_asking_on_every_request()
     {
-        // Being on by default means most apps meet a project that has not
-        // enabled scanning. Without a backoff every request would post the
-        // lockfile again to collect the same 403.
+        // Without a backoff, every request would post the lockfile again to collect the same 403.
         $rejected = new CveClient(403, '{"error":"feature_disabled","feature":"cve"}');
         $this->trigger($rejected)->maybeTrigger();
         $rejected->assertRequestsSent(1);
@@ -224,7 +246,7 @@ class CveRequestTriggerTest extends TestCase
         }
     }
 
-    /** @test */
+    #[Test]
     public function it_tries_again_once_the_backoff_has_lapsed()
     {
         $rejected = new CveClient(403, '{"error":"feature_disabled","feature":"cve"}');
@@ -239,7 +261,7 @@ class CveRequestTriggerTest extends TestCase
         $retry->assertRequestsSent(1);
     }
 
-    /** @test */
+    #[Test]
     public function it_keeps_retrying_after_a_server_error_rather_than_backing_off()
     {
         // A 5xx is a blip, not an answer, so it must not trip the backoff.
@@ -255,7 +277,7 @@ class CveRequestTriggerTest extends TestCase
         $retry->assertRequestsSent(1);
     }
 
-    /** @test */
+    #[Test]
     public function it_does_nothing_when_there_is_no_lockfile_to_read()
     {
         $this->app['config']['larabug.cve.lock_path'] = '/tmp/larabug-no-such-file.lock';
@@ -264,5 +286,167 @@ class CveRequestTriggerTest extends TestCase
         $this->trigger($client)->maybeTrigger();
 
         $client->assertRequestsSent(0);
+    }
+
+    #[Test]
+    public function it_sends_composer_lock_alone_when_there_is_no_npm_lockfile()
+    {
+        $client = new CveClient();
+        $this->trigger($client)->maybeTrigger();
+
+        $this->assertSame(['type', 'composer_lock'], array_keys($client->lastRequest()));
+    }
+
+    #[Test]
+    public function it_sends_the_npm_lockfile_next_to_composer_lock_in_one_scan()
+    {
+        $this->writeNpmLock('4.17.21');
+
+        $client = new CveClient();
+        $this->trigger($client)->maybeTrigger();
+
+        $client->assertRequestsSent(1);
+
+        $sent = $client->lastRequest();
+
+        $this->assertSame(['type', 'composer_lock', 'npm_lock'], array_keys($sent));
+        $this->assertSame(['laravel/framework' => 'v12.0.1'], $sent['composer_lock']['packages']);
+        $this->assertSame('package-lock.json', $sent['npm_lock']['lockfile']);
+        $this->assertSame([['name' => 'lodash', 'version' => '4.17.21', 'dev' => false]], $sent['npm_lock']['packages']);
+        $this->assertSame('php-sdk', $sent['npm_lock']['source']);
+    }
+
+    #[Test]
+    public function it_sends_npm_lock_alone_for_a_project_without_composer_lock()
+    {
+        $this->app['config']['larabug.cve.lock_path'] = '/tmp/larabug-no-such-file.lock';
+        $this->writeNpmLock('4.17.21');
+
+        $client = new CveClient();
+        $this->trigger($client)->maybeTrigger();
+
+        $client->assertRequestsSent(1);
+        $this->assertSame(['type', 'npm_lock'], array_keys($client->lastRequest()));
+    }
+
+    #[Test]
+    public function it_leaves_the_npm_lockfile_out_when_npm_scanning_is_off()
+    {
+        $this->app['config']['larabug.cve.npm'] = false;
+        $this->writeNpmLock('4.17.21');
+
+        $client = new CveClient();
+        $this->trigger($client)->maybeTrigger();
+
+        $this->assertSame(['type', 'composer_lock'], array_keys($client->lastRequest()));
+    }
+
+    #[Test]
+    public function it_remembers_the_last_sent_hash_of_each_lockfile()
+    {
+        $this->writeNpmLock('4.17.21');
+
+        $client = new CveClient();
+        $this->trigger($client)->maybeTrigger();
+
+        $sent = $client->lastRequest();
+        $cache = $this->app['cache']->store('array');
+
+        $this->assertSame($sent['composer_lock']['content_hash'], $cache->get('larabug.cve.last_sent_hash'));
+        $this->assertSame($sent['npm_lock']['content_hash'], $cache->get('larabug.cve.last_sent_npm_hash'));
+    }
+
+    #[Test]
+    public function it_stays_quiet_while_neither_lockfile_changes()
+    {
+        $this->writeNpmLock('4.17.21');
+
+        $first = new CveClient();
+        $this->trigger($first)->maybeTrigger();
+        $first->assertRequestsSent(1);
+
+        $this->resetStaticState();
+
+        $second = new CveClient();
+        $this->trigger($second)->maybeTrigger();
+
+        $second->assertRequestsSent(0);
+    }
+
+    #[Test]
+    public function it_fires_again_when_only_the_npm_lockfile_changes()
+    {
+        $this->writeNpmLock('4.17.20');
+
+        $first = new CveClient();
+        $this->trigger($first)->maybeTrigger();
+        $first->assertRequestsSent(1);
+
+        $this->resetStaticState();
+        $this->writeNpmLock('4.17.21');
+
+        $second = new CveClient();
+        $this->trigger($second)->maybeTrigger();
+
+        $second->assertRequestsSent(1);
+        $this->assertSame('4.17.21', $second->lastRequest()['npm_lock']['packages'][0]['version']);
+        $this->assertArrayHasKey('composer_lock', $second->lastRequest());
+    }
+
+    #[Test]
+    public function it_fires_once_after_upgrading_when_only_composer_lock_was_sent_before()
+    {
+        $first = new CveClient();
+        $this->trigger($first)->maybeTrigger();
+        $first->assertRequestsSent(1);
+
+        $this->resetStaticState();
+        $this->writeNpmLock('4.17.21');
+
+        $second = new CveClient();
+        $this->trigger($second)->maybeTrigger();
+
+        $second->assertRequestsSent(1);
+    }
+
+    #[Test]
+    public function it_does_not_parse_a_lockfile_whose_hash_says_no_scan_is_due()
+    {
+        $this->writeNpmLock('4.17.21');
+
+        $first = new CveClient();
+        $this->trigger($first)->maybeTrigger();
+        $first->assertRequestsSent(1);
+
+        $this->resetStaticState();
+
+        $composerScanner = new class () extends ComposerLockScanner {
+            public int $scans = 0;
+
+            public function scan(?string $lockPath = null, bool $includeDev = false, ?string $environment = null): ?array
+            {
+                $this->scans++;
+
+                return parent::scan($lockPath, $includeDev, $environment);
+            }
+        };
+
+        $npmScanner = new class ($this->npmDirectory) extends NpmLockScanner {
+            public int $scans = 0;
+
+            public function scan(?string $environment = null): ?array
+            {
+                $this->scans++;
+
+                return parent::scan($environment);
+            }
+        };
+
+        $second = new CveClient();
+        (new RequestTrigger($this->app['cache']->store('array'), $composerScanner, $npmScanner, $second))->maybeTrigger();
+
+        $second->assertRequestsSent(0);
+        $this->assertSame(0, $composerScanner->scans);
+        $this->assertSame(0, $npmScanner->scans);
     }
 }

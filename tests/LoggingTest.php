@@ -2,6 +2,8 @@
 
 namespace LaraBug\Tests;
 
+use PHPUnit\Framework\Attributes\Test;
+
 class LoggingTest extends TestCase
 {
     public function setUp(): void
@@ -15,7 +17,7 @@ class LoggingTest extends TestCase
         $this->app['config']['larabug.environments'] = ['testing'];
     }
 
-    /** @test */
+    #[Test]
     public function it_will_not_send_log_information_to_larabug()
     {
         $this->app['router']->get('/log-information-via-route/{type}', function (string $type) {
@@ -34,7 +36,7 @@ class LoggingTest extends TestCase
         \LaraBug\Facade::assertRequestsSent(0);
     }
 
-    /** @test */
+    #[Test]
     public function it_will_only_send_throwables_to_larabug()
     {
         $this->app['router']->get('/throwables-via-route', function () {

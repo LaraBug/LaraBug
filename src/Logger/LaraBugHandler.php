@@ -9,32 +9,22 @@ use Monolog\Handler\AbstractProcessingHandler;
 
 class LaraBugHandler extends AbstractProcessingHandler
 {
-    /** @var LaraBug */
-    protected $laraBug;
-
-    /**
-     * @param LaraBug $laraBug
-     * @param int $level
-     * @param bool $bubble
-     */
-    public function __construct(LaraBug $laraBug, $level = Logger::ERROR, bool $bubble = true)
-    {
-        $this->laraBug = $laraBug;
-
+    public function __construct(
+        protected readonly LaraBug $laraBug,
+        $level = Logger::ERROR,
+        bool $bubble = true,
+    ) {
         parent::__construct($level, $bubble);
     }
 
-    /**
-     * @param array $record
-     */
     protected function write($record): void
     {
-        if (isset($record['context']['exception']) && $record['context']['exception'] instanceof Throwable) {
-            $this->laraBug->handle(
-                $record['context']['exception']
-            );
+        $exception = $record['context']['exception'] ?? null;
 
+        if (! $exception instanceof Throwable) {
             return;
         }
+
+        $this->laraBug->handle($exception);
     }
 }

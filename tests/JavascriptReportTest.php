@@ -5,11 +5,11 @@ namespace LaraBug\Tests;
 use LaraBug\LaraBug;
 use Illuminate\Support\Facades\Route;
 use LaraBug\Tests\Mocks\LaraBugClient;
+use PHPUnit\Framework\Attributes\Test;
 
 class JavascriptReportTest extends TestCase
 {
-    /** @var LaraBugClient */
-    protected $client;
+    protected LaraBugClient $client;
 
     public function setUp(): void
     {
@@ -18,124 +18,117 @@ class JavascriptReportTest extends TestCase
         $this->app['config']['larabug.environments'] = ['testing'];
         $this->app['config']['larabug.sleep'] = 0;
 
-        $this->app->instance('larabug', new LaraBug($this->client = new LaraBugClient(
-            'login_key',
-            'project_key'
-        )));
+        $this->client = new LaraBugClient('login_key', 'project_key');
+
+        $this->app->instance('larabug', new LaraBug($this->client));
     }
 
-    /** @test */
-    public function it_does_not_read_a_server_side_file_named_by_a_javascript_report()
-    {
-        $path = tempnam(sys_get_temp_dir(), 'larabug');
-        file_put_contents($path, str_repeat("the-contents-of-a-local-file\n", 40));
-
-        $response = $this->postJson('/larabug-api/javascript-report', $this->payload([
-            'file' => $path,
-        ]));
-
-        unlink($path);
-
-        $response->assertStatus(200);
-
-        $this->client->assertRequestsSent(1);
-        $this->assertSame([], $this->client->getRequests()[0]['exception']['executor']);
-        $this->assertStringNotContainsString('the-contents-of-a-local-file', $this->sentPayload());
-    }
-
-    /** @test */
-    public function it_does_not_read_the_applications_own_composer_file_named_by_a_javascript_report()
-    {
-        $response = $this->postJson('/larabug-api/javascript-report', $this->payload([
-            'file' => __DIR__ . '/../composer.json',
-            'line' => 1,
-        ]));
-
-        $response->assertStatus(200);
-
-        $this->client->assertRequestsSent(1);
-        $this->assertSame([], $this->client->getRequests()[0]['exception']['executor']);
-        $this->assertStringNotContainsString('larabug/larabug', $this->sentPayload());
-    }
-
-    /** @test */
-    public function it_reports_a_javascript_error_without_any_source_context()
-    {
-        $response = $this->postJson('/larabug-api/javascript-report', $this->payload());
-
-        $response->assertStatus(200);
-
-        $this->client->assertRequestsSent(1);
-
-        $exception = $this->client->getRequests()[0]['exception'];
-
-        $this->assertSame('javascript', $exception['file_type']);
-        $this->assertSame('https://example.com/js/app.js', $exception['file']);
-        $this->assertSame(20, $exception['line']);
-        $this->assertSame('Uncaught TypeError: window.foo is not a function', $exception['error']);
-        $this->assertSame("TypeError: window.foo is not a function\n    at app.js:20:9", $exception['exception']);
-        $this->assertSame('https://example.com/checkout', $exception['fullUrl']);
-        $this->assertNull($exception['class']);
-        $this->assertSame([], $exception['executor']);
-    }
-
-    /** @test */
-    public function it_rejects_a_report_that_does_not_look_like_a_javascript_error()
+    #[Test]
+    public function it_reports_a_javascript_error()
     {
         $response = $this->postJson('/larabug-api/javascript-report', [
-            'message' => ['an', 'array'],
-            'file' => ['another', 'array'],
-            'line' => 'not a line',
-            'stack' => str_repeat('a', 20001),
-            'url' => str_repeat('b', 2049),
+            'message' => 'Uncaught ReferenceError: doesNotExist is not defined',
+            'file' => 'https://example.test/js/app.js',
+            'line' => 42,
+            'stack' => "ReferenceError: doesNotExist is not defined\n    at app.js:42:9",
+            'url' => 'https://example.test/checkout',
         ]);
 
-        $response->assertStatus(422);
+        $response->assertOk();
+
+        $this->client->assertRequestsSent(1);
+
+        $report = $this->client->requests()[0]['exception'];
+
+        $this->assertSame('javascript', $report['file_type']);
+        $this->assertSame('https://example.test/js/app.js', $report['file']);
+        $this->assertSame(42, $report['line']);
+        $this->assertSame('https://example.test/checkout', $report['fullUrl']);
+        $this->assertSame('Uncaught ReferenceError: doesNotExist is not defined', $report['error']);
+        $this->assertStringContainsString('at app.js:42:9', $report['exception']);
+        $this->assertNull($report['class']);
+    }
+
+    #[Test]
+    public function it_does_not_read_a_local_file_the_report_names()
+    {
+        $secret = tempnam(sys_get_temp_dir(), 'larabug');
+        file_put_contents($secret, "first line\nDATABASE_PASSWORD=hunter2\nthird line\n");
+
+        $response = $this->postJson('/larabug-api/javascript-report', [
+            'message' => 'boom',
+            'file' => $secret,
+            'line' => 2,
+            'stack' => 'Error: boom',
+            'url' => 'https://example.test/checkout',
+        ]);
+
+        unlink($secret);
+
+        $response->assertOk();
+
+        $this->client->assertRequestsSent(1);
+
+        $this->assertSame([], $this->client->requests()[0]['exception']['executor']);
+        $this->assertStringNotContainsString('hunter2', json_encode($this->client->requests()[0]));
+    }
+
+    #[Test]
+    public function it_does_not_read_the_applications_own_files()
+    {
+        $response = $this->postJson('/larabug-api/javascript-report', [
+            'message' => 'boom',
+            'file' => base_path('composer.json'),
+            'line' => 2,
+            'stack' => 'Error: boom',
+            'url' => 'https://example.test/checkout',
+        ]);
+
+        $response->assertOk();
+
+        $this->assertSame([], $this->client->requests()[0]['exception']['executor']);
+        $this->assertStringNotContainsString('larabug/larabug', json_encode($this->client->requests()[0]));
+    }
+
+    #[Test]
+    public function it_rejects_a_report_whose_fields_are_not_what_they_claim()
+    {
+        $reports = [
+            ['message' => ['an', 'array']],
+            ['message' => 'boom', 'file' => ['an', 'array']],
+            ['message' => 'boom', 'line' => 'not a number'],
+            ['message' => 'boom', 'stack' => str_repeat('a', 20001)],
+            ['message' => str_repeat('a', 2001)],
+            ['message' => 'boom', 'url' => str_repeat('a', 2001)],
+            [],
+        ];
+
+        foreach ($reports as $report) {
+            $this->postJson('/larabug-api/javascript-report', $report)->assertStatus(422);
+        }
 
         $this->client->assertRequestsSent(0);
     }
 
-    /** @test */
-    public function it_throttles_the_javascript_report_route()
+    #[Test]
+    public function the_report_route_is_throttled()
     {
-        $route = collect(Route::getRoutes()->getRoutes())->first(function ($route) {
-            return $route->uri() === 'larabug-api/javascript-report';
-        });
+        $route = collect(Route::getRoutes()->getRoutes())
+            ->first(fn ($route) => $route->uri() === 'larabug-api/javascript-report');
 
         $this->assertNotNull($route);
         $this->assertContains('throttle:60,1', $route->gatherMiddleware());
     }
 
-    /** @test */
-    public function it_stops_accepting_javascript_reports_once_the_rate_limit_is_reached()
+    #[Test]
+    public function it_stops_accepting_reports_once_the_limit_is_reached()
     {
-        for ($i = 0; $i < 60; $i++) {
-            $this->postJson('/larabug-api/javascript-report', $this->payload())->assertStatus(200);
+        $this->app['config']['larabug.environments'] = [];
+
+        foreach (range(1, 60) as $attempt) {
+            $this->postJson('/larabug-api/javascript-report', ['message' => 'boom'])->assertOk();
         }
 
-        $this->postJson('/larabug-api/javascript-report', $this->payload())->assertStatus(429);
-    }
-
-    /**
-     * @return string
-     */
-    protected function sentPayload()
-    {
-        return json_encode($this->client->getRequests(), JSON_UNESCAPED_SLASHES);
-    }
-
-    /**
-     * @param array $overrides
-     * @return array
-     */
-    protected function payload(array $overrides = [])
-    {
-        return array_merge([
-            'message' => 'Uncaught TypeError: window.foo is not a function',
-            'file' => 'https://example.com/js/app.js',
-            'line' => 20,
-            'stack' => "TypeError: window.foo is not a function\n    at app.js:20:9",
-            'url' => 'https://example.com/checkout',
-        ], $overrides);
+        $this->postJson('/larabug-api/javascript-report', ['message' => 'boom'])->assertStatus(429);
     }
 }

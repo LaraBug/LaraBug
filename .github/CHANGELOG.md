@@ -2,6 +2,143 @@
 
 All notable changes to `larabug` will be documented in this file
 
+## 4.0.0-beta.23 - 2026-11-13
+
+- No more PHP 8.5 deprecations from the package. Registering the exception handler called `SplObjectStorage::contains()` and `attach()`, which PHP 8.5 deprecates, so every boot added two lines to the application's deprecations log (and to LaraBug, when deprecations are shipped). It now uses array access on the storage, which works on every supported PHP version.
+- A queued job with no uuid in its payload and no id from its driver no longer uses `null` as an array key when its record is built, which PHP 8.5 deprecates as well. Its record is unchanged.
+
+## 4.0.0-beta.22 - 2026-11-13
+
+- Mail sent through any transport that extends Symfony's `AbstractTransport` (SMTP, Postmark, Mailgun, SES, Resend and the rest) is no longer counted twice, once as sent and once as failed. Those transports send a clone of the message, so the sent event never found the mark its sending event left, and the mark was reported as a failed send when the job, command or request ended. Every such send showed as a 50% failure rate. Only the array and log transports were unaffected.
+- The sent event now finds its mark by the message's class, subject and addresses when it carries a clone. Nothing is added to the outgoing mail. A send that throws is still recorded as failed, also when the same message is sent again right after.
+- A failed job's record no longer carries an exception the application would not report. The record goes to the server without going through the exception handler, so an exception excluded with `$dontReport`, `dontReportWhen()`, `ShouldntReport`, an overridden `shouldReport()` or LaraBug's own `except` list still opened an issue, once per failed job. The job is still recorded as failed with its status, attempts and duration, only without `exception`.
+- The handler is asked the way `report()` asks it, but without spending an attempt of a `throttleUsing()` limit and without counting an exception it already reported under `dontReportDuplicates()` as excluded. A handler that throws while deciding leaves the exception on the record.
+
+## 4.0.0-beta.21 - 2026-11-12
+
+- Events the LaraBug server could not take are no longer lost. On a 5xx, or when the server cannot be reached at all, the payload is written to a retry buffer on local disk (`storage/larabug/retry-buffer` by default, `retry_buffer.path` or `LB_RETRY_BUFFER_PATH`) and sent again, oldest first, on the next send that succeeds. A web request sends it on shutdown, after the response has gone out. A console process sends up to 50 right away.
+- `larabug:flush` sends everything waiting. It is scheduled every minute on every server, and only starts when something is waiting. It takes a file lock, so two processes never send the same event, stops at the first 5xx, unreachable server or 429, and always exits 0.
+- A `Retry-After` on a 5xx is honoured: until then nothing is sent and new events go straight to the buffer. The wait is capped at 10 minutes. A server that cannot be reached holds sends the same way for 30 seconds, so during an outage only the first send waits for the connection to time out. It never shortens a longer wait already in place.
+- The buffer holds at most 500 events, 5 MB and a day by default (`retry_buffer.max_events`, `max_bytes`, `max_age`). Past the age bound an event is dropped. Past the count or size bound the oldest telemetry goes first and exceptions only once no telemetry is left, so an outage's request and log batches cannot push out the exceptions it caused. A 4xx is never kept, and a 429 or 402 is still left to the backoff. CVE scans and queue depth samples are never kept. What is written is the payload as it would have been sent, after the data filters, and never the login key. Every failure in the buffer is swallowed.
+- Exception and JavaScript error reports now carry a top level `occurred_at` (ISO 8601, UTC), taken when the exception is captured, so one sent late from the retry buffer keeps the time it happened. A server that does not know the field ignores it and uses the time the report arrived. Telemetry streams are unchanged, since their records carry their own times.
+- With the buffer on, a log or queue job batch refused with a 5xx is no longer retried in process (`logs.max_retries`, `jobs.max_retries`), since the buffer already keeps it. Set `LB_RETRY_BUFFER_ENABLED=false` to go back to dropping, and to those retries.
+
+## 4.0.0-beta.20 - 2026-11-12
+
+- The README shows the test status of `v4`, as the Forgejo runner reports it on the commit. No change to the package itself.
+
+## 4.0.0-beta.19 - 2026-11-09
+
+- `larabug:queue-depth` no longer exits with code 1 when the LaraBug server cannot be reached, times out or answers with an error. It warns, sends nothing and exits 0, so the scheduler stops reporting `Scheduled command [...] larabug:queue-depth failed with exit code [1]` for an outage on the server's side. The samples are not kept: the next minute measures again.
+- The command now says which queues it skipped and why: a connection that is not configured, a driver with no queue to measure (`sync`, `null`, `deferred`, `background`), a failover connection that sends to one of those first, or a broker that could not be measured (an unreachable Redis, a missing `jobs` table), with the exception's class and message. Those queues were already left out silently. `QueueDepthSampler::skipped()` returns the same list after `sample()`.
+- An exception that is not about measuring a queue or reaching the server still reaches Laravel's exception handler, and so LaraBug, as before.
+
+## 4.0.0-beta.18 - 2026-10-23
+
+- CVE scans now include the application's JavaScript lockfile, so npm advisories can be raised next to Composer ones. The first of `package-lock.json`, `pnpm-lock.yaml` and `yarn.lock` in the application's root is sent as `npm_lock` in the same `cve_scan` as `composer_lock`, which is unchanged. A project without a `composer.lock` sends `npm_lock` alone. A server that does not know `npm_lock` ignores it.
+- `npm_lock` carries the `content_hash` (sha256 of the raw lockfile), the `lockfile` it came from, the unique pairs of `name` and `version` in `packages` with a `dev` flag, the `node_version` from `.nvmrc` or `engines.node` in `package.json` (null when neither is there), the `environment` and `source` set to `php-sdk`. One name can appear with several versions. A pair is only dev when every copy of it is.
+- `package-lock.json` is read in lockfile v1, v2 and v3, and `yarn.lock` in both the v1 and the berry format, without new dependencies. `pnpm-lock.yaml` is only read when the application has `symfony/yaml` installed. Without it pnpm is skipped with a debug log line and the next lockfile is tried. `yarn.lock` has no dev flags, so there, and in pnpm v9, a package is marked dev when `package.json` lists it in `devDependencies` only, which reaches the top level names and not what they pull in. Git, file and link dependencies are left out, since no advisory matches them and their version can name a private repository. A malformed lockfile is not sent and never throws.
+- Dev packages are always sent and flagged, whatever `cve.include_dev` says, which still only applies to `composer.lock`.
+- The request trigger keeps a last sent hash per lockfile, so a change to either one sends a scan again. Upgrading sends one scan for an application with an npm lockfile. The trigger now hashes the lockfiles first and only parses one when a scan is due, so a request no longer parses `composer.lock` (or the npm lockfile) every time. `larabug:scan` says how many npm packages it sent and from which lockfile.
+- `LB_CVE_NPM=false` (`cve.npm`) scans `composer.lock` alone. `LB_CVE_ENABLED=false` still turns all CVE scanning off.
+
+## 4.0.0-beta.17 - 2026-10-20
+
+- A deprecation's fingerprint no longer changes with the values in its message. PHP puts the value in many of them, such as `Implicit conversion from float 6360.067887183333 to int loses precision`, so one line of code raised a new deprecation for every value. That defeated the coalescing, sent every occurrence, and opened an issue per value on the server. Numbers (integers, floats, scientific notation and hex) are now replaced with `{number}` and quoted strings with `{string}` before fingerprinting. Class, property and method names are kept, quoted ones included, since they tell one deprecation from another.
+- The fingerprint is now the md5 of the file, the line and the normalised message, in that order. Every deprecation therefore gets a new fingerprint once after upgrading.
+- `message` is still the message as raised, so an issue shows a real example. `extra.larabug_deprecation` gains `normalised_message`, which the server may ignore.
+
+## 4.0.0-beta.16 - 2026-10-19
+
+- Deprecations are now coalesced across requests and processes through the application's cache, instead of within one process. A request served by PHP-FPM forgets everything when it ends, so a deprecation on a hot path used to be sent at least once per request, and twice when it repeated within one. Now one record per deprecation is sent per `logs.deprecations.interval` for the whole application (or per server with the `file` store), carrying the occurrences every process counted since the last one.
+- Whichever process first hits a deprecation once the interval has passed takes a lock in the cache and sends the record, with its own occurrences plus the shared count. Every other process adds what it counted to the shared count when its request ends, when a worker stops, or when it shuts down. The cache is used once per deprecation per request, never per occurrence, and without the store's events, so it never shows up as a cache call on the request. With the `database` store it does run a few queries.
+- The store is the default cache store, or the one named by `logs.deprecations.cache_store` (`LB_LOG_DEPRECATIONS_CACHE_STORE`). An `array` or `null` store is not shared between processes, so each process then counts for itself as in beta.14. A store that fails does the same for the rest of the process.
+- The first record of a deprecation can now carry a `count` above 1, when other processes counted occurrences while another held the lock. Occurrences counted after a deprecation's last record are only sent once it occurs again after the interval, so a deprecation that stops occurring loses that tail. The shared count expires after a week, or twice the interval if that is longer.
+- `source` is now always `php`. Laravel has no deprecation path of its own to tell apart from PHP's, and `laravel` only ever labelled lines written to the deprecations channel directly. A deprecation inside the framework shows by its `vendor/laravel/framework/` path.
+
+## 4.0.0-beta.15 - 2026-10-19
+
+- The Boost skill and guideline now say that HTTP requests (sampled at a tenth), artisan commands, scheduled tasks and logs are on by default, which they already were. They used to call these streams opt-in and told an agent never to switch one on. Query plans (`LB_QUERY_EXPLAIN`) remain the one opt-in.
+- The `logs` section of `config/larabug.php` and the Boost skill no longer describe naming `larabug-logs` in `LOG_STACK` as the way to turn logs on. The package adds the channel to the default log channel itself, and `LB_LOGS_ENABLED=false` turns it off. No behaviour changes in this release.
+
+## 4.0.0-beta.14 - 2026-10-19
+
+- PHP and Laravel deprecations are now shipped to LaraBug. Laravel writes them to the channel named by `logging.deprecations.channel` (`LOG_DEPRECATIONS_CHANNEL`), which is null by default, so they were discarded before the log stack ever saw them. When that setting is null, `'null'` or names a channel that does not exist, it now points at the package's `larabug-deprecations` channel. When it names a channel, that channel keeps writing and LaraBug is stacked next to it. A channel the application defines as `logging.channels.deprecations` itself is extended the same way. `logging.deprecations.trace` is left to Laravel, and a deprecation logged with its trace carries it in `context.trace`, with paths relative to the application.
+- A deprecation fires on every call, so it is not shipped once per occurrence. The first occurrence of each one in a process is sent, and after that at most one record per `logs.deprecations.interval` seconds (3600 by default) carrying the number of occurrences it stands for. A queue worker sends what it coalesced from its loop once the interval has passed, and all of it when it stops. Every process sends the rest when it shuts down.
+- Deprecation records go through the `logs_batch` stream as warnings on the `deprecations` channel, with the message stripped of Laravel's file and line. `extra.larabug_deprecation` carries the `fingerprint` (md5 of message, file and line), the `file` relative to the application (a package keeps its `vendor/` path), the `line`, the `count` and the `source`. The source is `php` for a deprecation raised by PHP and handed over by Laravel's error handler, and `laravel` for a line written to the deprecations channel directly.
+- They count against the same telemetry allowance as other log lines. `LB_LOG_DEPRECATIONS=false` turns them off, and they follow `LB_LOGS_ENABLED` otherwise. A deprecations channel that is a stack including `larabug-logs` no longer ships them through it, so they are never sent once per occurrence as ordinary lines.
+
+## 4.0.0-beta.13 - 2026-10-19
+
+- Slow SELECTs can now carry a summary of their query plan, so the server can tell a statement that scans a whole table for want of an index from one that is merely slow. This is opt-in and off by default: set `LB_QUERY_EXPLAIN=true` (`queries.explain.enabled`). When on, LaraBug runs plain `EXPLAIN` on MySQL and MariaDB, and `EXPLAIN (FORMAT JSON)` on Postgres, against the same connection with the original bindings. It never runs `EXPLAIN ANALYZE`, so the query is not executed again. Other drivers are never explained.
+- Only a query already kept on a sampled request is considered, and only when it is a single read only SELECT (no `FOR UPDATE` or `FOR SHARE`, no write inside a CTE, not inside `DB::pretend()`) that took at least `queries.explain.min_duration_ms` (100 by default). Each statement is explained at most once per `queries.explain.interval` seconds (3600 by default). The interval is claimed with `Cache::add` on the default cache store so it holds across processes, and is kept in the process itself when there is no cache store.
+- The EXPLAIN runs after the response has been sent, when the request record is assembled, so it never delays the query or the response. LaraBug's own EXPLAIN is never recorded or explained. A failing EXPLAIN is swallowed, and reported as a `buffer_error` only with `jobs.report_buffer_errors` on. MariaDB caps it at one second with `SET STATEMENT max_statement_time`. MySQL and Postgres run it uncapped, because MySQL's `max_execution_time` does not apply to `EXPLAIN` and Postgres can only scope a `statement_timeout` to one statement inside a transaction.
+- The query's entry in `sql` gains an optional `plan` object with `driver`, `full_scan`, `table`, `rows_estimate`, `key`, `possible_keys` and `explained_at`. On MySQL and MariaDB a table is scanned when a row has type `ALL`, or `index` with no possible key, and the fields come from the scanning row expected to read the most. On Postgres it is scanned when the plan has a `Seq Scan` node, the fields come from the largest one, and both keys are null. Bindings, values and the raw plan are never sent.
+
+## 4.0.0-beta.12 - 2026-10-19
+
+- Calls the application makes through Laravel's `Http` client now carry a W3C `traceparent` for the current request, job, command or scheduled task, so a second monitored application they reach records itself as its child. It is sent only to hosts listed in `requests.trace_propagation_targets` (`LB_TRACE_PROPAGATION_TARGETS`, comma separated). The list is empty by default, which sends it nowhere, so a trace id never reaches a third party unless its host is listed.
+- A target is an exact host such as `api.example.com`, or `*.example.com` for any host below example.com but not example.com itself. Hosts are compared case insensitively and without the port. No target is read as a regular expression.
+- A `traceparent` the call already carries is kept, and a call made while no trace has started gets none. Guzzle used directly, outside the `Http` facade, is not reached and never sends the header. LaraBug's own reports are unaffected.
+- A queued job and a scheduled task now start their trace when they begin instead of on first use, so a call they make before anything else is reported already carries it.
+
+## 4.0.0-beta.11 - 2026-10-19
+
+- An attempt after a job's first is never sampled out by `jobs.sample_rate`. An earlier attempt may have been reported as `released` or `processing`, and the server keeps the last record it was sent, so a dropped completion left the job looking released or stuck until the server's sweep marked it abandoned. Such a record carries a `sample_rate` of 1.0. This costs volume: with a sample rate below 1.0, every retried job that completes is now sent.
+- With `jobs.track_processing` on, a processing record is now kept or dropped together with its attempt's completion. Before, every processing record was sent while its completion could be sampled out, which left the job looking stuck. Whether an attempt is kept is now decided by its job's uuid instead of a random draw, so both records get the same answer.
+
+## 4.0.0-beta.10 - 2026-10-19
+
+- A job that fails itself with `$this->fail()` without throwing is now reported once, as `failed`. Laravel fires the processed event after the failed one for such a job, so it used to be followed by a `completed` record as well.
+- An attempt that ends without a processed, failed or release event, such as a job that releases itself and then throws, no longer leaves its times and duration in memory for the life of the worker. They are dropped when the next job off a real queue starts. The same goes for the duration kept for a job released after an exception. Such an attempt still sends no record of its own.
+
+## 4.0.0-beta.9 - 2026-10-19
+
+- Completed and failed queue job records now always carry `available_at` and `reserved_at`. Both are recorded when a job starts, whether or not its processing record is sent, so under the default config (where `jobs.track_processing` is off) the server can still tell when a job was due and how long it waited. `jobs.track_processing` only decides whether the processing record itself is sent.
+- A job that releases itself with `$this->release()` is now reported with status `released` instead of `completed`. The record carries the attempt's `duration_ms`, `memory_usage` and mail, and no `completed_at`. Laravel does not keep the delay a job releases itself with, so the `available_at` of a released record is the moment the job was released, not the moment it is due again.
+- A released record is never sampled out by `jobs.sample_rate`, and it is sent with `jobs.track_completed` off too, so the server does not keep the attempt before it as the job's last state.
+- The attempt after a release reports its own `reserved_at`. Its `available_at` is the first dispatch's, as in beta.8, unless it was released after an exception with a backoff Laravel reports.
+- The times of an attempt are forgotten once it ends, including when its record is sampled out or not sent. Before, with `jobs.track_processing` on, a completed record that was sampled out kept them for the life of the worker. The due time of a retry released after an exception is kept for the 1000 most recent releases only, since another worker may pick the retry up.
+
+## 4.0.0-beta.8 - 2026-10-19
+
+- Without Horizon a queue job's `available_at` now comes from the payload's `createdAt`, which Laravel writes itself, plus its `delay`. Before, a job without Horizon's `pushedAt` reported the moment a worker picked it up, the same as its `reserved_at`. `pushedAt` is still preferred when it is there, and a job carrying neither still reports the moment it was picked up.
+- Laravel writes `createdAt` and `delay` into the payload from 12.11. On Laravel 11, and on 12 before 12.11, a job without Horizon still reports the moment it was picked up, and a delayed job pushed through Horizon reports its push time without the delay.
+- A job that throws and is released for a retry no longer repeats the first attempt's `reserved_at` and `available_at` when the same worker runs it again. Its next attempt's `available_at` is the release time plus the backoff, which Laravel puts on `JobReleasedAfterException` from 12.48. Before 12.48, or when another worker picks the retry up, the next attempt reports the `available_at` of the first dispatch.
+- A job that releases itself with `$this->release()` still reports the `available_at` of the first dispatch on its next attempt, since Laravel does not expose the delay it was released with.
+
+## 4.0.0-beta.7 - 2026-10-19
+
+- A queue job's `available_at` is now when the job became due instead of when it was dispatched. For a job dispatched with a delay that is its push time plus the payload's `delay`, so a deliberately delayed job no longer looks like one that waited for a worker the whole time. A job dispatched without a delay reports its push time, as before.
+- The push time is the payload's `pushedAt`, which Horizon writes. Without it `available_at` is still the moment a worker picked the job up.
+- A job released back onto the queue keeps its original payload, so its later attempts report the `available_at` of the first dispatch, not the end of the release backoff.
+
+## 4.0.0-beta.6 - 2026-10-19
+
+- Queue depth is now sampled from the scheduler once a minute by `larabug:queue-depth` and sent as a `queue_depth_batch`. Each sample carries the pending, delayed and reserved counts and when the oldest pending job was queued, so a queue nobody drains shows up even though no worker reports on it. The finer counts are null on Laravel versions whose queues do not provide them.
+- The default connection's queue is measured, along with every queue Horizon supervises in the current environment. `jobs.depth.queues` takes a list of `connection:queue` strings that replaces that discovery. `LB_QUEUE_DEPTH=false` turns it off, and it follows `LB_TRACK_JOBS` otherwise. It needs `schedule:run` to be running.
+- The command exits with a failure code when the samples could not be sent. A server that does not know the type yet answers 422, which is not treated as a failure.
+
+## 4.0.0-beta.5 - 2026-10-19
+
+- A 429 from the server now holds the refused stream instead of being ignored. The hold follows `Retry-After` (seconds or an HTTP date), else `X-RateLimit-Reset`, else 30 seconds, and never lasts longer than a minute. Only the refused stream waits: exceptions keep being reported while telemetry is rate limited, and the other way round.
+- Telemetry refused with a 429 is no longer discarded. Queue jobs, log lines, requests, commands and scheduled tasks go back into their buffer, keep collecting during the hold, and are sent once it has passed. Each buffer holds at most ten batches. Past that the oldest records are dropped and, with `jobs.report_buffer_errors` on, reported as a `buffer_error` with `lost_events` once sending resumes. A web request that ends during a hold loses what it buffered rather than waiting.
+- An exception refused with a 429 holds exception reporting for the same short window, the way a 402 does for the billing limit. Exceptions raised inside that window are not sent.
+- `larabug:test` and `larabug:scan` say when the project is being rate limited.
+- A 402 behaves exactly as before.
+
+## 4.0.0-beta.4 - 2026-10-19
+
+- Buffered queue job records are now sent once `jobs.flush_interval` has passed even while the worker sits idle. Before, the interval was only checked when the next job came in, so the tail of every burst waited for more work.
+- A worker that stops, gracefully or by killing itself over a timed out job, flushes its buffer first. A timed out job's kill skips the shutdown function, so those records used to be lost.
+
+## 4.0.0-beta.3 - 2026-10-13
+
+- Outgoing mail is now recorded wherever it is sent, not only from HTTP requests. Each message belongs to the innermost execution that sent it: a queue job, else an artisan command, else the request. Completed and failed job records and command records carry `mail` and `mail_sent`, and job records carry the `sample_rate` they were kept at.
+- A queued mailable or queued notification is recorded by the worker that delivers it, with `queued = 1` and the real mailable or notification class. With job tracking on, the request that dispatched it no longer records a marker for it; with job tracking off, it still does.
+- A send that never completes is recorded as failed on the job or command it started in, the same as on a request.
+- A notification sent over the mail channel is now recorded as mail too, named after the notification class, as well as in the notification stream.
+
 ## 1.3.1 - 2019-10-11
 
 - Cleanups & L6

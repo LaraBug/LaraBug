@@ -1,0 +1,9 @@
+{
+  "dependencies": {
+    "@vue/shared": "^3.4.21",
+    "vue": "^3.4.21"
+  },
+  "devDependencies": {
+    "vite": "^5.1.0"
+  }
+}

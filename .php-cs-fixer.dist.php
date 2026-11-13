@@ -11,7 +11,7 @@ $finder = Symfony\Component\Finder\Finder::create()
 
 return (new PhpCsFixer\Config)
     ->setRules([
-        '@PSR2' => true,
+        '@PSR12' => true,
         'array_syntax' => true,
         'ordered_imports' => ['sort_algorithm' => 'length'],
         'no_unused_imports' => true,

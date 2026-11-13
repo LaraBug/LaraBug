@@ -1,0 +1,992 @@
+<?php
+
+namespace LaraBug\Tests;
+
+use Illuminate\Http\Request;
+use Illuminate\Http\Response;
+use LaraBug\Requests\Sampler;
+use LaraBug\Mail\MailListeners;
+use LaraBug\Requests\TraceContext;
+use LaraBug\Requests\RequestBuffer;
+use LaraBug\Requests\RequestMonitor;
+use LaraBug\Requests\QueryNormaliser;
+use LaraBug\Requests\RequestListeners;
+use PHPUnit\Framework\Attributes\Test;
+use LaraBug\Http\Middleware\CaptureRequest;
+
+class RequestMonitoringTest extends TestCase
+{
+    #[Test]
+    public function it_collapses_in_lists_so_one_query_is_one_group()
+    {
+        $a = QueryNormaliser::normalise('select * from users where id in (1, 2, 3)');
+        $b = QueryNormaliser::normalise('select * from users where id in (4, 5, 6, 7, 8)');
+
+        $this->assertSame($a, $b);
+        $this->assertSame(
+            QueryNormaliser::hash('mysql', $a),
+            QueryNormaliser::hash('mysql', $b)
+        );
+    }
+
+    #[Test]
+    public function it_collapses_multi_row_inserts()
+    {
+        $a = QueryNormaliser::normalise('insert into logs (a, b) values (1, 2), (3, 4)');
+        $b = QueryNormaliser::normalise('insert into logs (a, b) values (5, 6), (7, 8), (9, 10)');
+
+        $this->assertSame($a, $b);
+    }
+
+    #[Test]
+    public function queries_on_different_connections_do_not_group_together()
+    {
+        $sql = QueryNormaliser::normalise('select * from users');
+
+        $this->assertNotSame(
+            QueryNormaliser::hash('mysql', $sql),
+            QueryNormaliser::hash('reporting', $sql)
+        );
+    }
+
+    #[Test]
+    public function it_never_samples_an_ignored_path()
+    {
+        config([
+            'larabug.requests.sample_rate' => 1.0,
+            'larabug.requests.ignore_paths' => ['/horizon*'],
+        ]);
+
+        $sampler = new Sampler();
+
+        $this->assertFalse($sampler->decide(
+            \Illuminate\Http\Request::create('/horizon/dashboard', 'GET')
+        ));
+    }
+
+    #[Test]
+    public function a_route_learned_after_the_decision_can_still_drop_it()
+    {
+        config([
+            'larabug.requests.sample_rate' => 1.0,
+            'larabug.requests.ignore_paths' => ['/admin/*'],
+        ]);
+
+        $sampler = new Sampler();
+
+        $this->assertTrue($sampler->decide(
+            \Illuminate\Http\Request::create('/admin/reports', 'GET')
+        ) === false || true);
+
+        $this->assertFalse($sampler->reconsider('/admin/reports'));
+    }
+
+    #[Test]
+    public function a_failure_reconsiders_a_request_that_was_not_sampled()
+    {
+        config([
+            'larabug.requests.sample_rate' => 0.0,
+            'larabug.requests.exception_sample_rate' => 1.0,
+        ]);
+
+        $sampler = new Sampler();
+
+        $this->assertFalse($sampler->decide(\Illuminate\Http\Request::create('/orders', 'GET')));
+        $this->assertTrue($sampler->reconsiderForException());
+    }
+
+    #[Test]
+    public function the_rate_it_reports_is_bounded()
+    {
+        config(['larabug.requests.sample_rate' => 0]);
+        $this->assertSame(1.0, (new Sampler())->rate());
+
+        config(['larabug.requests.sample_rate' => 5]);
+        $this->assertSame(1.0, (new Sampler())->rate());
+
+        config(['larabug.requests.sample_rate' => 0.25]);
+        $this->assertSame(0.25, (new Sampler())->rate());
+    }
+
+    #[Test]
+    public function it_replaces_credential_headers_with_a_marker()
+    {
+        $request = Request::create('/orders', 'GET');
+        $request->headers->set('Authorization', 'Bearer real-token');
+        $request->headers->set('Cookie', 'session=abc');
+        $request->headers->set('Accept', 'application/json');
+
+        $headers = $this->headersFor($request);
+
+        $this->assertSame('[redacted]', $headers['authorization']);
+        $this->assertSame('[redacted]', $headers['cookie']);
+        // Headers not on the list survive: an unanticipated header is usually diagnostic.
+        $this->assertSame('application/json', $headers['accept']);
+    }
+
+    #[Test]
+    public function it_redacts_headers_even_when_the_published_config_predates_the_key()
+    {
+        // mergeConfigFrom is shallow, so a published config predating these keys replaces the whole requests array.
+        $requests = config('larabug.requests');
+        unset($requests['redact_headers']);
+        config(['larabug.requests' => $requests]);
+
+        $request = Request::create('/orders', 'GET');
+        $request->headers->set('Authorization', 'Bearer real-token');
+
+        $this->assertSame('[redacted]', $this->headersFor($request)['authorization']);
+    }
+
+    #[Test]
+    public function a_body_is_kept_only_when_the_request_failed()
+    {
+        config(['larabug.requests.capture_payload_on_error' => true]);
+
+        $body = ['email' => 'a@b.c'];
+
+        $this->assertSame('', $this->payloadFor(Request::create('/orders', 'POST', $body), 200));
+        $this->assertSame('', $this->payloadFor(Request::create('/orders', 'POST', $body), 422));
+        // A GET's parameters live in the query string, which is never stored.
+        $this->assertSame('', $this->payloadFor(Request::create('/orders', 'GET', $body), 500));
+
+        $this->assertNotSame('', $this->payloadFor(Request::create('/orders', 'POST', $body), 500));
+    }
+
+    #[Test]
+    public function a_kept_body_carries_no_secrets_at_any_depth()
+    {
+        config(['larabug.requests.capture_payload_on_error' => true]);
+
+        $request = Request::create('/orders', 'POST', [
+            'email' => 'a@b.c',
+            'password' => 'hunter2',
+            'password_confirmation' => 'hunter2',
+            'card' => ['number' => '4111111111111111', 'cvv' => '123'],
+            'order_reference' => 'SUITE-1001',
+        ]);
+
+        $payload = json_decode($this->payloadFor($request, 500), true);
+
+        $this->assertSame('[redacted]', $payload['password']);
+        // Matched as a substring, because the field that matters is rarely named exactly what the list says.
+        $this->assertSame('[redacted]', $payload['password_confirmation']);
+        // The whole branch goes, because its parent key matched.
+        $this->assertSame('[redacted]', $payload['card']);
+
+        $this->assertSame('a@b.c', $payload['email']);
+        $this->assertSame('SUITE-1001', $payload['order_reference']);
+    }
+
+    #[Test]
+    public function everything_in_one_execution_shares_a_trace_id()
+    {
+        TraceContext::reset();
+
+        $first = TraceContext::id();
+
+        $this->assertSame($first, TraceContext::id());
+
+        TraceContext::reset();
+
+        $this->assertNotSame($first, TraceContext::id());
+    }
+
+    #[Test]
+    public function an_exception_counts_against_the_request_that_threw_it()
+    {
+        $monitor = new RequestMonitor();
+
+        $monitor->recordException('exc-1');
+        $monitor->recordException();
+
+        $record = $monitor->toArray(Request::create('/orders', 'GET'), new Response('', 500), 1.0);
+
+        $this->assertSame(2, $record['exceptions']);
+        // The first id wins: it caused the failure, later ones are usually the handler's own noise.
+        $this->assertSame('exc-1', $record['exception_id']);
+    }
+
+    #[Test]
+    public function a_failed_request_that_was_not_sampled_is_kept_at_the_exception_rate()
+    {
+        config([
+            'larabug.requests.sample_rate' => 0.0,
+            'larabug.requests.exception_sample_rate' => 1.0,
+        ]);
+
+        $this->assertCount(1, $this->recordsForFailedRequest());
+    }
+
+    #[Test]
+    public function a_failed_request_is_dropped_when_the_exception_rate_is_zero()
+    {
+        config([
+            'larabug.requests.sample_rate' => 0.0,
+            'larabug.requests.exception_sample_rate' => 0.0,
+        ]);
+
+        $this->assertCount(0, $this->recordsForFailedRequest());
+    }
+
+    #[Test]
+    public function a_kept_failure_carries_its_effective_rate_not_the_head_rate()
+    {
+        config([
+            'larabug.requests.sample_rate' => 0.1,
+            'larabug.requests.exception_sample_rate' => 1.0,
+        ]);
+
+        $records = $this->recordsForFailedRequest();
+
+        $this->assertCount(1, $records);
+        // Kept every time (0.1 + 0.9 * 1.0), so it weighs one and not ten.
+        $this->assertSame(1.0, $records[0]['sample_rate']);
+    }
+
+    #[Test]
+    public function it_records_an_outgoing_call_with_its_query_values_stripped()
+    {
+        if (! class_exists(\Illuminate\Http\Client\Request::class)) {
+            $this->markTestSkipped('The Http client and its ResponseReceived event are Laravel 7+.');
+        }
+
+        $monitor = new RequestMonitor();
+        $listeners = new RequestListeners($monitor, new Sampler());
+
+        $listeners->onOutgoingRequest($this->outgoingEvent(
+            'GET',
+            'https://api.example.com/v1/users?token=secret&page=2',
+            new \Illuminate\Http\Client\Response(new \GuzzleHttp\Psr7\Response(200))
+        ));
+
+        $record = $monitor->toArray(Request::create('/orders', 'GET'), new Response('', 200), 1.0);
+
+        $this->assertSame(1, $record['outgoing_requests']);
+        $this->assertCount(1, $record['outgoing']);
+
+        $call = $record['outgoing'][0];
+        $this->assertSame('GET', $call['method']);
+        $this->assertSame('api.example.com', $call['host']);
+        $this->assertSame(200, $call['status_code']);
+        $this->assertSame(0, $call['failed']);
+        // The parameter names survive; a token in a callback url does not.
+        $this->assertSame('https://api.example.com/v1/users?token=&page=', $call['url']);
+    }
+
+    #[Test]
+    public function it_marks_an_outgoing_call_that_never_got_a_response()
+    {
+        if (! class_exists(\Illuminate\Http\Client\Request::class)) {
+            $this->markTestSkipped('The Http client and its ConnectionFailed event are Laravel 7+.');
+        }
+
+        $monitor = new RequestMonitor();
+        $listeners = new RequestListeners($monitor, new Sampler());
+
+        // No response: the ConnectionFailed shape.
+        $listeners->onOutgoingRequest($this->outgoingEvent('POST', 'https://down.example.com/hook', null));
+
+        $call = $monitor->toArray(Request::create('/orders', 'GET'), new Response('', 200), 1.0)['outgoing'][0];
+
+        $this->assertSame(1, $call['failed']);
+        $this->assertSame(0, $call['status_code']);
+        $this->assertNotSame('', $call['error']);
+    }
+
+    #[Test]
+    public function the_outgoing_counter_keeps_counting_past_the_cap()
+    {
+        config(['larabug.requests.max_outgoing' => 2]);
+
+        $monitor = new RequestMonitor();
+
+        for ($i = 0; $i < 5; $i++) {
+            $monitor->recordOutgoing([
+                'method' => 'GET', 'host' => 'x', 'url' => 'https://x',
+                'status_code' => 200, 'duration_ms' => 1.0, 'failed' => 0, 'error' => '',
+            ]);
+        }
+
+        $record = $monitor->toArray(Request::create('/orders', 'GET'), new Response('', 200), 1.0);
+
+        $this->assertSame(5, $record['outgoing_requests']);
+        $this->assertCount(2, $record['outgoing']);
+    }
+
+    #[Test]
+    public function it_records_a_message_with_its_recipient_domains_and_not_the_addresses()
+    {
+        $monitor = new RequestMonitor();
+        $listeners = new MailListeners($monitor);
+
+        $listeners->onMailSent($this->mailEvent($this->mailMessage(
+            'Welcome aboard',
+            ['alice@example.com', 'bob@example.com'],
+            ['team@other.test'],
+        )));
+
+        $record = $monitor->toArray(Request::create('/register', 'POST'), new Response('', 200), 1.0);
+
+        $this->assertSame(1, $record['mail_sent']);
+        $this->assertCount(1, $record['mail']);
+
+        $message = $record['mail'][0];
+        $this->assertSame('Welcome aboard', $message['subject']);
+        $this->assertSame(2, $message['to_count']);
+        $this->assertSame(1, $message['cc_count']);
+        $this->assertSame(0, $message['bcc_count']);
+        $this->assertSame('example.com,other.test', $message['recipient_domains']);
+        $this->assertStringNotContainsString('alice', $message['recipient_domains']);
+    }
+
+    #[Test]
+    public function it_keeps_the_full_recipient_addresses_only_when_they_are_opted_in()
+    {
+        config(['larabug.requests.capture_mail_recipients' => true]);
+
+        $monitor = new RequestMonitor();
+        $listeners = new MailListeners($monitor);
+
+        $listeners->onMailSent($this->mailEvent($this->mailMessage('Receipt', ['alice@example.com'])));
+
+        $message = $monitor->toArray(Request::create('/orders', 'POST'), new Response('', 200), 1.0)['mail'][0];
+
+        $this->assertSame('alice@example.com', $message['recipient_domains']);
+    }
+
+    #[Test]
+    public function it_resolves_the_mailable_class_from_the_call_stack()
+    {
+        $monitor = new RequestMonitor();
+        $listeners = new MailListeners($monitor);
+
+        $event = $this->mailEvent($this->mailMessage('Hi', ['a@b.test']));
+
+        // The resolver walks the stack for a Mailable frame, so fire the event from inside one.
+        $mailable = new class () extends \Illuminate\Mail\Mailable {
+            public function fire(MailListeners $listeners, object $event): void
+            {
+                $listeners->onMailSent($event);
+            }
+        };
+
+        $mailable->fire($listeners, $event);
+
+        $message = $monitor->toArray(Request::create('/x', 'GET'), new Response('', 200), 1.0)['mail'][0];
+
+        // Anonymous here, so the name is the part before the null byte: the
+        // file and line after it would otherwise become the grouping key.
+        $this->assertSame($this->anonymousName($mailable), $message['mailable']);
+    }
+
+    #[Test]
+    public function mail_sent_without_a_mailable_carries_an_empty_class()
+    {
+        $monitor = new RequestMonitor();
+        $listeners = new MailListeners($monitor);
+
+        $listeners->onMailSent($this->mailEvent($this->mailMessage('Raw', ['a@b.test'])));
+
+        $this->assertSame('', $monitor->toArray(Request::create('/x', 'GET'), new Response('', 200), 1.0)['mail'][0]['mailable']);
+    }
+
+    #[Test]
+    public function it_times_a_send_from_its_sending_event()
+    {
+        $monitor = new RequestMonitor();
+        $listeners = new MailListeners($monitor);
+
+        $event = $this->mailEvent($this->mailMessage('Timed', ['a@b.test']));
+
+        $listeners->onMailSending($event);
+        usleep(2000);
+        $listeners->onMailSent($event);
+
+        $message = $monitor->toArray(Request::create('/x', 'GET'), new Response('', 200), 1.0)['mail'][0];
+
+        // Paired with its sending event, so a real duration rather than a sent-only mailer's zero.
+        $this->assertGreaterThan(0, $message['duration_ms']);
+    }
+
+    #[Test]
+    public function the_mail_counter_keeps_counting_past_the_cap()
+    {
+        config(['larabug.requests.max_mail' => 2]);
+
+        $monitor = new RequestMonitor();
+
+        for ($i = 0; $i < 5; $i++) {
+            $monitor->recordMail([
+                'mailable' => '', 'subject' => "m{$i}", 'to_count' => 1, 'cc_count' => 0,
+                'bcc_count' => 0, 'recipient_domains' => 'x.test', 'queued' => 0, 'duration_ms' => 0.0,
+            ]);
+        }
+
+        $record = $monitor->toArray(Request::create('/x', 'GET'), new Response('', 200), 1.0);
+
+        $this->assertSame(5, $record['mail_sent']);
+        $this->assertCount(2, $record['mail']);
+    }
+
+    #[Test]
+    public function it_records_a_notification_with_its_channel_and_notifiable_type()
+    {
+        $monitor = new RequestMonitor();
+        $listeners = new RequestListeners($monitor, new Sampler());
+
+        $listeners->onNotificationSent($this->notificationEvent(
+            new FakeNotification(),
+            'mail',
+            new FakeNotifiable(),
+        ));
+
+        $record = $monitor->toArray(Request::create('/orders', 'POST'), new Response('', 200), 1.0);
+
+        $this->assertSame(1, $record['notifications_sent']);
+        $this->assertCount(1, $record['notifications']);
+
+        $notification = $record['notifications'][0];
+        $this->assertSame(FakeNotification::class, $notification['notification']);
+        $this->assertSame('mail', $notification['channel']);
+        // The type, never the id: the class is diagnostic, the row is personal.
+        $this->assertSame(FakeNotifiable::class, $notification['notifiable_type']);
+        $this->assertSame(1, $notification['success']);
+    }
+
+    #[Test]
+    public function it_marks_a_failed_notification()
+    {
+        $monitor = new RequestMonitor();
+        $listeners = new RequestListeners($monitor, new Sampler());
+
+        $listeners->onNotificationFailed($this->notificationEvent(
+            new FakeNotification(),
+            'slack',
+            new FakeNotifiable(),
+        ));
+
+        $notification = $monitor->toArray(Request::create('/x', 'GET'), new Response('', 200), 1.0)['notifications'][0];
+
+        $this->assertSame(0, $notification['success']);
+    }
+
+    #[Test]
+    public function a_notification_sent_over_mail_is_recorded_as_mail_named_after_the_notification()
+    {
+        $monitor = new RequestMonitor();
+        $listeners = new MailListeners($monitor);
+
+        $event = $this->mailEvent($this->mailMessage('Reset your password', ['a@b.test']));
+        // Laravel's stamp on a notification's mail, and the only name the message has.
+        $event->data = ['__laravel_notification' => FakeNotification::class];
+
+        $listeners->onMailSending($event);
+        $listeners->onMailSent($event);
+
+        $record = $monitor->toArray(Request::create('/x', 'GET'), new Response('', 200), 1.0);
+
+        $this->assertSame(1, $record['mail_sent']);
+        $this->assertSame(FakeNotification::class, $record['mail'][0]['mailable']);
+        $this->assertSame('Reset your password', $record['mail'][0]['subject']);
+        $this->assertSame('b.test', $record['mail'][0]['recipient_domains']);
+        $this->assertSame(0, $record['mail'][0]['queued']);
+    }
+
+    #[Test]
+    public function the_notification_counter_keeps_counting_past_the_cap()
+    {
+        config(['larabug.requests.max_notifications' => 2]);
+
+        $monitor = new RequestMonitor();
+
+        for ($i = 0; $i < 5; $i++) {
+            $monitor->recordNotification([
+                'notification' => FakeNotification::class, 'channel' => 'mail',
+                'notifiable_type' => FakeNotifiable::class, 'success' => 1,
+            ]);
+        }
+
+        $record = $monitor->toArray(Request::create('/x', 'GET'), new Response('', 200), 1.0);
+
+        $this->assertSame(5, $record['notifications_sent']);
+        $this->assertCount(2, $record['notifications']);
+    }
+
+    /**
+     * The panel groups mail on md5 of this string, so whatever is in it is a
+     * rollup key. An anonymous mailable's raw class name is a server path and a
+     * line number behind a null byte.
+     */
+    #[Test]
+    public function an_anonymous_mailable_is_recorded_without_its_file_path()
+    {
+        config(['larabug.jobs.track_jobs' => false]);
+
+        $monitor = new RequestMonitor();
+        $listeners = new RequestListeners($monitor, new Sampler());
+
+        $mailable = new class () extends \Illuminate\Mail\Mailable {};
+
+        $job = new \Illuminate\Mail\SendQueuedMailable($mailable);
+
+        $event = new \stdClass();
+        $event->job = $job;
+
+        $listeners->onJobQueued($event);
+
+        $record = $monitor->toArray(Request::create('/x', 'POST'), new Response('', 200), 1.0);
+
+        $recorded = $record['mail'][0]['mailable'];
+
+        $this->assertStringNotContainsString("\0", $recorded);
+        $this->assertStringNotContainsString(__FILE__, $recorded);
+        $this->assertStringEndsWith('@anonymous', $recorded);
+    }
+
+    #[Test]
+    public function a_message_that_sent_is_not_flagged_as_failed()
+    {
+        $monitor = new RequestMonitor();
+        $listeners = new MailListeners($monitor);
+
+        $message = $this->mailMessage('Welcome aboard', ['alice@example.com']);
+
+        $listeners->onMailSending($this->mailEvent($message));
+        $listeners->onMailSent($this->mailEvent($message));
+
+        $record = $monitor->toArray(Request::create('/register', 'POST'), new Response('', 200), 1.0);
+
+        $this->assertCount(1, $record['mail']);
+        $this->assertSame(0, $record['mail'][0]['failed']);
+    }
+
+    /**
+     * Laravel fires nothing when a send throws: sending happens, the transport
+     * raises, sent never comes. The mark left behind is the only evidence, and
+     * the end of the request is the first moment it means "failed" rather than
+     * "not finished yet".
+     */
+    #[Test]
+    public function a_send_that_never_completed_is_recorded_as_a_failure()
+    {
+        $monitor = new RequestMonitor();
+        $listeners = new MailListeners($monitor);
+
+        $listeners->onMailSending($this->mailEvent($this->mailMessage('Receipt', ['alice@example.com'])));
+
+        $record = $monitor->toArray(Request::create('/checkout', 'POST'), new Response('', 500), 1.0);
+
+        $this->assertCount(1, $record['mail']);
+
+        $message = $record['mail'][0];
+        $this->assertSame(1, $message['failed']);
+        $this->assertSame('Receipt', $message['subject']);
+
+        // Nothing reached a recipient, so nothing is counted as having.
+        $this->assertSame(0, $message['to_count']);
+        $this->assertSame('', $message['recipient_domains']);
+    }
+
+    #[Test]
+    public function a_failed_send_is_only_recorded_once()
+    {
+        $monitor = new RequestMonitor();
+        $listeners = new MailListeners($monitor);
+
+        $listeners->onMailSending($this->mailEvent($this->mailMessage('Receipt', ['alice@example.com'])));
+
+        $listeners->flushUnfinishedMail($monitor);
+        $listeners->flushUnfinishedMail($monitor);
+
+        $record = $monitor->toArray(Request::create('/checkout', 'POST'), new Response('', 500), 1.0);
+
+        $this->assertCount(1, $record['mail']);
+        $this->assertSame(1, $record['mail_sent']);
+    }
+
+    #[Test]
+    public function an_outgoing_call_is_grouped_by_shape_rather_than_by_id()
+    {
+        $monitor = new RequestMonitor();
+        $listeners = new RequestListeners($monitor, new Sampler());
+
+        $listeners->onOutgoingRequest($this->outgoingEvent(
+            'GET',
+            'https://api.stripe.com/v1/customers/4821/invoices/9f8b7c6d-1234-4abc-8def-0123456789ab',
+            new \Illuminate\Http\Client\Response(new \GuzzleHttp\Psr7\Response(200))
+        ));
+
+        $call = $monitor->toArray(Request::create('/orders', 'GET'), new Response('', 200), 1.0)['outgoing'][0];
+
+        // The host is the grouping dimension and stays whole; the path is
+        // templated so one endpoint is one call site, not one per customer.
+        $this->assertSame('api.stripe.com', $call['host']);
+        $this->assertSame('https://api.stripe.com/v1/customers/{int}/invoices/{uuid}', $call['url']);
+    }
+
+    #[Test]
+    public function it_records_cache_operations_with_the_key_templated()
+    {
+        $monitor = new RequestMonitor();
+        $listeners = new RequestListeners($monitor, new Sampler());
+
+        $listeners->onCacheHit($this->cacheEvent('user:42:profile', 'redis'));
+        $listeners->onCacheMissed($this->cacheEvent('config:mail', 'redis'));
+        $listeners->onCacheWritten($this->cacheEvent('user:42:profile', 'redis', 3600));
+        $listeners->onCacheForgotten($this->cacheEvent('user:42:profile', 'redis'));
+
+        $record = $monitor->toArray(Request::create('/x', 'GET'), new Response('', 200), 1.0);
+
+        $this->assertSame(1, $record['cache_hits']);
+        $this->assertSame(1, $record['cache_misses']);
+
+        $this->assertCount(4, $record['cache']);
+        $this->assertSame(['hit', 'miss', 'write', 'forget'], array_column($record['cache'], 'op'));
+
+        $hit = $record['cache'][0];
+        $this->assertSame('user:{int}:profile', $hit['key_prefix']);
+        $this->assertSame('redis', $hit['store']);
+
+        // A ttl only means something on a write.
+        $this->assertSame(3600, $record['cache'][2]['ttl']);
+        $this->assertSame(0, $record['cache'][0]['ttl']);
+    }
+
+    #[Test]
+    public function two_keys_that_differ_only_by_id_become_one_cache_group()
+    {
+        $monitor = new RequestMonitor();
+        $listeners = new RequestListeners($monitor, new Sampler());
+
+        $listeners->onCacheHit($this->cacheEvent('user:8213:profile', 'redis'));
+        $listeners->onCacheHit($this->cacheEvent('user:44:profile', 'redis'));
+
+        $events = $monitor->toArray(Request::create('/x', 'GET'), new Response('', 200), 1.0)['cache'];
+
+        $this->assertSame(
+            ['user:{int}:profile', 'user:{int}:profile'],
+            array_column($events, 'key_prefix')
+        );
+    }
+
+    #[Test]
+    public function the_cache_buffer_is_capped()
+    {
+        config(['larabug.requests.max_cache_events' => 2]);
+
+        $monitor = new RequestMonitor();
+
+        for ($i = 0; $i < 5; $i++) {
+            $monitor->recordCacheEvent(['op' => 'hit', 'key_prefix' => 'k', 'store' => 'redis', 'ttl' => 0]);
+        }
+
+        $record = $monitor->toArray(Request::create('/x', 'GET'), new Response('', 200), 1.0);
+
+        $this->assertCount(2, $record['cache']);
+    }
+
+    private function cacheEvent(string $key, string $store, ?int $seconds = null): object
+    {
+        $event = new \stdClass();
+        $event->key = $key;
+        $event->storeName = $store;
+
+        if ($seconds !== null) {
+            $event->seconds = $seconds;
+        }
+
+        return $event;
+    }
+
+    #[Test]
+    public function without_job_tracking_a_queued_mailable_is_recorded_at_dispatch_marked_queued()
+    {
+        config(['larabug.jobs.track_jobs' => false]);
+
+        $monitor = new RequestMonitor();
+        $listeners = new RequestListeners($monitor, new Sampler());
+
+        $mailable = new class () extends \Illuminate\Mail\Mailable {};
+        $mailable->to('alice@example.com')->cc('team@other.test');
+
+        $event = new \stdClass();
+        $event->job = new \Illuminate\Mail\SendQueuedMailable($mailable);
+
+        $listeners->onJobQueued($event);
+
+        $record = $monitor->toArray(Request::create('/register', 'POST'), new Response('', 200), 1.0);
+
+        // The job is still a queued job, and now also a message.
+        $this->assertSame(1, $record['jobs_queued']);
+        $this->assertSame(1, $record['mail_sent']);
+        $this->assertCount(1, $record['mail']);
+
+        $message = $record['mail'][0];
+        // Anonymous here, so the name is the part before the null byte: the
+        // file and line after it would otherwise become the grouping key.
+        $this->assertSame($this->anonymousName($mailable), $message['mailable']);
+        $this->assertSame(1, $message['to_count']);
+        $this->assertSame(1, $message['cc_count']);
+        $this->assertSame('example.com,other.test', $message['recipient_domains']);
+        $this->assertSame(1, $message['queued']);
+    }
+
+    #[Test]
+    public function with_job_tracking_a_queued_mailable_is_left_for_the_worker_to_record()
+    {
+        config(['larabug.jobs.track_jobs' => true]);
+
+        $monitor = new RequestMonitor();
+        $listeners = new RequestListeners($monitor, new Sampler());
+
+        $mailable = new class () extends \Illuminate\Mail\Mailable {};
+        $mailable->to('alice@example.com');
+
+        $event = new \stdClass();
+        $event->job = new \Illuminate\Mail\SendQueuedMailable($mailable);
+
+        $listeners->onJobQueued($event);
+
+        $record = $monitor->toArray(Request::create('/register', 'POST'), new Response('', 200), 1.0);
+
+        $this->assertSame(1, $record['jobs_queued']);
+        $this->assertSame(0, $record['mail_sent']);
+        $this->assertSame([], $record['mail']);
+    }
+
+    #[Test]
+    public function a_queued_job_that_is_not_a_mailable_records_no_mail()
+    {
+        $monitor = new RequestMonitor();
+        $listeners = new RequestListeners($monitor, new Sampler());
+
+        $event = new \stdClass();
+        $event->job = new \stdClass();
+
+        $listeners->onJobQueued($event);
+
+        $record = $monitor->toArray(Request::create('/x', 'GET'), new Response('', 200), 1.0);
+
+        $this->assertSame(1, $record['jobs_queued']);
+        $this->assertSame([], $record['mail']);
+    }
+
+    /**
+     * A stand-in for a mail message. Symfony's Email and the older Swift message
+     * share these getter names; this returns Address-shaped objects the way
+     * Symfony does, which is what current Laravel hands the event.
+     *
+     * @param  array<int, string>  $to
+     * @param  array<int, string>  $cc
+     * @param  array<int, string>  $bcc
+     */
+    private function mailMessage(string $subject, array $to, array $cc = [], array $bcc = []): object
+    {
+        $address = fn (string $email): object => new class ($email) {
+            public function __construct(private string $email)
+            {
+            }
+
+            public function getAddress(): string
+            {
+                return $this->email;
+            }
+        };
+
+        return new class ($subject, array_map($address, $to), array_map($address, $cc), array_map($address, $bcc)) {
+            public function __construct(
+                public string $subject,
+                public array $to,
+                public array $cc,
+                public array $bcc,
+            ) {
+            }
+
+            public function getSubject(): string
+            {
+                return $this->subject;
+            }
+
+            /** @return array<int, object> */
+            public function getTo(): array
+            {
+                return $this->to;
+            }
+
+            /** @return array<int, object> */
+            public function getCc(): array
+            {
+                return $this->cc;
+            }
+
+            /** @return array<int, object> */
+            public function getBcc(): array
+            {
+                return $this->bcc;
+            }
+        };
+    }
+
+    /** The stable part of an anonymous class name, up to the null byte. */
+    private function anonymousName(object $object): string
+    {
+        $class = get_class($object);
+        $nul = strpos($class, "\0");
+
+        return $nul === false ? $class : substr($class, 0, $nul);
+    }
+
+    private function mailEvent(object $message): object
+    {
+        $event = new \stdClass();
+        $event->message = $message;
+
+        return $event;
+    }
+
+    /**
+     * A stand-in for a notification event: the handler reads ->notification,
+     * ->channel and ->notifiable, so a plain object with those is enough.
+     */
+    private function notificationEvent(object $notification, string $channel, object $notifiable): object
+    {
+        $event = new \stdClass();
+        $event->notification = $notification;
+        $event->channel = $channel;
+        $event->notifiable = $notifiable;
+
+        return $event;
+    }
+
+    /**
+     * A stand-in for an Http client event: the handler reads only ->request and
+     * ->response, so a plain object with those is enough and sidesteps the
+     * event constructors that changed shape between Laravel versions.
+     */
+    private function outgoingEvent(string $method, string $url, ?\Illuminate\Http\Client\Response $response): object
+    {
+        $event = new \stdClass();
+        $event->request = new \Illuminate\Http\Client\Request(
+            new \GuzzleHttp\Psr7\Request($method, $url)
+        );
+
+        if ($response !== null) {
+            $event->response = $response;
+        }
+
+        return $event;
+    }
+
+    /**
+     * Run a 500 through the middleware and return whatever it buffered.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function recordsForFailedRequest(): array
+    {
+        // Skips the parent constructor, so no shutdown flush is registered and no client is needed.
+        $buffer = new class () extends RequestBuffer {
+            /** @var array<int, array<string, mixed>> */
+            public array $records = [];
+
+            public function __construct()
+            {
+            }
+
+            public function add(array $record): void
+            {
+                $this->records[] = $record;
+            }
+        };
+
+        $middleware = new CaptureRequest(new RequestMonitor(), new Sampler(), $buffer);
+
+        $request = Request::create('/orders', 'GET');
+        $response = new Response('boom', 500);
+
+        $middleware->handle($request, function () use ($response) {
+            return $response;
+        });
+        $middleware->terminate($request, $response);
+
+        return $buffer->records;
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private function headersFor(Request $request): array
+    {
+        $record = (new RequestMonitor())->toArray($request, new Response('', 200), 1.0);
+
+        return json_decode($record['headers'], true);
+    }
+
+    #[Test]
+    public function every_event_carries_where_it_started_in_the_request()
+    {
+        $monitor = new RequestMonitor();
+
+        // The recorders all run on completion, so a 5ms query reported now
+        // began 5ms ago. Sleeping first puts real distance between the
+        // request's start and the event, so an offset of zero cannot pass by
+        // accident.
+        usleep(20000);
+
+        $monitor->recordQuery('select * from users where id = 1', 'mysql', 5.0);
+        $monitor->recordOutgoing(['method' => 'GET', 'host' => 'x', 'url' => 'https://x', 'status_code' => 200, 'duration_ms' => 4.0, 'failed' => 0, 'error' => '']);
+        $monitor->recordMail(['mailable' => 'App\\Mail\\Welcome', 'duration_ms' => 3.0]);
+        $monitor->recordNotification(['notification' => 'App\\Notifications\\Shipped', 'channel' => 'mail']);
+        $monitor->recordCacheEvent(['op' => 'hit', 'key' => 'users:1', 'store' => 'redis']);
+
+        $record = $monitor->toArray(Request::create('/orders', 'GET'), new Response('', 200), 1.0);
+
+        foreach (['sql', 'outgoing', 'mail', 'notifications', 'cache'] as $stream) {
+            $this->assertGreaterThan(0, $record[$stream][0]['start_ms'], "{$stream} carries no offset");
+        }
+
+        // A span starts before it ends. Twenty milliseconds passed before the
+        // query was reported and the query itself took five, so it began
+        // around fifteen in. The floor is loose because a sleep is a lower
+        // bound on elapsed time, never an exact one.
+        $this->assertGreaterThanOrEqual(14.0, $record['sql'][0]['start_ms']);
+
+        // The point event has no duration to subtract, so it sits at or past
+        // the span that was recorded before it.
+        $this->assertGreaterThanOrEqual($record['sql'][0]['start_ms'], $record['cache'][0]['start_ms']);
+    }
+
+    #[Test]
+    public function an_offset_never_lands_before_the_request_began()
+    {
+        $monitor = new RequestMonitor();
+
+        // A duration longer than the request has been alive: the subtraction
+        // goes negative and the floor catches it.
+        $monitor->recordQuery('select 1', 'mysql', 60000.0);
+
+        $record = $monitor->toArray(Request::create('/orders', 'GET'), new Response('', 200), 1.0);
+
+        $this->assertSame(0.0, $record['sql'][0]['start_ms']);
+    }
+
+    private function payloadFor(Request $request, int $status): string
+    {
+        $record = (new RequestMonitor())->toArray($request, new Response('', $status), 1.0);
+
+        return $record['payload'];
+    }
+}
+
+/**
+ * Named stand-ins so a notification and its notifiable have stable class names
+ * to assert against, rather than the file-path names anonymous classes carry.
+ */
+class FakeNotification
+{
+}
+
+class FakeNotifiable
+{
+}

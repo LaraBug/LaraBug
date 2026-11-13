@@ -1,0 +1,30 @@
+[
+    {
+        "id": 1,
+        "select_type": "SIMPLE",
+        "table": "orders",
+        "partitions": null,
+        "type": "ALL",
+        "possible_keys": "orders_user_id_index",
+        "key": null,
+        "key_len": null,
+        "ref": null,
+        "rows": 2000,
+        "filtered": 10.0,
+        "Extra": "Using where"
+    },
+    {
+        "id": 1,
+        "select_type": "SIMPLE",
+        "table": "users",
+        "partitions": null,
+        "type": "eq_ref",
+        "possible_keys": "PRIMARY",
+        "key": "PRIMARY",
+        "key_len": "4",
+        "ref": "shop.orders.user_id",
+        "rows": 1,
+        "filtered": 100.0,
+        "Extra": null
+    }
+]

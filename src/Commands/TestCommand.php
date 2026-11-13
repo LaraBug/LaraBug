@@ -3,7 +3,9 @@
 namespace LaraBug\Commands;
 
 use Exception;
+use LaraBug\LaraBug;
 use Illuminate\Console\Command;
+use LaraBug\Support\LimitBackoff;
 
 class TestCommand extends Command
 {
@@ -11,7 +13,7 @@ class TestCommand extends Command
 
     protected $description = 'Generate a test exception and send it to larabug';
 
-    public function handle()
+    public function handle(): void
     {
         try {
             /** @var LaraBug $laraBug */
@@ -30,10 +32,12 @@ class TestCommand extends Command
                 $this->info('More information on setting your project key: https://www.larabug.com/docs/how-to-use/installation');
             }
 
-            if (in_array(config('app.env'), config('larabug.environments'))) {
-                $this->info('✓ [Larabug] Correct environment found (' . config('app.env') . ')');
+            $environment = config('app.env');
+
+            if (in_array($environment, config('larabug.environments'))) {
+                $this->info("✓ [Larabug] Correct environment found ({$environment})");
             } else {
-                $this->error('✗ [LaraBug] Environment (' . config('app.env') . ') not allowed to send errors to LaraBug, set this in your config');
+                $this->error("✗ [LaraBug] Environment ({$environment}) not allowed to send errors to LaraBug, set this in your config");
                 $this->info('More information about environment configuration: https://www.larabug.com/docs/how-to-use/installation');
             }
 
@@ -42,13 +46,19 @@ class TestCommand extends Command
             );
 
             if (isset($response->id)) {
-                $this->info('✓ [LaraBug] Sent exception to LaraBug with ID: '.$response->id);
-            } elseif (is_null($response)) {
+                $this->info("✓ [LaraBug] Sent exception to LaraBug with ID: {$response->id}");
+            } elseif ($response === null) {
                 $this->info('✓ [LaraBug] Sent exception to LaraBug!');
+            } elseif (LimitBackoff::isRateLimited(LimitBackoff::ISSUES)) {
+                $this->error('✗ [LaraBug] This project is sending faster than its plan\'s rate limit, so the exception was refused');
+                $this->info('Reporting starts again by itself within a minute.');
+            } elseif (LimitBackoff::resumesAt(LimitBackoff::ISSUES) !== null) {
+                $this->error('✗ [LaraBug] This project\'s issue limit is reached, so the exception was refused');
+                $this->info('Reporting starts again by itself once the limit lifts, no deploy needed.');
             } else {
                 $this->error('✗ [LaraBug] Failed to send exception to LaraBug');
             }
-        } catch (\Exception $ex) {
+        } catch (Exception $ex) {
             $this->error("✗ [LaraBug] {$ex->getMessage()}");
         }
     }

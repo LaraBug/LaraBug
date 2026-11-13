@@ -3,11 +3,16 @@
 namespace LaraBug\Tests;
 
 use LaraBug\LaraBug;
+use LaraBug\Support\LimitBackoff;
 use LaraBug\Tests\Mocks\LaraBugClient;
+use LaraBug\Tests\Mocks\MeteredClient;
+use PHPUnit\Framework\Attributes\Test;
 
 class TestCommandTest extends TestCase
 {
-    /** @test */
+    protected LaraBugClient $client;
+
+    #[Test]
     public function it_detects_if_the_login_key_is_set()
     {
         $this->app['config']['larabug.login_key'] = '';
@@ -23,7 +28,7 @@ class TestCommandTest extends TestCase
             ->assertExitCode(0);
     }
 
-    /** @test */
+    #[Test]
     public function it_detects_if_the_project_key_is_set()
     {
         $this->app['config']['larabug.project_key'] = '';
@@ -39,7 +44,7 @@ class TestCommandTest extends TestCase
             ->assertExitCode(0);
     }
 
-    /** @test */
+    #[Test]
     public function it_detects_that_its_running_in_the_correct_environment()
     {
         $this->app['config']['app.env'] = 'production';
@@ -56,7 +61,7 @@ class TestCommandTest extends TestCase
             ->assertExitCode(0);
     }
 
-    /** @test */
+    #[Test]
     public function it_detects_that_it_fails_to_send_to_larabug()
     {
         $this->artisan('larabug:test')
@@ -76,5 +81,21 @@ class TestCommandTest extends TestCase
             ->assertExitCode(0);
 
         $this->assertEquals(LaraBugClient::RESPONSE_ID, $this->app['larabug']->getLastExceptionId());
+    }
+
+    #[Test]
+    public function it_tells_a_reached_issue_limit_apart_from_a_broken_integration()
+    {
+        $this->app['config']['larabug.environments'] = ['testing'];
+
+        $client = new MeteredClient();
+        $client->willRefuse(LimitBackoff::ISSUES);
+
+        $this->app['larabug'] = new LaraBug($client);
+
+        $this->artisan('larabug:test')
+            ->expectsOutput('✗ [LaraBug] This project\'s issue limit is reached, so the exception was refused')
+            ->doesntExpectOutput('✗ [LaraBug] Failed to send exception to LaraBug')
+            ->assertExitCode(0);
     }
 }

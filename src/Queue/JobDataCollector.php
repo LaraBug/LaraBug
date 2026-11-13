@@ -2,21 +2,33 @@
 
 namespace LaraBug\Queue;
 
+use Exception;
+use Carbon\Carbon;
 use LaraBug\Filters\DataFilter;
+use LaraBug\Requests\TraceContext;
 use Illuminate\Contracts\Queue\Job;
 
 class JobDataCollector
 {
-    protected array $config;
+    protected readonly array $config;
 
-    protected DataFilter $filterer;
+    protected readonly DataFilter $filterer;
 
     /**
-     * Cache of timestamps by job_id
-     * Persists for the lifetime of the worker process
+     * When the current attempt of each job became due and was picked up, by
+     * job id. Recorded when the attempt starts and forgotten when it ends.
+     *
+     * @var array<string, array{available_at: ?string, reserved_at: string}>
      */
-    protected static array $reservedAtCache = [];
-    protected static array $availableAtCache = [];
+    protected static array $attemptTimes = [];
+
+    /**
+     * When the next attempt of a job released after an exception is due, by
+     * job id, kept until that attempt starts.
+     *
+     * @var array<string, string>
+     */
+    protected static array $nextDueAt = [];
 
     public function __construct(array $config)
     {
@@ -30,8 +42,7 @@ class JobDataCollector
     public function collect(Job $job, string $connectionName, string $status, array $extra = []): array
     {
         $payload = json_decode($job->getRawBody(), true) ?? [];
-        
-        // Use UUID from payload if available, otherwise fall back to job ID
+
         $jobId = $payload['uuid'] ?? $job->getJobId();
 
         $data = [
@@ -46,71 +57,152 @@ class JobDataCollector
             'timeout' => $payload['timeout'] ?? null,
             'payload' => $this->filterer->filterPayload($payload),
             'tags' => $payload['tags'] ?? [],
+            'trace_id' => TraceContext::id(),
+            'parent_trace_id' => TraceContext::parentId() ?? '',
             'created_at' => now()->toIso8601String(),
         ];
 
-        // Add timestamps based on status
-        // Set timestamps on first event (processing)
-        if ($status === 'processing' && !isset(static::$reservedAtCache[$jobId])) {
-            $now = now();
-            
-            // available_at: When job was pushed to queue (use pushedAt from payload if available)
-            $availableAt = isset($payload['pushedAt']) 
-                ? $this->convertTimestamp($payload['pushedAt'])
-                : $now->toIso8601String();
-            
-            // reserved_at: When worker picked up the job (now)
-            $reservedAt = $now->toIso8601String();
-            
-            // Cache both timestamps
-            static::$availableAtCache[$jobId] = $availableAt;
-            static::$reservedAtCache[$jobId] = $reservedAt;
-            
-            $data['available_at'] = $availableAt;
-            $data['reserved_at'] = $reservedAt;
-        } elseif (isset(static::$reservedAtCache[$jobId])) {
-            // Use cached timestamps for completed/failed states
-            $data['available_at'] = static::$availableAtCache[$jobId] ?? null;
-            $data['reserved_at'] = static::$reservedAtCache[$jobId];
+        // Read under the key the attempt was stored under, which is never
+        // null: a job without a uuid or an id would otherwise use null as an
+        // array offset, which PHP 8.5 deprecates.
+        $attemptTimes = static::$attemptTimes[$this->jobId($job)] ?? null;
+
+        if ($attemptTimes !== null) {
+            $data['available_at'] = $attemptTimes['available_at'];
+            $data['reserved_at'] = $attemptTimes['reserved_at'];
         }
 
-        // completed_at: When job finished successfully
         if ($status === 'completed') {
             $data['completed_at'] = now()->toIso8601String();
-            // Clean up cache
-            unset(static::$reservedAtCache[$jobId]);
-            unset(static::$availableAtCache[$jobId]);
         }
 
-        // failed_at: When job failed
         if ($status === 'failed') {
             $data['failed_at'] = now()->toIso8601String();
-            // Clean up cache
-            unset(static::$reservedAtCache[$jobId]);
-            unset(static::$availableAtCache[$jobId]);
+        }
+
+        // A job that released itself goes back onto the queue with a delay
+        // Laravel does not keep, so all that is known of when it is due again
+        // is when it was released.
+        if ($status === 'released') {
+            $data['available_at'] = now()->toIso8601String();
         }
 
         return array_merge($data, $extra);
     }
 
     /**
-     * Convert timestamp to ISO8601 string format
+     * Records when the attempt that is starting became due and was picked up,
+     * so every record of the attempt carries the same times. An attempt always
+     * starts fresh: only the backoff of a release after an exception carries
+     * over from the attempt before it.
      */
-    protected function convertTimestamp($timestamp): ?string
+    public function started(Job $job): void
+    {
+        $jobId = $this->jobId($job);
+
+        $now = now();
+
+        $availableAt = static::$nextDueAt[$jobId] ?? $this->availableAtFromPayload($job->payload() ?? [], $now);
+
+        unset(static::$nextDueAt[$jobId]);
+
+        static::$attemptTimes[$jobId] = [
+            'available_at' => $availableAt,
+            'reserved_at' => $now->toIso8601String(),
+        ];
+    }
+
+    /**
+     * Called whenever an attempt ends, reported or not, so a long running
+     * worker does not keep the times of every job it ever ran.
+     */
+    public function forget(Job $job): void
+    {
+        unset(static::$attemptTimes[$this->jobId($job)]);
+    }
+
+    /**
+     * For the attempts that ended without saying so, which only the start of
+     * the next job can tell.
+     */
+    public function forgetAll(): void
+    {
+        static::$attemptTimes = [];
+    }
+
+    /**
+     * A job released after an exception goes back onto the queue with its
+     * payload unchanged, so only the release can say when its next attempt is
+     * due: the backoff after it. Without a backoff the next attempt reads the
+     * payload again, as an attempt picked up by another worker always does.
+     */
+    public function released(Job $job, ?int $backoff): void
+    {
+        $this->forget($job);
+
+        if ($backoff === null) {
+            return;
+        }
+
+        static::$nextDueAt[$this->jobId($job)] = now()->addSeconds($backoff)->toIso8601String();
+
+        // The retry may well be picked up by another worker, leaving its due
+        // time here unclaimed, so only the most recent releases are kept.
+        $maxPendingReleases = 1000;
+
+        if (count(static::$nextDueAt) > $maxPendingReleases) {
+            static::$nextDueAt = array_slice(static::$nextDueAt, -$maxPendingReleases, preserve_keys: true);
+        }
+    }
+
+    protected function jobId(Job $job): string
+    {
+        return (string) ($job->payload()['uuid'] ?? $job->getJobId());
+    }
+
+    /**
+     * The dispatch time is Horizon's pushedAt, else the createdAt Laravel
+     * itself writes from 12.11. A job carrying neither is taken to be due from
+     * the moment a worker picked it up.
+     */
+    protected function availableAtFromPayload(array $payload, Carbon $now): ?string
+    {
+        $dispatchedAt = $payload['pushedAt'] ?? $payload['createdAt'] ?? null;
+
+        if ($dispatchedAt === null) {
+            return $now->toIso8601String();
+        }
+
+        return $this->availableAt($dispatchedAt, $payload['delay'] ?? null);
+    }
+
+    /**
+     * A delayed job only became due its delay after it was dispatched. The
+     * dispatch time is in seconds, so the delay is added before it becomes a
+     * date.
+     */
+    protected function availableAt(mixed $dispatchedAt, mixed $delay): ?string
+    {
+        if (is_numeric($dispatchedAt) && is_numeric($delay)) {
+            return $this->convertTimestamp((float) $dispatchedAt + (float) $delay);
+        }
+
+        return $this->convertTimestamp($dispatchedAt);
+    }
+
+    protected function convertTimestamp(mixed $timestamp): ?string
     {
         if ($timestamp === null) {
             return null;
         }
 
-        // If it's already a timestamp integer
         if (is_numeric($timestamp)) {
-            return \Carbon\Carbon::createFromTimestamp($timestamp)->toIso8601String();
+            return Carbon::createFromTimestamp($timestamp)->toIso8601String();
         }
 
-        // If it's a date string, try to parse it
         try {
-            return \Carbon\Carbon::parse($timestamp)->toIso8601String();
-        } catch (\Exception $e) {
+            return Carbon::parse($timestamp)->toIso8601String();
+        } catch (Exception $e) {
             return null;
         }
     }

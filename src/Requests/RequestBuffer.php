@@ -1,0 +1,160 @@
+<?php
+
+namespace LaraBug\Requests;
+
+use Countable;
+use Throwable;
+use LaraBug\Http\Client;
+use LaraBug\Support\LimitBackoff;
+use LaraBug\Support\Concerns\RequeuesRateLimitedRecords;
+
+/**
+ * Batches finished request records.
+ *
+ * A duplicate of EventBuffer rather than a generalisation of it, deliberately:
+ * that buffer is in production carrying queue jobs, and the way to find out
+ * whether one abstraction serves both is to run the second one first.
+ *
+ * The flush happens on shutdown as well as on size, because a web process
+ * serves one request and then exits: without it, every batch below the
+ * threshold would be lost at exactly the moment it was complete.
+ */
+class RequestBuffer implements Countable
+{
+    use RequeuesRateLimitedRecords;
+
+    /** @var array<int, array<string, mixed>> */
+    protected array $buffer = [];
+
+    protected readonly int $batchSize;
+
+    protected readonly int $maxRetries;
+
+    protected bool $shutdownRegistered = false;
+
+    /**
+     * @param  array<string, mixed>  $config
+     */
+    public function __construct(
+        protected readonly Client $client,
+        protected readonly array $config,
+    ) {
+        $this->batchSize = (int) ($config['requests']['batch_size'] ?? 20);
+        $this->maxRetries = (int) ($config['requests']['max_retries'] ?? 2);
+
+        $this->registerShutdownHandler();
+    }
+
+    /**
+     * @param  array<string, mixed>  $record
+     */
+    public function add(array $record): void
+    {
+        // The telemetry limit is reached for now. Collecting anyway would
+        // only fill a buffer nobody may send.
+        if (! LimitBackoff::collects(LimitBackoff::TELEMETRY)) {
+            return;
+        }
+
+        $this->buffer[] = $record;
+
+        if (count($this->buffer) >= $this->batchSize) {
+            $this->flush();
+        }
+    }
+
+    public function flush(): void
+    {
+        if ($this->buffer === []) {
+            return;
+        }
+
+        // Kept for the other side of the window rather than sent into it.
+        if (LimitBackoff::isRateLimited(LimitBackoff::TELEMETRY)) {
+            $this->requeue();
+
+            return;
+        }
+
+        $records = $this->buffer;
+        $this->buffer = [];
+
+        $this->send($records);
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $records
+     */
+    protected function send(array $records, int $attempt = 1): void
+    {
+        // Refused for the rest of the window: these requests go no further.
+        if (! LimitBackoff::allows(LimitBackoff::TELEMETRY)) {
+            return;
+        }
+
+        try {
+            // A 402 means the telemetry limit is reached, which the backoff
+            // holds as a window rather than a flag. A 429 is a rate limit, and
+            // the batch waits in the buffer for the end of its window.
+            if ($this->refusedByLimit($this->client->reportRequests($records), $records)) {
+                return;
+            }
+
+            $this->reportDroppedRecords();
+        } catch (Throwable) {
+            if ($attempt <= $this->maxRetries) {
+                // Linear, not exponential: this runs on shutdown while the
+                // worker is still held, and a doubling backoff spends the
+                // customer's capacity on our outage.
+                usleep(100000 * $attempt);
+
+                $this->send($records, $attempt + 1);
+
+                return;
+            }
+
+            // Nothing else. A monitoring package that throws on the way out is
+            // a monitoring package that takes the application down with it.
+        }
+    }
+
+    /**
+     * A failure of the SDK's own work on a request record, such as an EXPLAIN
+     * the database refused. Reported the way a failed flush is, so it stays
+     * silent unless jobs.report_buffer_errors asks for it. Nothing was lost:
+     * the record goes out without what failed.
+     */
+    public function reportFailure(Throwable $e): void
+    {
+        $this->reportError($e, 0);
+    }
+
+    protected function registerShutdownHandler(): void
+    {
+        if ($this->shutdownRegistered) {
+            return;
+        }
+
+        $this->shutdownRegistered = true;
+
+        register_shutdown_function($this->flush(...));
+    }
+
+    protected function batchSize(): int
+    {
+        return $this->batchSize;
+    }
+
+    public function count(): int
+    {
+        return count($this->buffer);
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    public function pending(): array
+    {
+        return $this->buffer;
+    }
+}

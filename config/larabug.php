@@ -74,6 +74,19 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Report endpoint rate limit
+    |--------------------------------------------------------------------------
+    |
+    | The JavaScript client posts its reports to /larabug-api/javascript-report,
+    | which is open to every visitor by necessity. This is the rate limit put
+    | on it, in Laravel's "attempts,minutes" form, applied per IP address.
+    | A single broken asset can otherwise report on every page view.
+    |
+    */
+    'report_throttle' => env('LB_REPORT_THROTTLE', '60,1'),
+
+    /*
+    |--------------------------------------------------------------------------
     | Lines near exception
     |--------------------------------------------------------------------------
     |
@@ -83,6 +96,31 @@ return [
     |
     */
     'lines_count' => 12,
+
+    /*
+    |--------------------------------------------------------------------------
+    | Lines near each stack frame
+    |--------------------------------------------------------------------------
+    |
+    | How many lines of source to send around each frame of the stack trace,
+    | on both sides of the frame's own line. Smaller than lines_count on
+    | purpose, since this window is repeated per frame. Values above 25 fall
+    | back to 5.
+    |
+    */
+    'frame_lines_count' => 5,
+
+    /*
+    |--------------------------------------------------------------------------
+    | Frames carrying code
+    |--------------------------------------------------------------------------
+    |
+    | How many frames of the stack trace carry a window of source. Frames
+    | beyond this keep their file, line and function; only the source stops.
+    | Keeps the payload bounded on deep traces.
+    |
+    */
+    'max_code_frames' => 20,
 
     /*
     |--------------------------------------------------------------------------
@@ -160,12 +198,454 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Retry buffer
+    |--------------------------------------------------------------------------
+    |
+    | When the LaraBug server answers with a 5xx or cannot be reached at all,
+    | during a deploy, maintenance or an outage, what was being sent is kept
+    | on local disk instead of dropped. It is sent again on the next send that
+    | succeeds, and from `larabug:flush`, which the package schedules every
+    | minute while something is waiting (so it needs `schedule:run`). A 5xx
+    | with a Retry-After header holds every send until then, up to 10 minutes,
+    | and a server that cannot be reached holds them for 30 seconds, so only
+    | the first send pays the timeout and the rest go straight to the buffer.
+    |
+    | Only what would have gone over the wire is written, after every filter
+    | above has been applied, and never the login key. A 4xx is never kept:
+    | it will not get better. CVE scans and queue depth samples are never
+    | kept either, since both are sent fresh soon enough.
+    |
+    | Bounded by count, total bytes and age in seconds. Past the age an event
+    | is dropped. Past the count or size the oldest telemetry goes first, and
+    | exceptions only once there is no telemetry left to drop. Every server
+    | keeps its own buffer, so the path must be on local disk, writable by
+    | both the web server and the scheduler's user.
+    |
+    */
+    'retry_buffer' => [
+        'enabled' => env('LB_RETRY_BUFFER_ENABLED', true),
+        'path' => env('LB_RETRY_BUFFER_PATH', storage_path('larabug/retry-buffer')),
+        'max_events' => env('LB_RETRY_BUFFER_MAX_EVENTS', 500),
+        'max_bytes' => env('LB_RETRY_BUFFER_MAX_BYTES', 5 * 1024 * 1024),
+        'max_age' => env('LB_RETRY_BUFFER_MAX_AGE', 86400),
+        'schedule' => env('LB_RETRY_BUFFER_SCHEDULE', true),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Job Monitoring Configuration
     |--------------------------------------------------------------------------
     |
     | Configure queue job monitoring behavior.
     |
     */
+    /*
+    |--------------------------------------------------------------------------
+    | Request Monitoring
+    |--------------------------------------------------------------------------
+    |
+    | Records the HTTP requests this application serves: how long each stage of
+    | the framework took, how many queries and cache calls it made, and which
+    | statements ran.
+    |
+    | On, and sampled at a tenth. Sampling is what keeps this affordable, so
+    | the stream is collected without being asked and the volume is not: a
+    | tenth of the requests answers the same questions about throughput and
+    | latency as all of them, at a tenth of the quota.
+    |
+    */
+    'requests' => [
+        /*
+        | Enable or disable request monitoring
+        | Set LB_TRACK_REQUESTS=false to stop recording
+        | Default: true
+        */
+        'track_requests' => env('LB_TRACK_REQUESTS', true),
+
+        /*
+        | The fraction of requests recorded, 0.0 to 1.0
+        | The server divides by this to report real throughput, so a tenth here
+        | still reports the whole picture, just from a tenth of the evidence
+        | Default: 0.1
+        */
+        'sample_rate' => env('LB_REQUEST_SAMPLE_RATE', 0.1),
+
+        /*
+        | The rate a failed request is reconsidered at
+        | A request that threw is the one worth having, so an unsampled one
+        | re-rolls at this rate rather than being lost to an earlier coin toss
+        | Default: 1.0 (always keep a failure)
+        */
+        'exception_sample_rate' => env('LB_REQUEST_EXCEPTION_SAMPLE_RATE', 1.0),
+
+        /*
+        | Paths never recorded, matched with fnmatch against the route path
+        | Checked again once the route is known, so patterns can name routes
+        */
+        'ignore_paths' => [
+            '/horizon*',
+            '/telescope*',
+            '/_debugbar*',
+            '/up',
+            '/health*',
+        ],
+
+        /*
+        | How many statements are kept per request
+        | The query counter keeps counting past this: a request running ten
+        | thousand queries is worth knowing about, and what makes it worth
+        | knowing about is the number rather than the ten thousandth statement
+        | Default: 100
+        */
+        'max_queries' => env('LB_REQUEST_MAX_QUERIES', 100),
+
+        /*
+        | How many outbound HTTP calls are kept per request
+        | The outgoing counter keeps counting past this, the same as queries: a
+        | request that fans out to a hundred services is worth knowing about, and
+        | the number is what says so
+        | Default: 50
+        */
+        'max_outgoing' => env('LB_REQUEST_MAX_OUTGOING', 50),
+
+        /*
+        | How many messages are kept per request, and per job or command: mail
+        | is recorded against whichever of them sent it, and this caps all three
+        | The mail counter keeps counting past this, the same as queries and
+        | outgoing calls: a request that fans a newsletter out to a hundred
+        | recipients is worth knowing about, and the number is what says so
+        | Default: 50
+        */
+        'max_mail' => env('LB_REQUEST_MAX_MAIL', 50),
+
+        /*
+        | How many notifications are kept per request
+        | The notification counter keeps counting past this, one entry per
+        | channel, the same as mail: a request that notifies a thousand users is
+        | worth knowing about, and the number is what says so
+        | Default: 50
+        */
+        'max_notifications' => env('LB_REQUEST_MAX_NOTIFICATIONS', 50),
+
+        /*
+        | How many cache operations are kept per request
+        | The hit and miss counters keep counting past this on their own; a
+        | request that touches the cache a thousand times is common, and the
+        | first hundred operations are enough to read its shape
+        | Default: 100
+        */
+        'max_cache_events' => env('LB_REQUEST_MAX_CACHE_EVENTS', 100),
+
+        /*
+        | How many Livewire lifecycle events are kept per request
+        | The operation counter keeps counting past this, the same as queries: a
+        | page that mounts four hundred components is worth knowing about, and
+        | the number is what says so
+        | Default: 100
+        */
+        'max_livewire_events' => env('LB_REQUEST_MAX_LIVEWIRE_EVENTS', 100),
+
+        /*
+        | How many records are held before they are sent
+        | A web process serves one request, so this mostly matters for Octane
+        | and for the console
+        | Default: 20
+        */
+        'batch_size' => env('LB_REQUEST_BATCH_SIZE', 20),
+
+        'max_retries' => env('LB_REQUEST_MAX_RETRIES', 2),
+
+        /*
+        | Whether the client IP and the authenticated user id are recorded
+        | Both are personal data; both are useful. Neither is a query string,
+        | which is never recorded at all: reset tokens and signed url
+        | signatures live there
+        | Default: true
+        */
+        'capture_ip' => env('LB_REQUEST_CAPTURE_IP', true),
+        'capture_user' => env('LB_REQUEST_CAPTURE_USER', true),
+
+        /*
+        | Whether a sent message's full recipient addresses are recorded, on
+        | requests, jobs and commands alike
+        | Off by default: the domains a message reached are kept either way,
+        | which is the diagnostic part, and the addresses are personal data with
+        | no more business being stored than a query string's values. Turn this
+        | on only where the recipients are yours to keep
+        | Default: false
+        */
+        'capture_mail_recipients' => env('LB_REQUEST_CAPTURE_MAIL_RECIPIENTS', false),
+
+        /*
+        | Whether request headers are recorded
+        | Headers are how you tell a browser from a crawler and a v1 client
+        | from a v2 one, which is usually what a strange request turns out to
+        | be. The names below are replaced with a marker rather than dropped:
+        | knowing a request carried an Authorization header is worth having,
+        | and knowing which token it carried is not
+        | Default: true
+        */
+        'capture_headers' => env('LB_REQUEST_CAPTURE_HEADERS', true),
+
+        'redact_headers' => [
+            'authorization',
+            'cookie',
+            'set-cookie',
+            'x-api-key',
+            'x-csrf-token',
+            'x-xsrf-token',
+            'proxy-authorization',
+        ],
+
+        /*
+        | Whether the request body is kept when the request failed
+        | Off by default, and never on a success: a body is the most sensitive
+        | thing a request carries, and it is only worth its risk on the handful
+        | of requests that returned a 5xx and have to be reproduced
+        | Default: false
+        */
+        'capture_payload_on_error' => env('LB_REQUEST_CAPTURE_PAYLOAD_ON_ERROR', false),
+
+        /*
+        | Fields replaced with a marker inside a captured body
+        | Matched against the key at any depth, case-insensitively, and as a
+        | substring: 'password' covers password_confirmation
+        */
+        'redact_fields' => [
+            'password',
+            'password_confirmation',
+            'token',
+            'secret',
+            'card',
+            'cvv',
+            'iban',
+        ],
+
+        /*
+        | Hosts the application's own outgoing calls send their trace to
+        | A call to one of these carries a W3C traceparent header, so a second
+        | monitored application that receives it records itself as a child of
+        | this request, job or command. Empty by default, which sends it
+        | nowhere: a trace id has no business reaching every payment provider,
+        | mail service and webhook the application talks to, so list only the
+        | applications you run yourself
+        | Matched against the host alone, case insensitively and without the
+        | port. 'api.example.com' is that host only; '*.example.com' is any
+        | host below example.com but not example.com itself, so list both when
+        | both are wanted. Nothing here is read as a regular expression
+        | A traceparent the call already carries is never replaced
+        | Only calls made through Laravel's Http client are reached. Guzzle used
+        | directly, outside the Http facade, never sends the header
+        | Environment: LB_TRACE_PROPAGATION_TARGETS=api.example.com,*.internal.example.com
+        | Default: [] (sent nowhere)
+        */
+        'trace_propagation_targets' => array_values(array_filter(array_map('trim', explode(',', env('LB_TRACE_PROPAGATION_TARGETS', ''))))),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Query plans
+    |--------------------------------------------------------------------------
+    |
+    | Laravel does not say how many rows a statement examined, so a query that
+    | scans a whole table because an index is missing looks no different from
+    | one that is merely slow. With explain on, LaraBug asks the database for
+    | the plan of a slow SELECT and sends a summary of it: whether it scans a
+    | table, which table, how many rows the planner expects and which index it
+    | used or could have used.
+    |
+    | Off by default, because this runs a statement of LaraBug's own against
+    | your database. What it runs is plain EXPLAIN on MySQL and MariaDB, and
+    | EXPLAIN (FORMAT JSON) on Postgres, with the original bindings on the
+    | same connection. Never EXPLAIN ANALYZE, which would execute the query.
+    |
+    | It only considers a statement that was kept on a sampled request, that
+    | is a single read-only SELECT (no FOR UPDATE or FOR SHARE, no write inside
+    | a CTE), that took at least min_duration_ms, and that runs on mysql,
+    | mariadb or pgsql. Each statement is explained at most once per interval,
+    | tracked in your default cache store so the interval holds across
+    | processes, or in the process itself when there is no cache store.
+    |
+    | The EXPLAIN runs after the response has been sent, when the request
+    | record is assembled, so it never delays the query or the response. A
+    | failing EXPLAIN is swallowed, and reported as a buffer error only when
+    | jobs.report_buffer_errors is on. MariaDB caps it at one second with
+    | SET STATEMENT max_statement_time. MySQL and Postgres run it uncapped:
+    | MySQL's max_execution_time only governs SELECT statements, and Postgres
+    | only scopes a statement_timeout to one statement inside a transaction,
+    | where SET LOCAL would also outlive the EXPLAIN in a transaction of yours.
+    |
+    | The bindings are only used to run the EXPLAIN. Neither they nor the raw
+    | plan are ever sent.
+    |
+    */
+    'queries' => [
+        'explain' => [
+            /*
+            | Enable or disable query plans
+            | Default: false
+            */
+            'enabled' => env('LB_QUERY_EXPLAIN', false),
+
+            /*
+            | How slow a SELECT has to be before its plan is worth asking for
+            | Default: 100 (milliseconds)
+            */
+            'min_duration_ms' => env('LB_QUERY_EXPLAIN_MIN_DURATION_MS', 100),
+
+            /*
+            | Seconds before the same statement is explained again
+            | Default: 3600
+            */
+            'interval' => env('LB_QUERY_EXPLAIN_INTERVAL', 3600),
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Livewire
+    |--------------------------------------------------------------------------
+    |
+    | Records what the Livewire part of a request was doing: which components
+    | mounted, hydrated, updated and rendered, and on a failure, which component
+    | was addressed, which method it was asked to run and which properties the
+    | client changed.
+    |
+    | Worth having because a Livewire update is otherwise unreadable. Every
+    | component in the application posts to the same endpoint, so the route says
+    | nothing, and the body is a snapshot blob no exception can be read against.
+    |
+    | On by default, and free in an application without Livewire: nothing here
+    | loads a Livewire class or runs at all unless Livewire is installed.
+    |
+    | The lifecycle events land on the request timeline, beside the queries and
+    | cache calls, so they need request monitoring switched on above. Everything
+    | else lands on the exception report and does not.
+    |
+    */
+    'livewire' => [
+        /*
+        | Enable or disable Livewire monitoring
+        | Default: true
+        */
+        'track_livewire' => env('LB_TRACK_LIVEWIRE', true),
+
+        /*
+        | Whether the arguments a component method was called with are kept
+        | Livewire posts them as a positional list, so they are named from the
+        | method's own signature before the blacklist above runs over them: an
+        | argument arrives anonymous and is scrubbed as 'password' because that
+        | is what the method calls it. Turn this off to keep the method name
+        | and drop its arguments entirely
+        | Default: true
+        */
+        'capture_parameters' => env('LB_LIVEWIRE_CAPTURE_PARAMETERS', true),
+
+        /*
+        | Whether the values the client changed properties to are kept
+        | Keyed by property path and filtered by the blacklist above the same
+        | way. Turn this off to keep which properties changed and drop what
+        | they changed to
+        | Default: true
+        */
+        'capture_updates' => env('LB_LIVEWIRE_CAPTURE_UPDATES', true),
+
+        /*
+        | How long a single captured string may be
+        | A component property holds whatever the customer typed into it, up to
+        | and including a base64 upload; this is what stops one deciding how
+        | large our payload is
+        | Default: 255
+        */
+        'max_value_length' => env('LB_LIVEWIRE_MAX_VALUE_LENGTH', 255),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Command Monitoring
+    |--------------------------------------------------------------------------
+    |
+    | Records the artisan commands this application runs: how long each took, the
+    | code it exited with, and the arguments it was given. A separate execution
+    | context from a request, so it has its own switch.
+    |
+    | On, and kept whole rather than sampled: commands run at nothing like
+    | request volume, and the one that failed at 3am is the one worth having.
+    |
+    */
+    'commands' => [
+        /*
+        | Enable or disable command monitoring
+        | Set LB_TRACK_COMMANDS=false to stop recording
+        | Default: true
+        */
+        'track_commands' => env('LB_TRACK_COMMANDS', true),
+
+        /*
+        | Commands never recorded, matched with fnmatch against the command name
+        | The workers and schedulers that run forever or every minute would drown
+        | the real commands, and this package's own commands would report on
+        | themselves
+        */
+        'ignore' => [
+            'schedule:run',
+            'schedule:finish',
+            'schedule:work',
+            'queue:work',
+            'queue:listen',
+            'horizon',
+            'horizon:*',
+            'larabug:*',
+            'list',
+            'tinker',
+        ],
+
+        /*
+        | Arguments and options replaced with a marker before sending, matched
+        | against the name at any depth, case-insensitively, as a substring
+        */
+        'redact' => [
+            'password',
+            'secret',
+            'token',
+            'key',
+        ],
+
+        /*
+        | How many records are held before they are sent, and the retries on a
+        | 5xx. A console process runs one command and exits, so the shutdown flush
+        | usually sends a batch of one
+        */
+        'batch_size' => env('LB_COMMAND_BATCH_SIZE', 20),
+        'max_retries' => env('LB_COMMAND_MAX_RETRIES', 2),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Scheduled Task Monitoring
+    |--------------------------------------------------------------------------
+    |
+    | Records the scheduled tasks this application runs: whether each ran, failed
+    | or was skipped, how long it took, and the cron it runs on. Its own context,
+    | told apart from a standalone command run: a scheduled command emits command
+    | events too, and the command listener bows out while a task is in flight so
+    | the run is counted once, against the schedule.
+    |
+    | On. Kept whole, the same as commands.
+    |
+    */
+    'schedule' => [
+        /*
+        | Enable or disable scheduled task monitoring
+        | Set LB_TRACK_SCHEDULED_TASKS=false to stop recording
+        | Default: true
+        */
+        'track_scheduled_tasks' => env('LB_TRACK_SCHEDULED_TASKS', true),
+
+        'batch_size' => env('LB_SCHEDULED_TASK_BATCH_SIZE', 20),
+        'max_retries' => env('LB_SCHEDULED_TASK_MAX_RETRIES', 2),
+    ],
+
     'jobs' => [
         /*
         | Enable or disable queue job tracking
@@ -176,10 +656,46 @@ return [
 
         /*
         |--------------------------------------------------------------------------
+        | Queue Depth
+        |--------------------------------------------------------------------------
+        |
+        | Everything above is reported by a worker touching a job, so a queue
+        | whose workers have stopped sends nothing at all. Once a minute the
+        | scheduler measures each queue instead: how many jobs are ready,
+        | delayed and reserved, and when the oldest ready one was queued.
+        |
+        | Runs from the scheduler, so it needs `schedule:run` to be running. One
+        | small request a minute, sent from one server when the cache can hold
+        | a lock across them.
+        |
+        */
+        'depth' => [
+            /*
+            | Enable or disable queue depth sampling
+            | Set LB_QUEUE_DEPTH=false to stop sampling
+            | Default: follows track_jobs
+            */
+            'enabled' => env('LB_QUEUE_DEPTH', env('LB_TRACK_JOBS', true)),
+
+            /*
+            | Which queues to measure, as connection:queue strings
+            | Example: ['redis:default', 'redis:emails']
+            | Left null the default connection's own queue is measured, along
+            | with every queue Horizon supervises in this environment
+            | A list replaces that discovery entirely
+            | Connections that run jobs immediately (sync, null, deferred,
+            | background) have no queue to measure and are skipped
+            | Default: null
+            */
+            'queues' => null,
+        ],
+
+        /*
+        |--------------------------------------------------------------------------
         | Dynamic Batching (Automatic Load-Based)
         |--------------------------------------------------------------------------
         |
-        | Batching automatically activates when job dispatch rate exceeds a 
+        | Batching automatically activates when job dispatch rate exceeds a
         | threshold. During low traffic, events are sent immediately (no delay).
         | During high traffic, events are buffered and sent in batches.
         |
@@ -229,6 +745,8 @@ return [
         /*
         | Maximum retry attempts for failed API calls
         | Each retry uses exponential backoff (100ms, 200ms, 300ms)
+        | Only used while the retry buffer is disabled: with it, a batch
+        | refused with a 5xx is kept and sent again later instead.
         | Default: 3 retries
         */
         'max_retries' => env('LB_MAX_RETRIES', 3),
@@ -283,8 +801,10 @@ return [
         | 0.5 = track 50% of successful jobs
         | 0.1 = track 10% of successful jobs
         | 0.0 = don't track successful jobs
-        | 
-        | Note: Failures are ALWAYS tracked at 100% regardless of this setting
+        |
+        | Note: Failures are ALWAYS tracked at 100% regardless of this setting,
+        | and so are released jobs and every attempt after a job's first. A
+        | processing record is kept or dropped with its job's completion.
         */
         'sample_rate' => env('LB_SAMPLE_RATE', 1.0),
 
@@ -333,6 +853,8 @@ return [
 
         /*
         | Report buffer flush errors back to LaraBug (useful for debugging)
+        | Covers every telemetry buffer: the records any of them had to drop
+        | while a rate limit held them back are reported here too
         | Default: false
         */
         'report_buffer_errors' => env('LB_REPORT_BUFFER_ERRORS', false),
@@ -358,10 +880,20 @@ return [
         | 403 and the client backs off for an hour, so leaving this on costs at
         | most one request an hour.
         |
-        | Only package names, versions and a hash of composer.lock ever leave the
+        | Only package names, versions and a hash of the lockfile ever leave the
         | app. No source, no paths, no env values.
         */
         'enabled' => env('LB_CVE_ENABLED', true),
+
+        /*
+        | Also scan the JavaScript lockfile in the app's root, so npm advisories
+        | are raised next to Composer ones. The first of package-lock.json,
+        | pnpm-lock.yaml and yarn.lock is sent, dev packages included and
+        | flagged as such. pnpm-lock.yaml is only read when symfony/yaml is
+        | installed. Set LB_CVE_NPM=false to scan composer.lock alone.
+        | Default: true
+        */
+        'npm' => env('LB_CVE_NPM', true),
 
         /*
         | How scans get triggered:
@@ -402,5 +934,88 @@ return [
         | Environment label sent alongside the scan (matches `app.env` by default).
         */
         'environment' => env('LB_CVE_ENVIRONMENT'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Logs
+    |--------------------------------------------------------------------------
+    |
+    | Ships application log lines to LaraBug, so the lines leading up to an
+    | error are there when you open it.
+    |
+    | On by default. The package defines the `larabug-logs` channel and adds
+    | it to your default channel itself: appended when that is a stack, or
+    | wrapped together with it in a `larabug-stack` when it is a single
+    | channel, so your own logging keeps writing where it did. Naming the
+    | channel in your stack yourself is fine, it is never added twice.
+    |
+    | Logs run at far higher volume than exceptions and count against your
+    | plan, so keep the level at info or above in production. Define a
+    | channel called `larabug-logs` yourself if you want different settings;
+    | yours wins.
+    |
+    */
+
+    'logs' => [
+        /*
+        | Set LB_LOGS_ENABLED=false to stop shipping without touching the
+        | logging config, for instance while debugging a noisy deploy.
+        | Default: true
+        */
+        'enabled' => env('LB_LOGS_ENABLED', true),
+
+        /*
+        | Minimum severity to send, as a PSR-3 level name. Shipping 'debug'
+        | from production is rarely what you want.
+        */
+        'level' => env('LB_LOGS_LEVEL', 'info'),
+
+        /*
+        | Lines held before a batch is sent. A request that logs fewer than
+        | this sends one batch when it terminates.
+        */
+        'batch_size' => env('LB_LOGS_BATCH_SIZE', 50),
+
+        /*
+        | Retries on a 5xx while the retry buffer is disabled. With it, the
+        | batch is kept and sent again later instead. A batch refused with a
+        | 403 or 422 is never retried and stops collection for the rest of the
+        | process. A 402 pauses it until the limit lifts, and a 429 keeps the
+        | batch and sends it once the rate limit window has passed.
+        */
+        'max_retries' => env('LB_LOGS_MAX_RETRIES', 3),
+
+        /*
+        | Ceiling on how many keys of one context or extra bag are sent. Log
+        | context routinely holds whole models, and the rest is dropped with a
+        | `_truncated` marker rather than shipping an object graph per line.
+        */
+        'max_context_keys' => env('LB_LOGS_MAX_CONTEXT_KEYS', 50),
+
+        /*
+        | Release identifier sent with every line, so a spike can be tied to a
+        | deploy. A commit sha or a version tag.
+        */
+        'release' => env('LB_LOGS_RELEASE'),
+
+        /*
+        | PHP and Laravel deprecations. Laravel writes them to a channel of its
+        | own, set by LOG_DEPRECATIONS_CHANNEL, which discards them unless the
+        | application names one. LaraBug is added to that channel, next to
+        | whatever the application already sends them to.
+        |
+        | A deprecation fires on every call, so each one is sent once per
+        | interval (in seconds) with the number of occurrences it stands for.
+        | The count is kept in the cache store named below, the default store
+        | when null, so it holds across requests and processes. An `array` or
+        | `null` store is not shared between processes, and each process then
+        | sends its own record.
+        */
+        'deprecations' => [
+            'enabled' => env('LB_LOG_DEPRECATIONS', true),
+            'interval' => env('LB_LOG_DEPRECATIONS_INTERVAL', 3600),
+            'cache_store' => env('LB_LOG_DEPRECATIONS_CACHE_STORE'),
+        ],
     ],
 ];

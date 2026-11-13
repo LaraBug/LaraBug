@@ -2,30 +2,29 @@
 
 namespace LaraBug\Http\Controllers;
 
+use ErrorException;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Validator;
 
 class LaraBugReportController
 {
-    /**
-     * @param Request $request
-     * @return \Illuminate\Http\Response|\Illuminate\Contracts\Routing\ResponseFactory
-     */
-    public function report(Request $request)
+    public function report(Request $request): Response
     {
-        // Validated by hand rather than through $request->validate(), because this
-        // route deliberately runs without the web group and a redirect response
-        // would need a session that is not there.
+        // Every field here comes from an anonymous browser and ends up in the
+        // report sent to the project, so none of it is taken on trust.
+        // Validated by hand rather than through a form request: this route
+        // runs without the web group, so there is no session to flash to.
         $validator = Validator::make($request->all(), [
             'message' => ['required', 'string', 'max:2000'],
-            'line' => ['nullable', 'integer', 'min:0', 'max:1000000'],
-            'file' => ['nullable', 'string', 'max:2048'],
+            'line' => ['nullable', 'integer', 'min:0', 'max:10000000'],
+            'file' => ['nullable', 'string', 'max:2000'],
             'stack' => ['nullable', 'string', 'max:20000'],
-            'url' => ['nullable', 'string', 'max:2048'],
+            'url' => ['nullable', 'string', 'max:2000'],
         ]);
 
         if ($validator->fails()) {
-            return response()->json(['errors' => $validator->errors()], 422);
+            return response('invalid report', 422);
         }
 
         $report = $validator->validated();
@@ -34,11 +33,11 @@ class LaraBugReportController
         $laraBug = app('larabug');
 
         $laraBug->handle(
-            new \ErrorException($report['message']),
+            new ErrorException($report['message']),
             'javascript',
             [
                 'file' => $report['file'] ?? null,
-                'line' => isset($report['line']) ? (int) $report['line'] : null,
+                'line' => $report['line'] ?? null,
                 'message' => $report['message'],
                 'stack' => $report['stack'] ?? null,
                 'url' => $report['url'] ?? null,

@@ -4,36 +4,43 @@ namespace LaraBug\Queue;
 
 use Throwable;
 use LaraBug\Http\Client;
+use LaraBug\Mail\ExecutionMail;
 use Illuminate\Contracts\Queue\Job;
+use LaraBug\Support\ExceptionReporting;
 
 class JobMonitor
 {
-    protected Client $client;
+    protected readonly Client $client;
 
-    protected array $config;
+    protected readonly array $config;
 
-    protected JobDataCollector $collector;
-    
-    protected ?EventBuffer $buffer = null;
+    protected readonly JobDataCollector $collector;
+
+    protected readonly ?EventBuffer $buffer;
 
     public function __construct(Client $client, array $config)
     {
         $this->client = $client;
         $this->config = $config;
         $this->collector = new JobDataCollector($config);
-        
-        // Initialize buffer for dynamic batching
         $this->buffer = new EventBuffer($client, $config);
     }
 
     public function trackJobStarted(Job $job, string $connectionName): void
     {
-        if (!$this->shouldTrack($job)) {
+        if (! $this->shouldTrack($job)) {
             return;
         }
-        
-        // Check if we should track processing events
-        if (!($this->config['jobs']['track_processing'] ?? false)) {
+
+        // Recorded whether or not the processing record is sent, since the
+        // record the attempt ends with carries them too.
+        $this->collector->started($job);
+
+        if (! ($this->config['jobs']['track_processing'] ?? false)) {
+            return;
+        }
+
+        if (! $this->isSampled($job)) {
             return;
         }
 
@@ -42,93 +49,174 @@ class JobMonitor
         $this->send($data);
     }
 
-    public function trackJobCompleted(Job $job, string $connectionName, ?float $durationMs, ?int $memoryUsed): void
-    {
-        if (!$this->shouldTrack($job)) {
-            return;
-        }
-        
-        // Check if we should track completed events
-        if (!($this->config['jobs']['track_completed'] ?? true)) {
-            return;
-        }
-        
-        // Apply sampling rate
-        if (!$this->shouldSample()) {
-            return;
-        }
+    public function trackJobCompleted(
+        Job $job,
+        string $connectionName,
+        ?float $durationMs,
+        ?int $memoryUsed,
+        ExecutionMail $mail = new ExecutionMail(),
+    ): void {
+        try {
+            if (! $this->shouldTrack($job)) {
+                return;
+            }
 
-        $data = $this->collector->collect($job, $connectionName, 'completed', [
-            'duration_ms' => $durationMs,
-            'memory_usage' => $memoryUsed,
-        ]);
+            if (! ($this->config['jobs']['track_completed'] ?? true)) {
+                return;
+            }
 
-        $this->send($data);
+            if (! $this->isSampled($job)) {
+                return;
+            }
+
+            $data = $this->collector->collect($job, $connectionName, 'completed', [
+                'duration_ms' => $durationMs,
+                'memory_usage' => $memoryUsed,
+                ...$mail->toArray(),
+                // What the mail on it is weighted by: a completed record stands in
+                // for every job of its kind that sampling dropped.
+                'sample_rate' => $this->isRetry($job) ? 1.0 : $this->sampleRate(),
+            ]);
+
+            $this->send($data);
+        } finally {
+            $this->collector->forget($job);
+        }
     }
 
-    public function trackJobFailed(Job $job, string $connectionName, Throwable $exception, ?float $durationMs): void
+    /**
+     * A job that released itself with $this->release() ends its attempt with
+     * the same processed event as one that completed. It is never sampled out:
+     * it says the job is back on the queue, and dropping it would leave the
+     * attempt before it as the job's last known state.
+     */
+    public function trackJobReleasedItself(
+        Job $job,
+        string $connectionName,
+        ?float $durationMs,
+        ?int $memoryUsed,
+        ExecutionMail $mail = new ExecutionMail(),
+    ): void {
+        try {
+            if (! $this->shouldTrack($job)) {
+                return;
+            }
+
+            $data = $this->collector->collect($job, $connectionName, 'released', [
+                'duration_ms' => $durationMs,
+                'memory_usage' => $memoryUsed,
+                ...$mail->toArray(),
+                'sample_rate' => 1.0,
+            ]);
+
+            $this->send($data);
+        } finally {
+            $this->collector->forget($job);
+        }
+    }
+
+    public function trackJobFailed(
+        Job $job,
+        string $connectionName,
+        Throwable $exception,
+        ?float $durationMs,
+        ExecutionMail $mail = new ExecutionMail(),
+    ): void {
+        try {
+            if (! $this->shouldTrack($job)) {
+                return;
+            }
+
+            if (! ($this->config['jobs']['track_failed'] ?? true)) {
+                return;
+            }
+
+            $storage = [
+                'SERVER' => [
+                    'USER' => $_SERVER['USER'] ?? null,
+                    'HTTP_USER_AGENT' => $_SERVER['HTTP_USER_AGENT'] ?? 'CLI',
+                    'SERVER_PROTOCOL' => $_SERVER['SERVER_PROTOCOL'] ?? null,
+                    'SERVER_SOFTWARE' => $_SERVER['SERVER_SOFTWARE'] ?? null,
+                    'PHP_VERSION' => PHP_VERSION,
+                ],
+                'HEADERS' => getallheaders() ?: [],
+            ];
+
+            $data = $this->collector->collect($job, $connectionName, 'failed', [
+                'duration_ms' => $durationMs,
+                ...$this->failedWith($exception, $storage),
+                ...$mail->toArray(),
+                // A failure is never sampled out, so it stands for itself alone.
+                'sample_rate' => 1.0,
+            ]);
+
+            $this->send($data);
+        } finally {
+            $this->collector->forget($job);
+        }
+    }
+
+    /**
+     * The exception a failed record carries, or nothing when the application
+     * would not report it.
+     *
+     * The server opens an issue for the exception on a failed record, and that
+     * record never passes through the application's exception handler. So an
+     * exception the application excluded (`$dontReport`, `dontReportWhen()`,
+     * `shouldReport()`, or this SDK's own `except` list) used to come in as an
+     * issue anyway, once per failed job. Only the exception is left out: the
+     * job still failed, and its status, attempts and duration say so.
+     *
+     * @param  array<string, mixed>  $storage
+     * @return array{exception?: array<string, mixed>}
+     */
+    protected function failedWith(Throwable $exception, array $storage): array
     {
-        if (!$this->shouldTrack($job)) {
-            return;
+        if (! ExceptionReporting::wouldReport($exception)) {
+            return [];
         }
-        
-        // Build storage data similar to regular exceptions
-        $storage = [
-            'SERVER' => [
-                'USER' => $_SERVER['USER'] ?? null,
-                'HTTP_USER_AGENT' => $_SERVER['HTTP_USER_AGENT'] ?? 'CLI',
-                'SERVER_PROTOCOL' => $_SERVER['SERVER_PROTOCOL'] ?? null,
-                'SERVER_SOFTWARE' => $_SERVER['SERVER_SOFTWARE'] ?? null,
-                'PHP_VERSION' => PHP_VERSION,
-            ],
-            'HEADERS' => getallheaders() ?: [],
-        ];
-        
-        // ALWAYS track failures (unless explicitly disabled)
-        if (!($this->config['jobs']['track_failed'] ?? true)) {
-            return;
-        }
-        
-        $data = $this->collector->collect($job, $connectionName, 'failed', [
-            'duration_ms' => $durationMs,
+
+        return [
             'exception' => [
-                'class' => get_class($exception),
+                'class' => $exception::class,
                 'message' => $exception->getMessage(),
                 'code' => $exception->getCode(),
                 'file' => $exception->getFile(),
                 'line' => $exception->getLine(),
-                'error' => $exception->getTraceAsString(), // Stack trace goes in error field
-                'storage' => array_filter($storage), // Server/headers data goes in storage field
+                'error' => $exception->getTraceAsString(), // Stack trace goes in the error field
+                'storage' => array_filter($storage), // Server/headers data goes in the storage field
                 'environment' => config('app.env', 'production'),
             ],
-        ]);
-
-        $this->send($data);
+        ];
     }
 
-    /**
-     * Check if job should be tracked based on filters and configuration
-     */
+    public function trackJobReleased(Job $job, ?int $backoff): void
+    {
+        $this->collector->released($job, $backoff);
+    }
+
+    public function forgetUnfinishedAttempts(): void
+    {
+        $this->collector->forgetAll();
+    }
+
     protected function shouldTrack(Job $job): bool
     {
-        // Check if tracking is globally disabled
-        if (!($this->config['jobs']['track_jobs'] ?? true)) {
+        if (! ($this->config['jobs']['track_jobs'] ?? true)) {
             return false;
         }
 
         // Don't track queue events while a regular exception capture is in flight —
-        // prevents the queue tracking path from re-entering the send pipeline
-        // while it is already being used by LaraBug::handle().
+        // prevents re-entering the send pipeline while LaraBug::handle() is using it.
         if (\LaraBug\LaraBug::isCapturing()) {
             return false;
         }
 
         $jobClass = $job->resolveName();
 
-        // Never track SDK-internal jobs. This is a hard-coded safety rail on top
-        // of the user-configurable ignore list below: when the LaraBug package is
-        // installed inside the LaraBug SaaS itself (dogfooding), we never want the
-        // ingest queue jobs shipping themselves back to the server.
+        // Hard-coded safety rail on top of the user-configurable ignore list: when
+        // the SDK is dogfooded inside the LaraBug SaaS itself, the ingest queue jobs
+        // must never ship themselves back to the server.
         if (is_string($jobClass) && (
             str_starts_with($jobClass, 'LaraBug\\')
             || str_starts_with($jobClass, 'Larabug\\')
@@ -136,19 +224,17 @@ class JobMonitor
             return false;
         }
 
-        // Check ignore list
         foreach ($this->config['jobs']['ignore_jobs'] ?? [] as $ignoredJob) {
             if ($jobClass === $ignoredJob || is_subclass_of($jobClass, $ignoredJob)) {
                 return false;
             }
         }
 
-        // Check queue filters
         $jobQueue = $job->getQueue();
         $onlyQueues = $this->config['jobs']['only_queues'] ?? [];
         $ignoreQueues = $this->config['jobs']['ignore_queues'] ?? [];
 
-        if (!empty($onlyQueues) && !in_array($jobQueue, $onlyQueues)) {
+        if (! empty($onlyQueues) && ! in_array($jobQueue, $onlyQueues)) {
             return false;
         }
 
@@ -162,51 +248,67 @@ class JobMonitor
     protected function send(array $data): void
     {
         try {
-            // Use buffer for dynamic batching
             if ($this->buffer) {
                 $this->buffer->add($data);
+
                 return;
             }
-            
-            // Fall back to direct sending if buffer not initialized
+
+            // Fall back to direct sending if the buffer was never initialized.
             $payload = [
                 'type' => 'queue_job',
                 'project' => $this->config['project_key'],
                 'job' => $data,
             ];
-            
+
             $this->client->report($payload);
         } catch (Throwable $e) {
-            // Silent fail - never break user's jobs
-            // But report the error if configured
+            // Silent fail — never break the user's jobs.
             $this->reportError($e);
         }
     }
-    
+
     /**
-     * Apply sampling rate for successful job completions
+     * Whether the processing and completed records of an attempt are sent.
+     * It is decided by the job's uuid rather than a coin toss, so both are
+     * kept or dropped together: a processing record whose completion was
+     * dropped would stay the job's last state on the server.
      */
-    protected function shouldSample(): bool
+    protected function isSampled(Job $job): bool
     {
-        $sampleRate = $this->config['jobs']['sample_rate'] ?? 1.0;
-        
-        // Always sample at 100%
+        // An earlier attempt may have been reported as released or as
+        // processing, and only this attempt's record can replace it.
+        if ($this->isRetry($job)) {
+            return true;
+        }
+
+        $sampleRate = $this->sampleRate();
+
         if ($sampleRate >= 1.0) {
             return true;
         }
-        
-        // Never sample
+
         if ($sampleRate <= 0.0) {
             return false;
         }
-        
-        // Random sampling
-        return (mt_rand() / mt_getrandmax()) <= $sampleRate;
+
+        return crc32($job->uuid() ?? spl_object_hash($job)) / 0xFFFFFFFF < $sampleRate;
     }
-    
+
+    protected function isRetry(Job $job): bool
+    {
+        return $job->attempts() > 1;
+    }
+
     /**
-     * Report SDK errors (for debugging)
+     * The rate completed jobs are kept at, bounded the way it is applied: a
+     * configured 2.0 keeps every job, which is a rate of one.
      */
+    protected function sampleRate(): float
+    {
+        return min(1.0, max(0.0, (float) ($this->config['jobs']['sample_rate'] ?? 1.0)));
+    }
+
     protected function reportError(Throwable $e): void
     {
         try {
@@ -214,7 +316,7 @@ class JobMonitor
                 $this->client->report([
                     'type' => 'sdk_error',
                     'exception' => [
-                        'class' => get_class($e),
+                        'class' => $e::class,
                         'message' => $e->getMessage(),
                         'file' => $e->getFile(),
                         'line' => $e->getLine(),
@@ -222,17 +324,20 @@ class JobMonitor
                 ]);
             }
         } catch (Throwable $ignored) {
-            // Never let error reporting break the app
+            // Never let error reporting break the app.
         }
     }
-    
+
     /**
-     * Manually flush the buffer (useful for testing or long-running processes)
+     * Manually flush the buffer (useful for testing or long-running processes).
      */
     public function flush(): void
     {
-        if ($this->buffer) {
-            $this->buffer->flush();
-        }
+        $this->buffer?->flush();
+    }
+
+    public function flushIfDue(): void
+    {
+        $this->buffer?->flushIfDue();
     }
 }

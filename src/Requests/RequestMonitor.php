@@ -1,0 +1,689 @@
+<?php
+
+namespace LaraBug\Requests;
+
+use Throwable;
+use Illuminate\Http\Request;
+use LaraBug\Mail\RecordsMail;
+use Illuminate\Http\UploadedFile;
+use Symfony\Component\HttpFoundation\Response;
+
+/**
+ * The state of the request being served, and the record it becomes.
+ *
+ * One instance per execution, held as a singleton. Everything that wants to
+ * contribute — the middleware marking stage boundaries, the query listener, the
+ * cache listeners — writes here, and the middleware's terminate hands the
+ * finished record to the buffer.
+ *
+ * A flat record with fixed duration columns, not a span tree. Seven numbers
+ * that sum to the total answer where the time went for every request at fixed
+ * cost; a tree costs parent ids, ordering and unbounded cardinality to answer
+ * the same question for the few requests anyone opens.
+ */
+class RequestMonitor implements RecordsMail
+{
+    /** @var array<string, float> Wall-clock marks, in seconds. */
+    protected array $marks = [];
+
+    /**
+     * Work that only makes sense once the request is over.
+     *
+     * A listener that pairs two events has no way, mid-request, to tell an
+     * unfinished pair from one whose second half has not happened yet. This is
+     * the moment it can: nothing else will arrive.
+     *
+     * @var array<int, callable>
+     */
+    protected array $beforeFlush = [];
+
+    /** @var array<string, int> */
+    protected array $counters = [
+        'queries' => 0,
+        'cache_hits' => 0,
+        'cache_misses' => 0,
+        'outgoing_requests' => 0,
+        'jobs_queued' => 0,
+        'mail_sent' => 0,
+        'notifications_sent' => 0,
+        'exceptions' => 0,
+        'logs' => 0,
+        'livewire_operations' => 0,
+    ];
+
+    /** @var array<int, array<string, mixed>> */
+    protected array $queries = [];
+
+    /** @var array<int, array<string, mixed>> */
+    protected array $outgoing = [];
+
+    /** @var array<int, array<string, mixed>> */
+    protected array $mail = [];
+
+    /** @var array<int, array<string, mixed>> */
+    protected array $notifications = [];
+
+    /** @var array<int, array<string, mixed>> */
+    protected array $cache = [];
+
+    /** @var array<int, array<string, mixed>> */
+    protected array $livewire = [];
+
+    protected string $livewireComponent = '';
+
+    protected string $livewireMethod = '';
+
+    /** @var array<string, mixed>|null */
+    protected ?array $route = null;
+
+    protected string $exceptionId = '';
+
+    protected readonly int $maxQueries;
+
+    protected readonly int $maxOutgoing;
+
+    protected readonly int $maxMail;
+
+    protected readonly int $maxNotifications;
+
+    protected readonly int $maxCacheEvents;
+
+    protected readonly int $maxLivewireEvents;
+
+    public function __construct()
+    {
+        $this->maxQueries = (int) config('larabug.requests.max_queries', 100);
+        $this->maxOutgoing = (int) config('larabug.requests.max_outgoing', 50);
+        $this->maxMail = (int) config('larabug.requests.max_mail', 50);
+        $this->maxNotifications = (int) config('larabug.requests.max_notifications', 50);
+        $this->maxCacheEvents = (int) config('larabug.requests.max_cache_events', 100);
+        $this->maxLivewireEvents = (int) config('larabug.requests.max_livewire_events', 100);
+
+        // LARAVEL_START is set in public/index.php before the framework boots,
+        // so it is the only honest answer to "when did this request begin".
+        // Without it bootstrap would report as nothing.
+        $this->marks['start'] = defined('LARAVEL_START') ? LARAVEL_START : microtime(true);
+    }
+
+    public function mark(string $name): void
+    {
+        $this->marks[$name] = microtime(true);
+    }
+
+    /**
+     * How far into the request we are, in milliseconds.
+     */
+    protected function elapsedMs(): float
+    {
+        return (microtime(true) - $this->marks['start']) * 1000;
+    }
+
+    /**
+     * Where an event that has just finished began, as an offset from the start
+     * of the request.
+     *
+     * Every recorder below is called on completion: a query is reported by
+     * QueryExecuted once it has run, a message by MessageSent once it is away.
+     * So the offset is not where we are now, it is where we are now less
+     * however long the thing took. A point event passes no duration and lands
+     * on the moment it happened.
+     *
+     * Floored at zero, because a clock that stepped backwards mid-request is
+     * not worth a bar that starts before the request did.
+     */
+    protected function startedAtMs(float $durationMs = 0.0): float
+    {
+        return max(0.0, round($this->elapsedMs() - $durationMs, 3));
+    }
+
+    /**
+     * Whether the middleware got as far as marking where the action began. A
+     * terminate that runs after a handle that could not started nothing worth
+     * recording, and has no failure to promote.
+     */
+    public function started(): bool
+    {
+        return isset($this->marks['action_start']);
+    }
+
+    public function increment(string $counter, int $by = 1): void
+    {
+        if (isset($this->counters[$counter])) {
+            $this->counters[$counter] += $by;
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $route
+     */
+    public function setRoute(array $route): void
+    {
+        $this->route = $route;
+    }
+
+    /**
+     * The exception this request threw, set from the report path rather than
+     * guessed from the status code: a 500 can be returned deliberately, and an
+     * exception can be reported on a request that still answers 200.
+     */
+    public function recordException(string $exceptionId = ''): void
+    {
+        $this->counters['exceptions']++;
+
+        if ($exceptionId !== '' && $this->exceptionId === '') {
+            $this->exceptionId = $exceptionId;
+        }
+    }
+
+    public function recordLog(): void
+    {
+        $this->counters['logs']++;
+    }
+
+    /**
+     * The statement is kept with its placeholders and the bindings are dropped
+     * here rather than filtered later: a value in a WHERE clause is customer
+     * data, and the safest place to not send it is the place it would
+     * otherwise be collected.
+     *
+     * Returns where the statement was kept, or null once the cap is reached.
+     */
+    public function recordQuery(string $sql, string $connection, float $durationMs): ?int
+    {
+        $this->counters['queries']++;
+
+        // The counter keeps counting past the cap: a request running ten
+        // thousand queries is worth knowing about, and the reason to look at
+        // it is the number rather than the ten thousandth statement.
+        if (count($this->queries) >= $this->maxQueries) {
+            return null;
+        }
+
+        $normalised = QueryNormaliser::normalise($sql);
+
+        $this->queries[] = [
+            'sql' => $normalised,
+            'hash' => QueryNormaliser::hash($connection, $normalised),
+            'connection' => $connection,
+            'duration_ms' => round($durationMs, 3),
+            'start_ms' => $this->startedAtMs($durationMs),
+        ];
+
+        return array_key_last($this->queries);
+    }
+
+    /**
+     * Attach the summary of a statement's plan to the entry it describes.
+     *
+     * The hash has to match as well as the position, so a plan can only ever
+     * land on the statement it was asked for.
+     *
+     * @param  array<string, mixed>  $plan
+     */
+    public function recordQueryPlan(int $index, string $hash, array $plan): void
+    {
+        if (($this->queries[$index]['hash'] ?? null) !== $hash) {
+            return;
+        }
+
+        $this->queries[$index]['plan'] = $plan;
+    }
+
+    /**
+     * Record one outbound HTTP call. The counter keeps counting past the cap,
+     * the same as queries. The url arrives with its query values already
+     * stripped by the listener: a token in a callback url is customer data we
+     * have no business storing.
+     *
+     * @param  array<string, mixed>  $call
+     */
+    public function recordOutgoing(array $call): void
+    {
+        $this->counters['outgoing_requests']++;
+
+        if (count($this->outgoing) >= $this->maxOutgoing) {
+            return;
+        }
+
+        // Stamped here rather than in the listener that built it: the
+        // offset is only meaningful against this request's start, and this
+        // is the object that holds it.
+        $call['start_ms'] = $this->startedAtMs((float) ($call['duration_ms'] ?? 0));
+
+        $this->outgoing[] = $call;
+    }
+
+    /**
+     * Record one message sent. The counter keeps counting past the cap. The
+     * recipients arrive as domains rather than addresses unless the
+     * application opted the full ones in: who a request emailed is personal
+     * data, which service it emailed is the diagnostic part.
+     *
+     * @param  array<string, mixed>  $message
+     */
+    public function recordMail(array $message): void
+    {
+        $this->counters['mail_sent']++;
+
+        if (count($this->mail) >= $this->maxMail) {
+            return;
+        }
+
+        // Stamped here rather than in the listener that built it: the
+        // offset is only meaningful against this request's start, and this
+        // is the object that holds it.
+        $message['start_ms'] = $this->startedAtMs((float) ($message['duration_ms'] ?? 0));
+
+        $this->mail[] = $message;
+    }
+
+    /**
+     * Record one notification sent, one entry per channel: a notification
+     * going out over mail and database is two sends, which is what the
+     * notifiable actually receives. The notifiable is kept as its class,
+     * never its id: which model type gets notified is diagnostic, which row
+     * is personal data.
+     *
+     * @param  array<string, mixed>  $notification
+     */
+    public function recordNotification(array $notification): void
+    {
+        $this->counters['notifications_sent']++;
+
+        if (count($this->notifications) >= $this->maxNotifications) {
+            return;
+        }
+
+        // Stamped here rather than in the listener that built it: the
+        // offset is only meaningful against this request's start, and this
+        // is the object that holds it.
+        $notification['start_ms'] = $this->startedAtMs((float) ($notification['duration_ms'] ?? 0));
+
+        $this->notifications[] = $notification;
+    }
+
+    /**
+     * Record one cache operation. The hit and miss counters are kept by their
+     * own listeners, so this only buffers the detail and is capped on its own:
+     * a request that reads the cache a thousand times is common, and the first
+     * hundred operations are enough to see its shape.
+     *
+     * @param  array<string, mixed>  $event
+     */
+    public function recordCacheEvent(array $event): void
+    {
+        if (count($this->cache) >= $this->maxCacheEvents) {
+            return;
+        }
+
+        // Stamped here rather than in the listener that built it: the
+        // offset is only meaningful against this request's start, and this
+        // is the object that holds it.
+        $event['start_ms'] = $this->startedAtMs((float) ($event['duration_ms'] ?? 0));
+
+        $this->cache[] = $event;
+    }
+
+    /**
+     * Record one Livewire lifecycle event: a component mounting, hydrating,
+     * updating, running a method or rendering. The counter keeps counting past
+     * the cap, the same as queries: a page that mounts four hundred components
+     * is worth knowing about, and the number is what says so.
+     *
+     * Names only. The component, the method that was called and the property
+     * that changed, never an argument or a value: this record is kept for every
+     * sampled request, and component state has no business being kept that
+     * widely. The values live on the exception report, and only there.
+     *
+     * @param  array<string, mixed>  $event
+     */
+    public function recordLivewireEvent(array $event): void
+    {
+        $this->counters['livewire_operations']++;
+
+        if (count($this->livewire) >= $this->maxLivewireEvents) {
+            return;
+        }
+
+        // Stamped here rather than in the listener that built it: the
+        // offset is only meaningful against this request's start, and this
+        // is the object that holds it.
+        $event['start_ms'] = $this->startedAtMs((float) ($event['duration_ms'] ?? 0));
+
+        $this->livewire[] = $event;
+    }
+
+    /**
+     * The component this request was addressed to, and the method it was asked
+     * to run.
+     *
+     * Every Livewire update in an application posts to the same endpoint, so
+     * the route these records group by is one row for all of them. These two
+     * fields are what tell them apart. Nothing here changes the grouping key;
+     * that is the server's to decide, and this is the evidence it needs to
+     * decide it.
+     *
+     * First one wins, the same as the exception id: a request is addressed to
+     * one component, and anything after it is a child doing its own work.
+     */
+    public function setLivewireSubject(string $component, string $method = ''): void
+    {
+        if ($component !== '' && $this->livewireComponent === '') {
+            $this->livewireComponent = $component;
+        }
+
+        if ($method !== '' && $this->livewireMethod === '') {
+            $this->livewireMethod = $method;
+        }
+    }
+
+    /**
+     * Register work to run when the record is built.
+     *
+     * Guarded like every other listener path: a contributor that raises must
+     * not take the record it was contributing to down with it.
+     */
+    public function beforeFlush(callable $callback): void
+    {
+        $this->beforeFlush[] = $callback;
+    }
+
+    /**
+     * The finished record.
+     *
+     * @return array<string, mixed>
+     */
+    public function toArray(Request $request, Response $response, float $sampleRate): array
+    {
+        foreach ($this->beforeFlush as $callback) {
+            try {
+                $callback();
+            } catch (Throwable) {
+                // Instrumentation never surfaces in the application's stack.
+            }
+        }
+
+        $stages = $this->stages();
+
+        return array_merge([
+            'timestamp' => gmdate('Y-m-d H:i:s', (int) $this->marks['start']).'.'.
+                str_pad((string) (int) (($this->marks['start'] - (int) $this->marks['start']) * 1000), 3, '0', STR_PAD_LEFT),
+
+            'group' => $this->group($request),
+
+            'method' => $request->getMethod(),
+            'route_path' => $this->routeValue('path', ''),
+            'route_name' => $this->routeValue('name', ''),
+            'route_domain' => $this->routeValue('domain', ''),
+            'route_action' => $this->routeValue('action', ''),
+
+            // The path, and the names of the query parameters. Never their
+            // values: password reset tokens, signed url signatures and invite
+            // tokens all live in a query string.
+            'path' => '/'.ltrim($request->path(), '/'),
+            'query_keys' => implode(',', array_keys($request->query())),
+
+            'status_code' => $response->getStatusCode(),
+
+            'duration_ms' => round(array_sum($stages), 3),
+
+            'sample_rate' => $sampleRate,
+
+            // The same id the log lines and the exception from this execution
+            // carry, which is the whole reason any of them is worth joining.
+            'trace_id' => TraceContext::id(),
+
+            // The caller's trace, when a monitored application made this
+            // request and said so in its traceparent.
+            'parent_trace_id' => TraceContext::parentId() ?? '',
+
+            'exception_id' => $this->exceptionId,
+
+            'user_agent' => (string) $request->userAgent(),
+            'host' => (string) gethostname(),
+
+            // Redacted here, not on the way out: the headers most worth losing
+            // are the ones an exception in between would otherwise carry.
+            'headers' => $this->headers($request),
+
+            // Only when the request failed, and only when asked for. A request
+            // body is the highest-value thing in this payload and the one with
+            // no business being stored for the requests that worked.
+            'payload' => $this->payload($request, $response),
+
+            'memory_peak_kb' => (int) round(memory_get_peak_usage(true) / 1024),
+            'request_size' => strlen($request->getContent()),
+            'response_size' => strlen((string) $response->getContent()),
+
+            'environment' => (string) config('app.env'),
+            'release' => (string) config('larabug.project_version', ''),
+
+            'user_identifier' => $this->userIdentifier(),
+            'ip' => (string) config('larabug.requests.capture_ip', true) ? (string) $request->ip() : '',
+
+            'sql' => $this->queries,
+            'outgoing' => $this->outgoing,
+            'mail' => $this->mail,
+            'notifications' => $this->notifications,
+            'cache' => $this->cache,
+
+            // Empty on every request in an application without Livewire, and
+            // on every non-Livewire request in one with it.
+            'livewire_component' => $this->livewireComponent,
+            'livewire_method' => $this->livewireMethod,
+            'livewire' => $this->livewire,
+        ], $stages, $this->counters);
+    }
+
+    /**
+     * Request headers, minus the ones that are credentials. An
+     * allow-by-default list with an explicit deny, rather than the reverse: a
+     * header nobody thought about is usually diagnostic, and the handful that
+     * are not are well known.
+     *
+     * @return string JSON
+     */
+    protected function headers(Request $request): string
+    {
+        if (! config('larabug.requests.capture_headers', true)) {
+            return '';
+        }
+
+        // The fallback matters: an application that published its config
+        // before these keys existed reads nothing from the file, and an empty
+        // list here would store its Authorization header in full. The default
+        // is the list, not the absence of one.
+        $redact = array_map('strtolower', (array) config('larabug.requests.redact_headers', [
+            'authorization',
+            'cookie',
+            'set-cookie',
+            'x-api-key',
+            'x-csrf-token',
+            'x-xsrf-token',
+            'proxy-authorization',
+        ]));
+
+        $headers = [];
+
+        foreach ($request->headers->all() as $name => $values) {
+            $value = is_array($values) ? implode(', ', $values) : (string) $values;
+
+            // A constant marker, not one that preserves the length: the length
+            // of a secret is itself something worth not publishing.
+            $headers[$name] = in_array(strtolower($name), $redact, true) ? '[redacted]' : $value;
+        }
+
+        return (string) json_encode($headers);
+    }
+
+    /**
+     * The request body, on failure only: the body is what you need to
+     * reproduce the request that broke, and what you have no reason to hold
+     * for the thousands that did not.
+     */
+    protected function payload(Request $request, Response $response): string
+    {
+        if (! config('larabug.requests.capture_payload_on_error', false)) {
+            return '';
+        }
+
+        if ($response->getStatusCode() < 500) {
+            return '';
+        }
+
+        if (in_array($request->getMethod(), ['GET', 'HEAD', 'OPTIONS', 'TRACE'], true)) {
+            return '';
+        }
+
+        $redact = array_map('strtolower', (array) config('larabug.requests.redact_fields', [
+            'password',
+            'password_confirmation',
+            'token',
+            'secret',
+            'card',
+            'cvv',
+            'iban',
+        ]));
+
+        return (string) json_encode($this->redact($request->all(), $redact));
+    }
+
+    /**
+     * Replace sensitive values anywhere in a body. Depth-first and by
+     * substring, because the field that matters is rarely at the top level
+     * under exactly the name the config lists: a checkout posts card[cvv], a
+     * registration posts user.password_confirmation.
+     *
+     * @param  array<int|string, mixed>  $input
+     * @param  array<int, string>  $redact  lowercased needles
+     * @return array<int|string, mixed>
+     */
+    protected function redact(array $input, array $redact): array
+    {
+        foreach ($input as $key => $value) {
+            // The key is judged before the value is walked into: a matching
+            // key takes its whole branch with it, so 'card' removes
+            // card[number] as well as card[cvv].
+            if ($this->isSensitive($key, $redact)) {
+                $input[$key] = '[redacted]';
+
+                continue;
+            }
+
+            // An upload is a file handle, not data: no JSON form worth sending
+            // and contents that are not ours to hold, so it is described
+            // rather than serialised.
+            if ($value instanceof UploadedFile) {
+                $input[$key] = '[file: '.$value->getClientOriginalName().']';
+
+                continue;
+            }
+
+            if (is_array($value)) {
+                $input[$key] = $this->redact($value, $redact);
+            }
+        }
+
+        return $input;
+    }
+
+    /**
+     * @param  int|string  $key
+     * @param  array<int, string>  $redact  lowercased needles
+     */
+    protected function isSensitive(int|string $key, array $redact): bool
+    {
+        $name = strtolower((string) $key);
+
+        foreach ($redact as $needle) {
+            if ($needle !== '' && str_contains($name, $needle)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * The seven stages, in the order a request passes through them. Each is
+     * the gap between two marks, and a mark that was never set closes its
+     * stage at zero rather than borrowing from its neighbour: a request that
+     * threw in middleware never reached render, and reporting render time for
+     * it would be inventing a number.
+     *
+     * @return array<string, float>
+     */
+    protected function stages(): array
+    {
+        $order = [
+            'bootstrap_ms' => ['start', 'booted'],
+            'before_middleware_ms' => ['booted', 'action_start'],
+            'action_ms' => ['action_start', 'action_end'],
+            'render_ms' => ['action_end', 'response_prepared'],
+            'after_middleware_ms' => ['response_prepared', 'response_sent'],
+            'sending_ms' => ['response_sent', 'terminating'],
+            'terminating_ms' => ['terminating', 'terminated'],
+        ];
+
+        $stages = [];
+
+        foreach ($order as $stage => $pair) {
+            [$from, $to] = $pair;
+
+            $stages[$stage] = isset($this->marks[$from], $this->marks[$to])
+                ? round(max(0, ($this->marks[$to] - $this->marks[$from]) * 1000), 3)
+                : 0.0;
+        }
+
+        return $stages;
+    }
+
+    /**
+     * The rollup key, hashed here rather than on ingest. Sorted methods,
+     * domain and route path, which is Nightwatch's key and the right one: it
+     * groups by what the application defines rather than by what the client
+     * typed, so /users/1 and /users/2 are one row.
+     */
+    protected function group(Request $request): string
+    {
+        $methods = $this->routeValue('methods', [$request->getMethod()]);
+
+        if (! is_array($methods)) {
+            $methods = [(string) $methods];
+        }
+
+        sort($methods);
+
+        // md5 for the same reason QueryNormaliser keeps it: a stable grouping
+        // key, not a signature.
+        return md5(implode('|', $methods).','.$this->routeValue('domain', '').','.$this->routeValue('path', ''));
+    }
+
+    protected function routeValue(string $key, mixed $default): mixed
+    {
+        if ($this->route === null || ! array_key_exists($key, $this->route)) {
+            return $default;
+        }
+
+        return $this->route[$key];
+    }
+
+    protected function userIdentifier(): string
+    {
+        if (! config('larabug.requests.capture_user', true)) {
+            return '';
+        }
+
+        try {
+            $user = auth()->user();
+        } catch (Throwable) {
+            return '';
+        }
+
+        if (! $user) {
+            return '';
+        }
+
+        return (string) $user->getAuthIdentifier();
+    }
+}

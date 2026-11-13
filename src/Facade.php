@@ -6,31 +6,24 @@ use LaraBug\Http\Client;
 use LaraBug\Fakes\LaraBugFake;
 
 /**
- * @method static \LaraBug\LaraBug context(array $context)
- * @method static \LaraBug\LaraBug clearContext()
- * @method static void assertSent($throwable, $callback = null)
+ * @method static void context(array $context)
+ * @method static void clearContext()
+ * @method static void assertSent(mixed $throwable, ?callable $callback = null)
  * @method static void assertRequestsSent(int $count)
- * @method static void assertNotSent($throwable, $callback = null)
+ * @method static void assertNotSent(mixed $throwable, ?callable $callback = null)
  * @method static void assertNothingSent()
  */
 class Facade extends \Illuminate\Support\Facades\Facade
 {
     /**
      * Replace the bound instance with a fake.
-     *
-     * @return void
      */
-    public static function fake()
+    public static function fake(): void
     {
         static::swap(new LaraBugFake(new Client('login_key', 'project_key')));
     }
 
-    /**
-     * Get the registered name of the component.
-     *
-     * @return string
-     */
-    protected static function getFacadeAccessor()
+    protected static function getFacadeAccessor(): string
     {
         return 'larabug';
     }

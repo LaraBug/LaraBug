@@ -7,26 +7,22 @@ use Illuminate\Http\UploadedFile;
 
 class DataFilter
 {
-    protected array $blacklist;
+    /** @var array<int, string> */
+    protected readonly array $blacklist;
 
-    protected int $maxSize;
+    protected readonly int $maxSize;
 
     public function __construct(array $blacklist = [], int $maxSize = 10000)
     {
-        // Normalize blacklist to lowercase for case-insensitive matching
-        $this->blacklist = array_map(function ($item) {
-            return strtolower($item);
-        }, $blacklist);
+        // Lowercased once so matching is case-insensitive.
+        $this->blacklist = array_map(strtolower(...), $blacklist);
 
         $this->maxSize = $maxSize;
     }
 
-    /**
-     * Filter variables/arrays recursively
-     */
-    public function filterVariables($variables): array
+    public function filterVariables(mixed $variables): array
     {
-        if (!is_array($variables)) {
+        if (! is_array($variables)) {
             return [];
         }
 
@@ -44,7 +40,7 @@ class DataFilter
     }
 
     /**
-     * Filter payload data (for jobs)
+     * Filter payload data (for jobs).
      */
     public function filterPayload(array $payload): array
     {
@@ -54,37 +50,26 @@ class DataFilter
     }
 
     /**
-     * Filter parameters (combine variable filtering + parameter value filtering)
-     * This is the main method to use for request parameters
+     * The main entry point for request parameters: strips uploaded files
+     * first, then sensitive keys.
      */
     public function filterParameters(array $parameters): array
     {
-        // First filter out uploaded files
         $filtered = $this->filterParameterValues($parameters);
-        
-        // Then filter sensitive keys
+
         return $this->filterVariables($filtered);
     }
 
-    /**
-     * Filter parameter values (remove uploaded files)
-     */
     public function filterParameterValues(array $parameters): array
     {
-        return collect($parameters)->map(function ($value) {
-            if ($this->shouldParameterValueBeFiltered($value)) {
-                return '...';
-            }
-            return $value;
-        })->toArray();
+        return collect($parameters)
+            ->map(fn ($value) => $this->shouldParameterValueBeFiltered($value) ? '...' : $value)
+            ->toArray();
     }
 
-    /**
-     * Recursively filter data
-     */
-    protected function filterRecursive($data)
+    protected function filterRecursive(mixed $data): mixed
     {
-        if (!is_array($data)) {
+        if (! is_array($data)) {
             return $data;
         }
 
@@ -93,17 +78,16 @@ class DataFilter
         foreach ($data as $key => $value) {
             if (is_string($key) && $this->shouldFilter($key)) {
                 $filtered[$key] = '[FILTERED]';
-            } else {
-                $filtered[$key] = $this->filterRecursive($value);
+
+                continue;
             }
+
+            $filtered[$key] = $this->filterRecursive($value);
         }
 
         return $filtered;
     }
 
-    /**
-     * Check if a key should be filtered based on blacklist
-     */
     protected function shouldFilter(string $key): bool
     {
         $lowerKey = strtolower($key);
@@ -118,17 +102,11 @@ class DataFilter
         return false;
     }
 
-    /**
-     * Check if parameter value should be filtered (e.g., uploaded files)
-     */
-    public function shouldParameterValueBeFiltered($value): bool
+    public function shouldParameterValueBeFiltered(mixed $value): bool
     {
         return $value instanceof UploadedFile;
     }
 
-    /**
-     * Truncate payload if it exceeds max size
-     */
     protected function truncateIfNeeded(array $payload): array
     {
         $json = json_encode($payload);
@@ -145,9 +123,7 @@ class DataFilter
         return $payload;
     }
 
-    /**
-     * Get the blacklist
-     */
+    /** @return array<int, string> */
     public function getBlacklist(): array
     {
         return $this->blacklist;

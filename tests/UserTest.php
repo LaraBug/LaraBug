@@ -4,15 +4,14 @@ namespace LaraBug\Tests;
 
 use LaraBug\LaraBug;
 use LaraBug\Tests\Mocks\LaraBugClient;
+use PHPUnit\Framework\Attributes\Test;
 use Illuminate\Foundation\Auth\User as AuthUser;
 
 class UserTest extends TestCase
 {
-    /** @var Mocks\LaraBugClient */
-    protected $client;
+    protected LaraBugClient $client;
 
-    /** @var LaraBug */
-    protected $laraBug;
+    protected LaraBug $laraBug;
 
     public function setUp(): void
     {
@@ -24,7 +23,7 @@ class UserTest extends TestCase
         ));
     }
 
-    /** @test */
+    #[Test]
     public function it_return_custom_user()
     {
         $this->actingAs((new CustomerUser())->forceFill([
@@ -37,7 +36,7 @@ class UserTest extends TestCase
         $this->assertSame(['id' => 1, 'username' => 'username', 'password' => 'password', 'email' => 'email'], $this->laraBug->getUser());
     }
 
-    /** @test */
+    #[Test]
     public function it_return_custom_user_with_to_larabug()
     {
         $this->actingAs((new CustomerUserWithToLarabug())->forceFill([
@@ -50,7 +49,7 @@ class UserTest extends TestCase
         $this->assertSame(['username' => 'username', 'email' => 'email'], $this->laraBug->getUser());
     }
 
-    /** @test */
+    #[Test]
     public function it_returns_nothing_for_ghost()
     {
         $this->assertSame(null, $this->laraBug->getUser());
