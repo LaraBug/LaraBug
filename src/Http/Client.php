@@ -183,11 +183,16 @@ class Client
         try {
             return $this->getGuzzleHttpClient()->request('POST', config('larabug.server'), [
                 'headers' => $this->headers(),
-                'verify' => config('larabug.verify_ssl'),
+                // Unset means verify, as it did on Guzzle 7. Guzzle 8 rejects a
+                // null here, and with it every report.
+                'verify' => config('larabug.verify_ssl') ?? true,
                 ...$options,
             ]);
         } catch (RequestException $e) {
-            $response = $e->getResponse();
+            // Guzzle 8 keeps getResponse() on ResponseException alone. A
+            // RequestException without it never had an answer, as one whose
+            // getResponse() is null did not on Guzzle 7.
+            $response = method_exists($e, 'getResponse') ? $e->getResponse() : null;
 
             if ($response === null) {
                 throw $e;
