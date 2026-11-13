@@ -2,7 +2,7 @@
 
 All notable changes to `larabug` will be documented in this file
 
-## Unreleased
+## 4.0.0-beta.23 - 2026-11-13
 
 - No more PHP 8.5 deprecations from the package. Registering the exception handler called `SplObjectStorage::contains()` and `attach()`, which PHP 8.5 deprecates, so every boot added two lines to the application's deprecations log (and to LaraBug, when deprecations are shipped). It now uses array access on the storage, which works on every supported PHP version.
 - A queued job with no uuid in its payload and no id from its driver no longer uses `null` as an array key when its record is built, which PHP 8.5 deprecates as well. Its record is unchanged.
