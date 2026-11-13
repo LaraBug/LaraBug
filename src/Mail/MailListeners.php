@@ -43,7 +43,8 @@ class MailListeners
     protected array $executions = [];
 
     /**
-     * Send-start marks, keyed by message.
+     * Send-start marks, keyed by the object id of the message the sending
+     * event carried.
      *
      * The mailable and subject are read here rather than at the sent event
      * because a send that throws never reaches one, and a failure whose
@@ -51,7 +52,12 @@ class MailListeners
      * is fixed here too: the send belongs to the execution it started in,
      * whatever has opened or closed by the time it is over.
      *
-     * @var array<int, array{at: float, mailable: string, subject: string, queued: int, owner: RecordsMail}>
+     * The message itself is held as well. The sent event usually carries a
+     * different object (see markFor()), so the mark has to be found by what
+     * the message says rather than by its id, and holding it also keeps its
+     * id from being handed to a later message while the mark still stands.
+     *
+     * @var array<int, array{at: float, mailable: string, subject: string, queued: int, owner: RecordsMail, message: object}>
      */
     protected array $mailStartedAt = [];
 
@@ -117,6 +123,7 @@ class MailListeners
                 'subject' => $this->mailSubject($message),
                 'queued' => $queued,
                 'owner' => $owner,
+                'message' => $message,
             ];
         });
     }
@@ -130,7 +137,15 @@ class MailListeners
             // walked the stack for these, and walking it twice per message
             // buys nothing. A sent event with no sending before it, which is
             // mostly a mailer under test, still reads them live.
-            $mark = $message === null ? null : ($this->mailStartedAt[spl_object_id($message)] ?? null);
+            $key = $message === null ? null : $this->markFor($message);
+
+            $mark = $key === null ? null : $this->mailStartedAt[$key];
+
+            // Taken off as soon as it is found: a mark left standing is a send
+            // that failed, and this one did not.
+            if ($key !== null) {
+                unset($this->mailStartedAt[$key]);
+            }
 
             $owner = $mark['owner'] ?? $this->owner();
 
@@ -155,7 +170,7 @@ class MailListeners
                 $mailable,
                 $mark['subject'] ?? $this->mailSubject($message),
                 $queued,
-                $this->mailDuration($message),
+                $this->mailDuration($mark),
             ));
         });
     }
@@ -263,22 +278,88 @@ class MailListeners
     }
 
     /**
-     * Zero when the sending event was never seen for this message: a mailer
-     * that only fires sent, or a send that threw before the mark was read back.
+     * The mark the sending event left for the message a sent event carries,
+     * as its key, or null when there is none.
+     *
+     * The sent event rarely carries the object the sending event did. Every
+     * transport that extends Symfony's AbstractTransport, which is SMTP,
+     * Postmark, Mailgun, SES and the rest, sends `clone $message`, and
+     * Laravel's sent event hands over that clone. Keyed by object id alone,
+     * no such send ever found its mark: it was recorded as sent, and its
+     * mark, still standing at the close, recorded it a second time as a
+     * failure. Only the array and log transports send the object itself.
+     *
+     * So the id is tried first, and otherwise the newest mark whose message
+     * has the same class, subject and addresses. Those are compared on the
+     * held message as it is now rather than as it was at the sending event,
+     * so a later sending listener that rewrote the recipients (a staging
+     * redirect, say) is matched too: the transport cloned it after that.
+     * Headers as a whole are not compared, because some transports stamp
+     * their own on the clone once it is sent (SES its message id, Resend its
+     * email id).
+     *
+     * Newest first, because a send that failed leaves its mark behind, and a
+     * retry of the very same message must not take the failure's mark and
+     * leave its own to be counted as failed instead.
+     *
+     * Nothing is added to the message to pair the two. A header would pair
+     * them exactly, but it would go out in every customer's mail, in the raw
+     * source any recipient can read. Two identical messages open at once are
+     * the only thing this can confuse, and they are indistinguishable anyway:
+     * either way one is sent and one is not.
      */
-    protected function mailDuration(object $message): float
+    protected function markFor(object $message): ?int
     {
         $key = spl_object_id($message);
 
-        if (! isset($this->mailStartedAt[$key])) {
+        if (($this->mailStartedAt[$key]['message'] ?? null) === $message) {
+            return $key;
+        }
+
+        $identity = $this->mailIdentity($message);
+
+        foreach (array_reverse($this->mailStartedAt, true) as $key => $mark) {
+            if ($this->mailIdentity($mark['message']) === $identity) {
+                return $key;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * What a message says, as far as a transport cannot change it: the class,
+     * the subject and every address on it.
+     */
+    protected function mailIdentity(object $message): string
+    {
+        $parts = [get_class($message), $this->mailSubject($message)];
+
+        foreach (['getFrom', 'getTo', 'getCc', 'getBcc', 'getReplyTo'] as $getter) {
+            $addresses = method_exists($message, $getter) ? (array) $message->{$getter}() : [];
+
+            $parts[] = implode(',', array_map(
+                fn ($address) => is_object($address) && method_exists($address, 'getAddress') ? $address->getAddress() : (string) $address,
+                $addresses,
+            ));
+        }
+
+        return implode("\n", $parts);
+    }
+
+    /**
+     * Zero when the sending event was never seen for this message: a mailer
+     * that only fires sent.
+     *
+     * @param  array{at: float}|null  $mark
+     */
+    protected function mailDuration(?array $mark): float
+    {
+        if ($mark === null) {
             return 0.0;
         }
 
-        $duration = round((microtime(true) - $this->mailStartedAt[$key]['at']) * 1000, 3);
-
-        unset($this->mailStartedAt[$key]);
-
-        return $duration;
+        return round((microtime(true) - $mark['at']) * 1000, 3);
     }
 
     protected function guard(callable $callback): void

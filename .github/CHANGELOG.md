@@ -4,6 +4,8 @@ All notable changes to `larabug` will be documented in this file
 
 ## Unreleased
 
+- Mail sent through any transport that extends Symfony's `AbstractTransport` (SMTP, Postmark, Mailgun, SES, Resend and the rest) is no longer counted twice, once as sent and once as failed. Those transports send a clone of the message, so the sent event never found the mark its sending event left, and the mark was reported as a failed send when the job, command or request ended. Every such send showed as a 50% failure rate. Only the array and log transports were unaffected.
+- The sent event now finds its mark by the message's class, subject and addresses when it carries a clone. Nothing is added to the outgoing mail. A send that throws is still recorded as failed, also when the same message is sent again right after.
 - A failed job's record no longer carries an exception the application would not report. The record goes to the server without going through the exception handler, so an exception excluded with `$dontReport`, `dontReportWhen()`, `ShouldntReport`, an overridden `shouldReport()` or LaraBug's own `except` list still opened an issue, once per failed job. The job is still recorded as failed with its status, attempts and duration, only without `exception`.
 - The handler is asked the way `report()` asks it, but without spending an attempt of a `throttleUsing()` limit and without counting an exception it already reported under `dontReportDuplicates()` as excluded. A handler that throws while deciding leaves the exception on the record.
 
