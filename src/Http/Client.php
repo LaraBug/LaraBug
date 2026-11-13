@@ -4,6 +4,7 @@ namespace LaraBug\Http;
 
 use Exception;
 use GuzzleHttp\ClientInterface;
+use LaraBug\Support\SdkVersion;
 use LaraBug\Requests\Traceparent;
 use Psr\Http\Message\ResponseInterface;
 use GuzzleHttp\Exception\RequestException;
@@ -207,6 +208,10 @@ class Client
      * story rather than start one of its own. Built per call, because its span
      * names this one request.
      *
+     * Every send carries the SDK's version, a payload the retry buffer kept
+     * included: it is added here rather than stored with the body, so a
+     * flushed event names the version that sent it.
+     *
      * @return array<string, string>
      */
     protected function headers(): array
@@ -215,7 +220,8 @@ class Client
             'Authorization' => 'Bearer '.$this->login,
             'Content-Type' => 'application/json',
             'Accept' => 'application/json',
-            'User-Agent' => 'LaraBug-Package',
+            'User-Agent' => 'LaraBug-Package/'.SdkVersion::version(),
+            'X-LaraBug-Sdk' => SdkVersion::header(),
             'traceparent' => Traceparent::forCurrentTrace(),
         ];
     }
