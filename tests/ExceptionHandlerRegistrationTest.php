@@ -5,6 +5,7 @@ namespace LaraBug\Tests;
 use Exception;
 use Throwable;
 use PHPUnit\Framework\Attributes\Test;
+use Illuminate\Foundation\Exceptions\Handler;
 use Illuminate\Contracts\Debug\ExceptionHandler;
 
 class ExceptionHandlerRegistrationTest extends TestCase
@@ -46,6 +47,37 @@ class ExceptionHandlerRegistrationTest extends TestCase
 
         $handler->report(new Exception('reported once'));
 
+        $this->assertCount(1, $recorder->handled);
+    }
+
+    #[Test]
+    public function registering_a_handler_raises_no_deprecation()
+    {
+        $recorder = $this->swapLaraBugForRecorder();
+
+        $handler = new Handler($this->app);
+
+        $this->app->forgetInstance(ExceptionHandler::class);
+        $this->app->bind(ExceptionHandler::class, fn () => $handler);
+
+        $deprecations = [];
+
+        set_error_handler(function (int $level, string $message) use (&$deprecations) {
+            $deprecations[] = $message;
+
+            return true;
+        }, E_DEPRECATED);
+
+        try {
+            $this->app->make(ExceptionHandler::class);
+            $this->app->make(ExceptionHandler::class);
+        } finally {
+            restore_error_handler();
+        }
+
+        $handler->report(new Exception('reported once'));
+
+        $this->assertSame([], $deprecations);
         $this->assertCount(1, $recorder->handled);
     }
 

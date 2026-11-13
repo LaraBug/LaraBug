@@ -2,6 +2,11 @@
 
 All notable changes to `larabug` will be documented in this file
 
+## Unreleased
+
+- No more PHP 8.5 deprecations from the package. Registering the exception handler called `SplObjectStorage::contains()` and `attach()`, which PHP 8.5 deprecates, so every boot added two lines to the application's deprecations log (and to LaraBug, when deprecations are shipped). It now uses array access on the storage, which works on every supported PHP version.
+- A queued job with no uuid in its payload and no id from its driver no longer uses `null` as an array key when its record is built, which PHP 8.5 deprecates as well. Its record is unchanged.
+
 ## 4.0.0-beta.22 - 2026-11-13
 
 - Mail sent through any transport that extends Symfony's `AbstractTransport` (SMTP, Postmark, Mailgun, SES, Resend and the rest) is no longer counted twice, once as sent and once as failed. Those transports send a clone of the message, so the sent event never found the mark its sending event left, and the mark was reported as a failed send when the job, command or request ended. Every such send showed as a 50% failure rate. Only the array and log transports were unaffected.

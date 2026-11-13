@@ -62,9 +62,14 @@ class JobDataCollector
             'created_at' => now()->toIso8601String(),
         ];
 
-        if (isset(static::$attemptTimes[$jobId])) {
-            $data['available_at'] = static::$attemptTimes[$jobId]['available_at'];
-            $data['reserved_at'] = static::$attemptTimes[$jobId]['reserved_at'];
+        // Read under the key the attempt was stored under, which is never
+        // null: a job without a uuid or an id would otherwise use null as an
+        // array offset, which PHP 8.5 deprecates.
+        $attemptTimes = static::$attemptTimes[$this->jobId($job)] ?? null;
+
+        if ($attemptTimes !== null) {
+            $data['available_at'] = $attemptTimes['available_at'];
+            $data['reserved_at'] = $attemptTimes['reserved_at'];
         }
 
         if ($status === 'completed') {

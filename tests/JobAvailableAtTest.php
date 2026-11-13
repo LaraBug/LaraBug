@@ -162,6 +162,37 @@ class JobAvailableAtTest extends TestCase
         $this->assertSame('2025-10-19T12:05:00+00:00', $secondAttempt['available_at']);
     }
 
+    #[Test]
+    public function a_job_without_a_uuid_or_an_id_is_collected_without_a_deprecation()
+    {
+        $job = new class ($this->app, json_encode(['job' => 'App\\Jobs\\Legacy']), 'redis', 'default') extends SyncJob {
+            public function getJobId()
+            {
+                return null;
+            }
+        };
+
+        $deprecations = [];
+
+        set_error_handler(function (int $level, string $message) use (&$deprecations) {
+            $deprecations[] = $message;
+
+            return true;
+        }, E_DEPRECATED);
+
+        try {
+            $collector = new JobDataCollector(config('larabug'));
+            $collector->started($job);
+            $record = $collector->collect($job, 'redis', 'processing');
+        } finally {
+            restore_error_handler();
+        }
+
+        $this->assertSame([], $deprecations);
+        $this->assertNull($record['job_id']);
+        $this->assertArrayHasKey('reserved_at', $record);
+    }
+
     private function payload(float|string|null $pushedAt, ?int $delay, float|int|string|null $createdAt = null): array
     {
         return array_filter([
