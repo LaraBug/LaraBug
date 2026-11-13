@@ -19,6 +19,7 @@ use GuzzleHttp\Client as GuzzleClient;
 use PHPUnit\Framework\Attributes\Test;
 use Psr\Http\Message\RequestInterface;
 use GuzzleHttp\Exception\ConnectException;
+use GuzzleHttp\Exception\RequestException;
 use Illuminate\Console\Scheduling\Schedule;
 use PHPUnit\Framework\Attributes\DataProvider;
 
@@ -60,6 +61,19 @@ class RetryBufferTest extends TestCase
 
         $this->assertCount(1, $this->kept());
         $this->assertSame('Server unreachable', $this->kept()[0]['exception']['exception']);
+    }
+
+    #[Test]
+    public function an_exception_whose_request_failed_without_an_answer_is_kept()
+    {
+        // Guzzle 7 answers null from getResponse() here, Guzzle 8 has no
+        // getResponse() on a RequestException at all.
+        $client = $this->client([$this->failureWithoutAnswer()]);
+
+        $this->assertFalse((new LaraBug($client))->handle(new Exception('No answer')));
+
+        $this->assertCount(1, $this->kept());
+        $this->assertSame('No answer', $this->kept()[0]['exception']['exception']);
     }
 
     #[Test]
@@ -428,6 +442,20 @@ class RetryBufferTest extends TestCase
     }
 
     #[Test]
+    public function a_flush_stops_when_a_request_failed_without_an_answer()
+    {
+        $this->writeEntry(time() - 20, ['type' => 'logs_batch', 'number' => 1]);
+        $this->writeEntry(time() - 10, ['type' => 'logs_batch', 'number' => 2]);
+
+        $client = $this->client([$this->failureWithoutAnswer()]);
+
+        $result = RetryBuffer::fromConfig()->flush($client);
+
+        $this->assertSame(FlushStop::Unreachable, $result->stoppedBy);
+        $this->assertSame([1, 2], array_column($this->kept(), 'number'));
+    }
+
+    #[Test]
     public function a_flush_drops_an_event_refused_with_a_4xx_and_carries_on()
     {
         $this->writeEntry(time() - 20, ['type' => 'logs_batch', 'number' => 1]);
@@ -738,6 +766,14 @@ class RetryBufferTest extends TestCase
     {
         return new ConnectException(
             'cURL error 7: Failed to connect to larabug.test',
+            new Request('POST', 'https://larabug.test/api/log')
+        );
+    }
+
+    protected function failureWithoutAnswer(): RequestException
+    {
+        return new RequestException(
+            'Error completing request',
             new Request('POST', 'https://larabug.test/api/log')
         );
     }
