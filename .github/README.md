@@ -2,7 +2,7 @@
 
 # LaraBug Laravel SDK
 
-Official Laravel SDK for [larabug.com](https://www.larabug.com). Captures unhandled exceptions and queued job failures from Laravel 6 through 13 on PHP 7.4 and newer.
+Official Laravel SDK for [larabug.com](https://www.larabug.com). Captures unhandled exceptions and queued job failures from Laravel 11, 12 and 13 on PHP 8.2 and newer.
 
 [![Software License](https://poser.pugx.org/larabug/larabug/license.svg)](../LICENSE.md)
 [![Latest Version on Packagist](https://poser.pugx.org/larabug/larabug/v/stable.svg)](https://packagist.org/packages/larabug/larabug)
@@ -14,6 +14,8 @@ Official Laravel SDK for [larabug.com](https://www.larabug.com). Captures unhand
 ```bash
 composer require larabug/larabug
 ```
+
+The package works with Guzzle 7 and Guzzle 8, so it installs on a new Laravel 13 application as is. Laravel 10 and older, or PHP 8.1 and older, need the 3.x line (`composer require larabug/larabug:^3.0`).
 
 Publish the config file:
 

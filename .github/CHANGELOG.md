@@ -2,6 +2,13 @@
 
 All notable changes to `larabug` will be documented in this file
 
+## 4.0.1 - 2026-11-13
+
+- Guzzle 8 is supported next to Guzzle 7 (`^7.8 || ^8.0`). A new Laravel 13 application ships with Guzzle 8, so `composer require larabug/larabug` now installs there without `-W`. Laravel 11 and 12 stay on Guzzle 7, which they require.
+- A job that failed in a queue worker is recorded again on Guzzle 8. Its record read the request headers with `getallheaders()`, which the CLI does not have. Guzzle 7 installed a polyfill for it and Guzzle 8 does not, so the listener threw. Laravel's own failed job listener runs after LaraBug's, so the job was also missing from `failed_jobs`. The headers now come from Laravel's request, filtered with the `blacklist` like an exception report's, and only when a job fails inside an HTTP request (on the `sync` queue, for instance). A worker serves no request and sends none, as before.
+- A send that fails without any answer from the server, where Guzzle throws a plain `RequestException` rather than a connection error, is kept in the retry buffer again on Guzzle 8. Guzzle 8 moved `getResponse()` to `ResponseException`, so the client threw an `Error` instead and the payload was lost.
+- A `verify_ssl` set to `null` means verify, on Guzzle 8 as on Guzzle 7. Guzzle 8 rejects a `null` for its `verify` option, which dropped every report.
+
 ## 4.0.0-beta.23 - 2026-11-13
 
 - No more PHP 8.5 deprecations from the package. Registering the exception handler called `SplObjectStorage::contains()` and `attach()`, which PHP 8.5 deprecates, so every boot added two lines to the application's deprecations log (and to LaraBug, when deprecations are shipped). It now uses array access on the storage, which works on every supported PHP version.
