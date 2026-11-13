@@ -22,6 +22,7 @@ jobs:
         php: [ 8.4, 8.3, 8.2 ]
         laravel: [ 13.*, 12.*, 11.* ]
         dependency-version: [ prefer-lowest, prefer-stable ]
+        guzzle: [ '^8.0', '^7.8' ]
         include:
           - laravel: 13.*
             testbench: 11.*
@@ -38,7 +39,14 @@ jobs:
           - laravel: 11.*
             dependency-version: prefer-lowest
 
-    name: P${{ matrix.php }} - L${{ matrix.laravel }} - ${{ matrix.dependency-version }}
+          # Laravel 11 and 12 cap Guzzle at 7. Laravel 13 allows 8, and a new
+          # Laravel 13 application ships with it.
+          - laravel: 12.*
+            guzzle: '^8.0'
+          - laravel: 11.*
+            guzzle: '^8.0'
+
+    name: P${{ matrix.php }} - L${{ matrix.laravel }} - G${{ matrix.guzzle }} - ${{ matrix.dependency-version }}
 
     steps:
       - name: Checkout code
@@ -62,7 +70,7 @@ jobs:
       - name: Install dependencies
         run: |
           composer config --global policy.advisories.block false
-          composer require "laravel/framework:${{ matrix.laravel }}" "orchestra/testbench:${{ matrix.testbench }}" --no-interaction --no-update
+          composer require "laravel/framework:${{ matrix.laravel }}" "orchestra/testbench:${{ matrix.testbench }}" "guzzlehttp/guzzle:${{ matrix.guzzle }}" --no-interaction --no-update
           composer update --${{ matrix.dependency-version }} --prefer-dist --no-interaction
 
       - name: Execute tests
