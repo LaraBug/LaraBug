@@ -2,6 +2,11 @@
 
 All notable changes to `larabug` will be documented in this file
 
+## Unreleased
+
+- Mail sent through any transport that extends Symfony's `AbstractTransport` (SMTP, Postmark, Mailgun, SES, Resend and the rest) is no longer counted twice, once as sent and once as failed. Those transports send a clone of the message, so the sent event never found the mark its sending event left, and the mark was reported as a failed send when the job, command or request ended. Every such send showed as a 50% failure rate. Only the array and log transports were unaffected.
+- The sent event now finds its mark by the message's class, subject and addresses when it carries a clone. Nothing is added to the outgoing mail. A send that throws is still recorded as failed, also when the same message is sent again right after.
+
 ## 4.0.0-beta.21 - 2026-11-12
 
 - Events the LaraBug server could not take are no longer lost. On a 5xx, or when the server cannot be reached at all, the payload is written to a retry buffer on local disk (`storage/larabug/retry-buffer` by default, `retry_buffer.path` or `LB_RETRY_BUFFER_PATH`) and sent again, oldest first, on the next send that succeeds. A web request sends it on shutdown, after the response has gone out. A console process sends up to 50 right away.

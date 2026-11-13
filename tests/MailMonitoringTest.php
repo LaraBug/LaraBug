@@ -31,6 +31,7 @@ use Illuminate\Notifications\AnonymousNotifiable;
 use Illuminate\Contracts\Queue\Job as JobContract;
 use Workbench\App\Notifications\QueuedOrderShipped;
 use Illuminate\Notifications\SendQueuedNotifications;
+use Symfony\Component\Mailer\Transport\NullTransport;
 use Illuminate\Contracts\Console\Kernel as ConsoleKernel;
 
 /**
@@ -49,6 +50,7 @@ class MailMonitoringTest extends TestCase
     {
         $app['config']->set('mail.default', 'array');
         $app['config']->set('mail.mailers.failing', ['transport' => 'failing']);
+        $app['config']->set('mail.mailers.cloning', ['transport' => 'cloning']);
 
         // The provider's own listeners would send to a LaraBug that is not
         // there; each test wires its own, recording ones instead.
@@ -62,6 +64,12 @@ class MailMonitoringTest extends TestCase
         parent::setUp();
 
         Mail::extend('failing', fn () => new FailingTransport());
+
+        // Every real transport (SMTP, Postmark, Mailgun, SES) extends Symfony's
+        // AbstractTransport, which sends a clone of the message: the sent
+        // event carries an object the sending event never saw. The array
+        // transport sends the message itself, so it cannot show this.
+        Mail::extend('cloning', fn () => new NullTransport());
 
         // Laravel only turns Symfony's console events into its own outside of
         // unit tests, and the command listener hears nothing else.
@@ -192,6 +200,66 @@ class MailMonitoringTest extends TestCase
         $this->assertSame(InvoiceMail::class, $message['mailable']);
         $this->assertSame('Your invoice', $message['subject']);
         $this->assertSame(0, $message['to_count']);
+    }
+
+    #[Test]
+    public function a_send_through_a_transport_that_clones_the_message_is_recorded_once_as_sent()
+    {
+        $this->work(new SendInvoice(mailer: 'cloning'));
+
+        $record = $this->jobRecord();
+
+        $this->assertSame('completed', $record['status']);
+        $this->assertSame(1, $record['mail_sent']);
+        $this->assertCount(1, $record['mail']);
+        $this->assertSame(0, $record['mail'][0]['failed']);
+        $this->assertSame(InvoiceMail::class, $record['mail'][0]['mailable']);
+        $this->assertSame(1, $record['mail'][0]['to_count']);
+    }
+
+    #[Test]
+    public function a_request_that_sends_through_a_transport_that_clones_the_message_records_no_failure()
+    {
+        $request = new RequestMonitor();
+
+        $this->listen(request: $request);
+
+        Mail::mailer('cloning')->to('alice@example.com')->send(new InvoiceMail());
+        Mail::mailer('cloning')->to('bob@example.org')->send(new InvoiceMail());
+
+        $record = $request->toArray(Request::create('/checkout', 'POST'), new Response('', 200), 1.0);
+
+        $this->assertSame(2, $record['mail_sent']);
+        $this->assertSame([0, 0], array_column($record['mail'], 'failed'));
+        $this->assertSame(['example.com', 'example.org'], array_column($record['mail'], 'recipient_domains'));
+    }
+
+    #[Test]
+    public function a_failed_send_stays_failed_when_the_same_message_then_goes_out_through_a_cloning_transport()
+    {
+        Artisan::command('app:send-digest', function () {
+            try {
+                Mail::mailer('failing')->to('alice@example.com')->send(new InvoiceMail());
+            } catch (\Throwable) {
+            }
+
+            Mail::mailer('cloning')->to('alice@example.com')->send(new InvoiceMail());
+        });
+
+        Artisan::call('app:send-digest');
+
+        $record = $this->commandRecord();
+
+        $this->assertSame(2, $record['mail_sent']);
+        $this->assertCount(2, $record['mail']);
+
+        $failed = array_values(array_filter($record['mail'], fn (array $message) => $message['failed'] === 1));
+        $sent = array_values(array_filter($record['mail'], fn (array $message) => $message['failed'] === 0));
+
+        $this->assertCount(1, $failed);
+        $this->assertCount(1, $sent);
+        $this->assertSame(0, $failed[0]['to_count']);
+        $this->assertSame(1, $sent[0]['to_count']);
     }
 
     #[Test]
