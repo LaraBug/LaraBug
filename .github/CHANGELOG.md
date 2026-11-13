@@ -2,6 +2,11 @@
 
 All notable changes to `larabug` will be documented in this file
 
+## Unreleased
+
+- A failed job's record no longer carries an exception the application would not report. The record goes to the server without going through the exception handler, so an exception excluded with `$dontReport`, `dontReportWhen()`, `ShouldntReport`, an overridden `shouldReport()` or LaraBug's own `except` list still opened an issue, once per failed job. The job is still recorded as failed with its status, attempts and duration, only without `exception`.
+- The handler is asked the way `report()` asks it, but without spending an attempt of a `throttleUsing()` limit and without counting an exception it already reported under `dontReportDuplicates()` as excluded. A handler that throws while deciding leaves the exception on the record.
+
 ## 4.0.0-beta.21 - 2026-11-12
 
 - Events the LaraBug server could not take are no longer lost. On a 5xx, or when the server cannot be reached at all, the payload is written to a retry buffer on local disk (`storage/larabug/retry-buffer` by default, `retry_buffer.path` or `LB_RETRY_BUFFER_PATH`) and sent again, oldest first, on the next send that succeeds. A web request sends it on shutdown, after the response has gone out. A console process sends up to 50 right away.

@@ -6,6 +6,7 @@ use Throwable;
 use LaraBug\Http\Client;
 use LaraBug\Mail\ExecutionMail;
 use Illuminate\Contracts\Queue\Job;
+use LaraBug\Support\ExceptionReporting;
 
 class JobMonitor
 {
@@ -143,16 +144,7 @@ class JobMonitor
 
             $data = $this->collector->collect($job, $connectionName, 'failed', [
                 'duration_ms' => $durationMs,
-                'exception' => [
-                    'class' => $exception::class,
-                    'message' => $exception->getMessage(),
-                    'code' => $exception->getCode(),
-                    'file' => $exception->getFile(),
-                    'line' => $exception->getLine(),
-                    'error' => $exception->getTraceAsString(), // Stack trace goes in the error field
-                    'storage' => array_filter($storage), // Server/headers data goes in the storage field
-                    'environment' => config('app.env', 'production'),
-                ],
+                ...$this->failedWith($exception, $storage),
                 ...$mail->toArray(),
                 // A failure is never sampled out, so it stands for itself alone.
                 'sample_rate' => 1.0,
@@ -162,6 +154,40 @@ class JobMonitor
         } finally {
             $this->collector->forget($job);
         }
+    }
+
+    /**
+     * The exception a failed record carries, or nothing when the application
+     * would not report it.
+     *
+     * The server opens an issue for the exception on a failed record, and that
+     * record never passes through the application's exception handler. So an
+     * exception the application excluded (`$dontReport`, `dontReportWhen()`,
+     * `shouldReport()`, or this SDK's own `except` list) used to come in as an
+     * issue anyway, once per failed job. Only the exception is left out: the
+     * job still failed, and its status, attempts and duration say so.
+     *
+     * @param  array<string, mixed>  $storage
+     * @return array{exception?: array<string, mixed>}
+     */
+    protected function failedWith(Throwable $exception, array $storage): array
+    {
+        if (! ExceptionReporting::wouldReport($exception)) {
+            return [];
+        }
+
+        return [
+            'exception' => [
+                'class' => $exception::class,
+                'message' => $exception->getMessage(),
+                'code' => $exception->getCode(),
+                'file' => $exception->getFile(),
+                'line' => $exception->getLine(),
+                'error' => $exception->getTraceAsString(), // Stack trace goes in the error field
+                'storage' => array_filter($storage), // Server/headers data goes in the storage field
+                'environment' => config('app.env', 'production'),
+            ],
+        ];
     }
 
     public function trackJobReleased(Job $job, ?int $backoff): void
