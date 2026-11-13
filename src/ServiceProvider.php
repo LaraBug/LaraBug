@@ -539,11 +539,12 @@ class ServiceProvider extends BaseServiceProvider
             // Resolving the handler more than once is normal, Collision wraps it
             // for one. Without this guard every resolution adds another callback
             // and one exception is reported once per resolution.
-            if ($this->handlersRegistered->contains($handler)) {
+            // Array access, because PHP 8.5 deprecates contains() and attach().
+            if (isset($this->handlersRegistered[$handler])) {
                 return;
             }
 
-            $this->handlersRegistered->attach($handler);
+            $this->handlersRegistered[$handler] = true;
 
             $handler->reportable(function (Throwable $exception) {
                 // Deliberately not returning handle()'s value. A reportable
