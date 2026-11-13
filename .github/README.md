@@ -66,6 +66,10 @@ LB_RETRY_BUFFER_MAX_AGE=86400
 
 The path defaults to `storage/larabug/retry-buffer` and the age is in seconds. Past the age bound an event is dropped. Past the count or size bound the oldest telemetry goes first, and exceptions only once no telemetry is left. Every server keeps its own buffer, so the path has to be writable by both the web server and the user the scheduler runs as.
 
+## SDK version
+
+Every request the SDK sends carries an `X-LaraBug-Sdk` header naming the SDK, PHP and Laravel versions, for example `larabug-php/4.0.2 php/8.4.27 laravel/13.42.0`. The SDK version is read from Composer and is `unknown` when Composer does not list the package. An event flushed from the retry buffer carries the version that sent it, not the one that kept it.
+
 ## Documentation
 
 Full documentation (configuration, exception capturing, queue and job monitoring, user context, testing, and troubleshooting) lives at **[larabug.com/docs](https://www.larabug.com/docs)**.
