@@ -4,10 +4,10 @@
 
 Official Laravel SDK for [larabug.com](https://www.larabug.com). Captures unhandled exceptions and queued job failures from Laravel 11, 12 and 13 on PHP 8.2 and newer.
 
-[![Software License](https://poser.pugx.org/larabug/larabug/license.svg)](../LICENSE.md)
-[![Latest Version on Packagist](https://poser.pugx.org/larabug/larabug/v/stable.svg)](https://packagist.org/packages/larabug/larabug)
-[![Build Status](https://img.shields.io/github/checks-status/LaraBug/LaraBug/v4?label=tests)](https://github.com/LaraBug/LaraBug/commits/v4)
-[![Total Downloads](https://poser.pugx.org/larabug/larabug/d/total.svg)](https://packagist.org/packages/larabug/larabug)
+[![Software License](https://img.shields.io/packagist/l/larabug/larabug)](https://github.com/LaraBug/LaraBug/blob/master/LICENSE)
+[![Latest Version on Packagist](https://img.shields.io/packagist/v/larabug/larabug)](https://packagist.org/packages/larabug/larabug)
+[![Tests](https://img.shields.io/github/checks-status/LaraBug/LaraBug/master?label=tests)](https://github.com/LaraBug/LaraBug/commits/master)
+[![Total Downloads](https://img.shields.io/packagist/dt/larabug/larabug)](https://packagist.org/packages/larabug/larabug)
 
 ## Installation
 
