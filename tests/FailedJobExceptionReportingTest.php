@@ -4,7 +4,9 @@ namespace LaraBug\Tests;
 
 use Throwable;
 use RuntimeException;
+use ReflectionProperty;
 use LaraBug\Http\Client;
+use Illuminate\Http\Request;
 use LaraBug\Requests\TraceContext;
 use Illuminate\Support\Facades\Queue;
 use LaraBug\Tests\Mocks\MeteredClient;
@@ -62,6 +64,38 @@ class FailedJobExceptionReportingTest extends TestCase
 
         $this->assertSame(RuntimeException::class, $record['exception']['class']);
         $this->assertSame('Receipt could not be delivered', $record['exception']['message']);
+    }
+
+    #[Test]
+    public function a_job_that_fails_in_a_worker_carries_no_headers()
+    {
+        Queue::push(new DeliverReceipt());
+
+        $this->work();
+
+        $this->assertArrayNotHasKey('HEADERS', $this->failedRecord()['exception']['storage']);
+    }
+
+    #[Test]
+    public function a_job_that_fails_inside_a_request_carries_its_headers_filtered()
+    {
+        $this->app->instance('request', Request::create('/checkout', 'POST', server: [
+            'HTTP_AUTHORIZATION' => 'Bearer secret',
+            'HTTP_X_CHECKOUT_STEP' => 'payment',
+        ]));
+
+        $this->servingHttp(function () {
+            try {
+                Queue::connection('sync')->push(new DeliverReceipt());
+            } catch (RuntimeException) {
+                // The sync queue throws what the job threw, after failing it.
+            }
+        });
+
+        $headers = $this->failedRecord()['exception']['storage']['HEADERS'];
+
+        $this->assertSame(['payment'], $headers['x-checkout-step']);
+        $this->assertSame('***', $headers['authorization']);
     }
 
     #[Test]
@@ -154,6 +188,18 @@ class FailedJobExceptionReportingTest extends TestCase
         $this->assertArrayHasKey('duration_ms', $record);
         $this->assertNotNull($record['duration_ms']);
         $this->assertArrayHasKey('failed_at', $record);
+    }
+
+    protected function servingHttp(callable $callback): void
+    {
+        $runningInConsole = new ReflectionProperty($this->app, 'isRunningInConsole');
+        $runningInConsole->setValue($this->app, false);
+
+        try {
+            $callback();
+        } finally {
+            $runningInConsole->setValue($this->app, null);
+        }
     }
 
     protected function handler(): Handler

@@ -4,8 +4,10 @@ namespace LaraBug\Queue;
 
 use Throwable;
 use LaraBug\Http\Client;
+use LaraBug\Filters\DataFilter;
 use LaraBug\Mail\ExecutionMail;
 use Illuminate\Contracts\Queue\Job;
+use Illuminate\Support\Facades\Request;
 use LaraBug\Support\ExceptionReporting;
 
 class JobMonitor
@@ -139,7 +141,7 @@ class JobMonitor
                     'SERVER_SOFTWARE' => $_SERVER['SERVER_SOFTWARE'] ?? null,
                     'PHP_VERSION' => PHP_VERSION,
                 ],
-                'HEADERS' => getallheaders() ?: [],
+                'HEADERS' => $this->requestHeaders(),
             ];
 
             $data = $this->collector->collect($job, $connectionName, 'failed', [
@@ -188,6 +190,26 @@ class JobMonitor
                 'environment' => config('app.env', 'production'),
             ],
         ];
+    }
+
+    /**
+     * The headers of the HTTP request a job failed inside, such as one run on
+     * the sync queue, filtered the way an exception report's are. A worker
+     * serves no request, so it has none.
+     *
+     * Not getallheaders(): the CLI does not have it, and the polyfill that
+     * stood in for it came with Guzzle 7 and is gone from Guzzle 8, which left
+     * every failed job in a worker throwing instead of being recorded.
+     *
+     * @return array<string, mixed>
+     */
+    protected function requestHeaders(): array
+    {
+        if (app()->runningInConsole()) {
+            return [];
+        }
+
+        return (new DataFilter($this->config['blacklist'] ?? []))->filterVariables(Request::header());
     }
 
     public function trackJobReleased(Job $job, ?int $backoff): void
