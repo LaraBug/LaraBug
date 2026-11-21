@@ -104,6 +104,52 @@ class ScheduledTaskMonitoringTest extends TestCase
         $this->assertCount(1, $commandBuffer->records);
     }
 
+    #[Test]
+    public function it_does_not_report_its_own_flush_being_skipped()
+    {
+        $buffer = $this->taskBuffer();
+        $listeners = new ScheduledTaskListeners($buffer);
+
+        $listeners->onScheduledTaskSkipped($this->taskEvent($this->fakeTask("'/usr/bin/php8.4' 'artisan' larabug:flush > '/dev/null' 2>&1")));
+
+        $this->assertCount(0, $buffer->records);
+    }
+
+    #[Test]
+    public function it_does_not_report_its_own_flush_running_as_a_task_or_as_a_command()
+    {
+        $taskBuffer = $this->taskBuffer();
+        $commandBuffer = $this->commandBuffer();
+
+        $tasks = new ScheduledTaskListeners($taskBuffer);
+        $commands = new CommandListeners($commandBuffer);
+
+        $task = $this->fakeTask("'/usr/bin/php8.4' 'artisan' larabug:flush > '/dev/null' 2>&1");
+
+        $tasks->onScheduledTaskStarting($this->taskEvent($task));
+
+        $input = $this->fakeInput();
+        $commands->onCommandStarting($this->commandEvent('larabug:flush', $input));
+        $commands->onCommandFinished($this->commandEvent('larabug:flush', $input, 0));
+
+        $tasks->onScheduledTaskFinished($this->taskEvent($task, 0.1));
+
+        $this->assertCount(0, $taskBuffer->records);
+        $this->assertCount(0, $commandBuffer->records);
+        $this->assertSame(0, ScheduledTaskListeners::$inFlight);
+    }
+
+    #[Test]
+    public function a_task_merely_named_like_the_flush_is_still_reported()
+    {
+        $buffer = $this->taskBuffer();
+        $listeners = new ScheduledTaskListeners($buffer);
+
+        $listeners->onScheduledTaskSkipped($this->taskEvent($this->fakeTask('larabug:flush-cache')));
+
+        $this->assertCount(1, $buffer->records);
+    }
+
     private function taskBuffer(): ScheduledTaskBuffer
     {
         return new class () extends ScheduledTaskBuffer {
