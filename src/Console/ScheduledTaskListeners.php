@@ -75,6 +75,10 @@ class ScheduledTaskListeners
         // A skipped task never started, so the in-flight counter was not raised
         // for it and nothing needs releasing here.
         $this->guard(function () use ($event) {
+            if ($this->isOwnTask($event->task ?? null)) {
+                return;
+            }
+
             $this->buffer->add($this->toRecord($event->task ?? null, 'skipped', 0.0));
         });
     }
@@ -88,6 +92,10 @@ class ScheduledTaskListeners
 
             $task = $event->task ?? null;
             $duration = $this->duration($task, $event);
+
+            if ($this->isOwnTask($task)) {
+                return;
+            }
 
             $this->buffer->add($this->toRecord($task, $status, $duration));
         });
@@ -138,6 +146,24 @@ class ScheduledTaskListeners
         }
 
         return 0.0;
+    }
+
+    /**
+     * Whether this is a task the package schedules for itself rather than one
+     * the application wrote. `larabug:flush` runs every minute behind a check
+     * that is false whenever the retry buffer is empty, which is nearly
+     * always, so reporting it sent a skip a minute: about 1,440 a day, counted
+     * against the application's quota and listed as part of its schedule.
+     *
+     * It still counts as in flight while it runs, so the command listener
+     * keeps leaving it to the schedule and it is not reported as a command
+     * either.
+     */
+    protected function isOwnTask(mixed $task): bool
+    {
+        $name = $this->taskName($task);
+
+        return $name === 'larabug:flush' || str_starts_with($name, 'larabug:flush ');
     }
 
     /**
