@@ -5,6 +5,7 @@ namespace LaraBug\Tests;
 use LaraBug\Console\CommandBuffer;
 use LaraBug\Console\CommandListeners;
 use PHPUnit\Framework\Attributes\Test;
+use PHPUnit\Framework\Attributes\DataProvider;
 use LaraBug\Console\ScheduledTaskBuffer;
 use LaraBug\Console\ScheduledTaskListeners;
 
@@ -140,14 +141,60 @@ class ScheduledTaskMonitoringTest extends TestCase
     }
 
     #[Test]
-    public function a_task_merely_named_like_the_flush_is_still_reported()
+    #[DataProvider('ownCommands')]
+    public function it_does_not_report_any_of_its_own_commands_being_skipped(string $command)
     {
         $buffer = $this->taskBuffer();
         $listeners = new ScheduledTaskListeners($buffer);
 
-        $listeners->onScheduledTaskSkipped($this->taskEvent($this->fakeTask('larabug:flush-cache')));
+        $listeners->onScheduledTaskSkipped($this->taskEvent($this->fakeTask("'/usr/bin/php8.4' 'artisan' {$command} > '/dev/null' 2>&1")));
 
-        $this->assertCount(1, $buffer->records);
+        $this->assertCount(0, $buffer->records);
+    }
+
+    #[Test]
+    #[DataProvider('ownCommands')]
+    public function it_does_not_report_any_of_its_own_commands_running_as_a_task(string $command)
+    {
+        $buffer = $this->taskBuffer();
+        $listeners = new ScheduledTaskListeners($buffer);
+
+        $task = $this->fakeTask("'/usr/bin/php8.4' 'artisan' {$command}");
+
+        $listeners->onScheduledTaskStarting($this->taskEvent($task));
+        $listeners->onScheduledTaskFinished($this->taskEvent($task, 0.1));
+
+        $listeners->onScheduledTaskStarting($this->taskEvent($task));
+        $listeners->onScheduledTaskFailed($this->taskEvent($task));
+
+        $this->assertCount(0, $buffer->records);
+        $this->assertSame(0, ScheduledTaskListeners::$inFlight);
+    }
+
+    /**
+     * @return array<string, array{0: string}>
+     */
+    public static function ownCommands(): array
+    {
+        return [
+            'flush' => ['larabug:flush'],
+            'queue depth' => ['larabug:queue-depth'],
+            'security posture' => ['larabug:security-posture'],
+            'cve scan' => ['larabug:scan'],
+            'with options' => ['larabug:queue-depth --show'],
+        ];
+    }
+
+    #[Test]
+    public function the_applications_own_tasks_mentioning_larabug_are_still_reported()
+    {
+        $buffer = $this->taskBuffer();
+        $listeners = new ScheduledTaskListeners($buffer);
+
+        $listeners->onScheduledTaskSkipped($this->taskEvent($this->fakeTask('app:larabug-flush')));
+        $listeners->onScheduledTaskSkipped($this->taskEvent($this->fakeTask("'/usr/bin/php8.4' 'artisan' reports:send --to=larabug:flush")));
+
+        $this->assertCount(2, $buffer->records);
     }
 
     private function taskBuffer(): ScheduledTaskBuffer

@@ -4,6 +4,7 @@ All notable changes to `larabug` will be documented in this file
 
 ## Unreleased
 
+- No command in the `larabug:` namespace is reported as a scheduled task any more. `larabug:flush` already was left out; `larabug:queue-depth`, `larabug:scan` and anything the package schedules later now are too, so the package's own housekeeping no longer shows up in the application's schedule, counts against its quota or raises a stopped schedule. Each still counts as in flight while it runs, so it is not reported as a command either. Run by hand, outside the scheduler, they are still recorded as commands.
 - Every request to the LaraBug server now carries an `X-LaraBug-Sdk` header with the SDK, PHP and Laravel versions as product tokens, such as `larabug-php/4.0.2 php/8.4.27 laravel/13.42.0`. That covers exceptions, every telemetry stream, queue depth samples, CVE scans and the retry buffer's flush. The SDK version comes from Composer and is `unknown` when Composer does not list the package. It is worked out once per process.
 - A flushed event carries the version that sent it. The retry buffer still keeps the body alone, so an event kept by an older SDK goes out with the current header.
 - The `User-Agent` is now `LaraBug-Package/<sdk version>` instead of `LaraBug-Package`.
