@@ -36,6 +36,7 @@ use LaraBug\Livewire\LivewireContext;
 use LaraBug\Logger\DeprecationBuffer;
 use LaraBug\Logger\LaraBugLogHandler;
 use LaraBug\Queue\JobEventSubscriber;
+use LaraBug\Security\PostureSchedule;
 use Illuminate\Foundation\AliasLoader;
 use LaraBug\Requests\RequestListeners;
 use LaraBug\Commands\QueueDepthCommand;
@@ -46,6 +47,7 @@ use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Queue\Events\WorkerStopping;
 use LaraBug\Console\ScheduledTaskListeners;
 use LaraBug\Http\Middleware\CaptureRequest;
+use LaraBug\Commands\SecurityPostureCommand;
 use LaraBug\Logger\LaraBugDeprecationHandler;
 use Illuminate\Foundation\Bus\PendingDispatch;
 use Illuminate\Contracts\Debug\ExceptionHandler;
@@ -76,6 +78,7 @@ class ServiceProvider extends BaseServiceProvider
             ScanCommand::class,
             QueueDepthCommand::class,
             FlushCommand::class,
+            SecurityPostureCommand::class,
         ]);
 
         $this->mapLaraBugApiRoutes();
@@ -189,6 +192,24 @@ class ServiceProvider extends BaseServiceProvider
                     ->command('larabug:flush')
                     ->everyMinute()
                     ->when(fn () => RetryBuffer::fromConfig()?->hasEntries() ?? false);
+            });
+        }
+
+        // The security posture, once a day and on the first run after the
+        // application changed. Asked every minute before the scheduler starts
+        // a process, so a minute with nothing due costs a few cache reads. A
+        // cache that forgets between processes cannot tell what changed, so
+        // there it is sent once a day. On one server, because the cache that
+        // remembers the last snapshot is shared between them.
+        if (PostureSchedule::enabled() && PostureSchedule::reports()) {
+            $this->app->booted(function () {
+                $event = $this->app->make(Schedule::class)
+                    ->command('larabug:security-posture')
+                    ->onOneServer();
+
+                PostureSchedule::remembers()
+                    ? $event->everyMinute()->when(fn () => $this->app->make(PostureSchedule::class)->due() !== null)
+                    : $event->daily();
             });
         }
 

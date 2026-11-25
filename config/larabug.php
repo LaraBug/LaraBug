@@ -938,6 +938,36 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Security posture
+    |--------------------------------------------------------------------------
+    |
+    | Once a day, and on the first scheduler run after a deploy or a change to
+    | the configuration it reads, the package sends LaraBug a snapshot of how
+    | this application is set up, so it can flag what is risky in production:
+    | debug mode on, Telescope, Horizon, Pulse or Debugbar open to guests, a
+    | session cookie without its flags, every proxy trusted, CORS open to any
+    | origin with credentials, and dev tools loaded.
+    |
+    | Only booleans, names and versions leave the app. Never a configured
+    | value: no keys, paths, origins or addresses. Run
+    | `php artisan larabug:security-posture --show` to see exactly what is
+    | sent. Runs from the scheduler, so it needs `schedule:run`, and like
+    | everything else only in the environments listed above.
+    |
+    */
+    'security' => [
+        'posture' => [
+            /*
+            | Set LB_SECURITY_POSTURE=false to stop sending it, or true to send
+            | it from local and testing environments too.
+            | Default: on, except in the local and testing environments
+            */
+            'enabled' => env('LB_SECURITY_POSTURE'),
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Logs
     |--------------------------------------------------------------------------
     |

@@ -5,9 +5,12 @@ namespace LaraBug\Tests;
 use LaraBug\Console\CommandBuffer;
 use LaraBug\Console\CommandListeners;
 use PHPUnit\Framework\Attributes\Test;
-use PHPUnit\Framework\Attributes\DataProvider;
+use Illuminate\Console\Scheduling\Event;
 use LaraBug\Console\ScheduledTaskBuffer;
+use Illuminate\Console\Scheduling\Schedule;
 use LaraBug\Console\ScheduledTaskListeners;
+use PHPUnit\Framework\Attributes\DataProvider;
+use Orchestra\Testbench\Attributes\DefineEnvironment;
 
 class ScheduledTaskMonitoringTest extends TestCase
 {
@@ -183,6 +186,46 @@ class ScheduledTaskMonitoringTest extends TestCase
             'cve scan' => ['larabug:scan'],
             'with options' => ['larabug:queue-depth --show'],
         ];
+    }
+
+    #[Test]
+    #[DefineEnvironment('scheduleEveryOwnCommand')]
+    public function every_task_the_package_schedules_is_left_out()
+    {
+        $events = collect($this->app->make(Schedule::class)->events())
+            ->filter(fn (Event $event) => str_contains((string) $event->command, 'larabug:'));
+
+        $this->assertEqualsCanonicalizing(
+            ['larabug:flush', 'larabug:queue-depth', 'larabug:scan', 'larabug:security-posture'],
+            $events->map(fn (Event $event) => trim(strstr((string) $event->command, 'larabug:')))->values()->all(),
+        );
+
+        $buffer = $this->taskBuffer();
+        $listeners = new ScheduledTaskListeners($buffer);
+
+        foreach ($events as $event) {
+            $listeners->onScheduledTaskSkipped($this->taskEvent($event));
+
+            $listeners->onScheduledTaskStarting($this->taskEvent($event));
+            $listeners->onScheduledTaskFinished($this->taskEvent($event, 0.1));
+        }
+
+        $this->assertCount(0, $buffer->records);
+    }
+
+    protected function scheduleEveryOwnCommand($app): void
+    {
+        $app['env'] = 'production';
+
+        $app['config']->set([
+            'app.env' => 'production',
+            'larabug.environments' => ['production'],
+            'larabug.cve.enabled' => true,
+            'larabug.cve.trigger' => 'schedule',
+            'larabug.jobs.depth.enabled' => true,
+            'larabug.retry_buffer.schedule' => true,
+            'larabug.security.posture.enabled' => true,
+        ]);
     }
 
     #[Test]
