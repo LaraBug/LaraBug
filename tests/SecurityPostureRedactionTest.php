@@ -197,7 +197,8 @@ class SecurityPostureRedactionTest extends TestCase
             'taken_at' => '/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/',
             'php' => '/^'.preg_quote(PHP_VERSION, '/').'$/',
             'laravel' => '/^'.preg_quote(\Illuminate\Foundation\Application::VERSION, '/').'$/',
-            'sdk' => '/^[\w.\-+]+$/',
+            // Whatever Composer calls this package, `dev-<branch>` on a branch checkout.
+            'sdk' => '/^'.preg_quote(\LaraBug\Support\SdkVersion::version(), '/').'$/',
             'checks.dev_packages.loaded.*.version' => '/^v?\d+\.\d+\.\d+$/',
         ];
 
