@@ -15,19 +15,21 @@ use LaraBug\Security\InstalledPackages;
 class DevPackagesCheck implements PostureCheck
 {
     /**
-     * Package name => the service provider that means it is loaded.
+     * The service provider that means a tool is loaded => the packages it
+     * ships in. Debugbar 4 has its Fruitcake classes in both its new package
+     * and its old name, which is still the one most applications require.
      *
-     * @var array<string, class-string>
+     * @var array<class-string, array<int, string>>
      */
     protected array $devTools = [
-        'spatie/laravel-ignition' => 'Spatie\LaravelIgnition\IgnitionServiceProvider',
-        'facade/ignition' => 'Facade\Ignition\IgnitionServiceProvider',
-        'barryvdh/laravel-debugbar' => 'Barryvdh\Debugbar\ServiceProvider',
-        'fruitcake/laravel-debugbar' => 'Fruitcake\LaravelDebugbar\ServiceProvider',
-        'itsgoingd/clockwork' => 'Clockwork\Support\Laravel\ClockworkServiceProvider',
-        'spatie/laravel-web-tinker' => 'Spatie\WebTinker\WebTinkerServiceProvider',
-        'beyondcode/laravel-query-detector' => 'BeyondCode\QueryDetector\QueryDetectorServiceProvider',
-        'laravel/dusk' => 'Laravel\Dusk\DuskServiceProvider',
+        'Spatie\LaravelIgnition\IgnitionServiceProvider' => ['spatie/laravel-ignition'],
+        'Facade\Ignition\IgnitionServiceProvider' => ['facade/ignition'],
+        'Fruitcake\LaravelDebugbar\ServiceProvider' => ['barryvdh/laravel-debugbar', 'fruitcake/laravel-debugbar'],
+        'Barryvdh\Debugbar\ServiceProvider' => ['barryvdh/laravel-debugbar'],
+        'Clockwork\Support\Laravel\ClockworkServiceProvider' => ['itsgoingd/clockwork'],
+        'Spatie\WebTinker\WebTinkerServiceProvider' => ['spatie/laravel-web-tinker'],
+        'BeyondCode\QueryDetector\QueryDetectorServiceProvider' => ['beyondcode/laravel-query-detector'],
+        'Laravel\Dusk\DuskServiceProvider' => ['laravel/dusk'],
     ];
 
     public function __construct(protected readonly InstalledPackages $packages)
@@ -41,12 +43,14 @@ class DevPackagesCheck implements PostureCheck
     {
         $loaded = [];
 
-        foreach ($this->devTools as $package => $provider) {
+        foreach ($this->devTools as $provider => $packages) {
             if (app()->getProviders($provider) === []) {
                 continue;
             }
 
-            $loaded[] = [
+            $package = $this->installedOf($packages);
+
+            $loaded[$package] = [
                 'package' => $package,
                 'version' => $this->packages->version($package),
             ];
@@ -54,7 +58,23 @@ class DevPackagesCheck implements PostureCheck
 
         return [
             'composer_dev_installed' => $this->packages->devDependenciesInstalled(),
-            'loaded' => $loaded,
+            'loaded' => array_values($loaded),
         ];
+    }
+
+    /**
+     * The one of these packages Composer installed, the first when none is.
+     *
+     * @param  array<int, string>  $packages
+     */
+    protected function installedOf(array $packages): string
+    {
+        foreach ($packages as $package) {
+            if ($this->packages->has($package)) {
+                return $package;
+            }
+        }
+
+        return $packages[0];
     }
 }

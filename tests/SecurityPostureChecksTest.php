@@ -249,6 +249,31 @@ class SecurityPostureChecksTest extends TestCase
     }
 
     #[Test]
+    public function debugbar_4_is_named_after_the_package_composer_installed_it_as()
+    {
+        $this->packages(['barryvdh/laravel-debugbar' => 'v4.4.0']);
+
+        $this->app->register(\Fruitcake\LaravelDebugbar\ServiceProvider::class);
+
+        $this->assertSame([['package' => 'barryvdh/laravel-debugbar', 'version' => 'v4.4.0']], $this->check('dev_packages')['loaded']);
+
+        $this->packages(['fruitcake/laravel-debugbar' => 'v4.4.0']);
+
+        $this->assertSame([['package' => 'fruitcake/laravel-debugbar', 'version' => 'v4.4.0']], $this->check('dev_packages')['loaded']);
+    }
+
+    #[Test]
+    public function a_package_loaded_through_two_providers_is_listed_once()
+    {
+        $this->packages(['barryvdh/laravel-debugbar' => 'v4.4.0']);
+
+        $this->app->register(\Fruitcake\LaravelDebugbar\ServiceProvider::class);
+        $this->app->register(\Barryvdh\Debugbar\ServiceProvider::class);
+
+        $this->assertCount(1, $this->check('dev_packages')['loaded']);
+    }
+
+    #[Test]
     public function no_dev_packages_loaded_is_reported_as_an_empty_list()
     {
         $this->packages(['spatie/laravel-ignition' => '2.9.1'], devInstalled: false);
