@@ -7,7 +7,8 @@ use Throwable;
 /**
  * The "do not send until" clock, kept per stream.
  *
- * The server meters two limits apart: issues (exceptions and CVE findings)
+ * The server meters two limits apart: issues (exceptions, CVE findings and
+ * security posture snapshots)
  * and telemetry (requests, queries, logs, cache, mail, queue jobs, queue depth,
  * commands and scheduled tasks). It refuses them independently with a 402,
  * because an application that has reached its telemetry limit must still be
@@ -38,7 +39,7 @@ use Throwable;
  */
 class LimitBackoff
 {
-    /** Exceptions and CVE findings. */
+    /** Exceptions, CVE findings and security posture snapshots. */
     public const ISSUES = 'issues';
 
     /** Requests, queries, logs, cache, mail, queue jobs, queue depth, commands, scheduled tasks. */

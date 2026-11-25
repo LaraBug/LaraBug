@@ -54,6 +54,13 @@ class RetryBuffer
      */
     protected static array $unbufferedTypes = ['cve_scan', 'queue_depth_batch'];
 
+    /**
+     * Payload types that carry a type but count against the issues limit.
+     *
+     * @var array<int, string>
+     */
+    protected static array $issueTypes = ['security_posture'];
+
     public function __construct(
         protected readonly string $path,
         protected readonly int $maxEvents = 500,
@@ -560,13 +567,18 @@ class RetryBuffer
 
     /**
      * Which limit an event counts against: exceptions are sent without a
-     * type, every telemetry batch names one.
+     * type, every telemetry batch names one. A security posture snapshot
+     * names one too, but the server meters it with the issues it opens.
      *
      * @param  array<string, mixed>  $payload
      */
     protected function streamOf(array $payload): string
     {
-        return isset($payload['type']) ? LimitBackoff::TELEMETRY : LimitBackoff::ISSUES;
+        if (! isset($payload['type']) || in_array($payload['type'], static::$issueTypes, true)) {
+            return LimitBackoff::ISSUES;
+        }
+
+        return LimitBackoff::TELEMETRY;
     }
 
     protected function writtenAt(string $file): int

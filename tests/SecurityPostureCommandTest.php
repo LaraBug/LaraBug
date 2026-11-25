@@ -277,12 +277,12 @@ class SecurityPostureCommandTest extends TestCase
     }
 
     #[Test]
-    public function it_sends_nothing_while_telemetry_is_on_hold()
+    public function it_sends_nothing_while_issues_are_on_hold()
     {
-        LimitBackoff::hold(LimitBackoff::TELEMETRY, 300);
+        LimitBackoff::hold(LimitBackoff::ISSUES, 300);
 
         $this->artisan('larabug:security-posture')
-            ->expectsOutput('[LaraBug] Telemetry is on hold for now, nothing sent')
+            ->expectsOutput('[LaraBug] Issues are on hold for now, nothing sent')
             ->assertExitCode(0);
 
         $this->client->assertRequestsSent(0);
@@ -291,10 +291,10 @@ class SecurityPostureCommandTest extends TestCase
     #[Test]
     public function a_reached_limit_holds_the_next_snapshot_until_it_lifts()
     {
-        $this->client->willRefuse(LimitBackoff::TELEMETRY, '600');
+        $this->client->willRefuse(LimitBackoff::ISSUES, '600');
 
         $this->artisan('larabug:security-posture')
-            ->expectsOutput('[LaraBug] The telemetry limit is reached, so the snapshot was refused')
+            ->expectsOutput('[LaraBug] The issue limit is reached, so the snapshot was refused')
             ->assertExitCode(0);
 
         $this->assertNull($this->schedule()->due());
@@ -326,10 +326,51 @@ class SecurityPostureCommandTest extends TestCase
         $this->client->willRespondWith(422);
 
         $this->artisan('larabug:security-posture')
-            ->expectsOutput('[LaraBug] The server does not accept security posture snapshots yet')
+            ->expectsOutput('[LaraBug] The server did not accept the snapshot (422), it is sent again tomorrow')
             ->assertExitCode(0);
 
         $this->assertNull($this->schedule()->due());
+    }
+
+    #[Test]
+    public function a_telemetry_hold_does_not_stop_the_snapshot()
+    {
+        LimitBackoff::hold(LimitBackoff::TELEMETRY, 300);
+
+        $this->artisan('larabug:security-posture')->expectsOutput('[LaraBug] Sent the security posture');
+
+        $this->client->assertRequestsSent(1);
+    }
+
+    #[Test]
+    public function an_accepted_snapshot_is_reported_as_sent()
+    {
+        $this->client->willAnswer(new Response(202, [], json_encode(['accepted' => true, 'snapshot_id' => 12])));
+
+        $this->artisan('larabug:security-posture')->expectsOutput('[LaraBug] Sent the security posture');
+
+        $this->assertNull($this->schedule()->due());
+    }
+
+    #[Test]
+    public function a_plan_without_security_insights_is_said_and_not_asked_again_until_tomorrow()
+    {
+        $this->client->willAnswer(new Response(200, [], json_encode(['skipped' => 'plan'])));
+
+        $this->artisan('larabug:security-posture')
+            ->expectsOutput('[LaraBug] Sent the security posture, but this project\'s plan does not include security insights')
+            ->assertExitCode(0);
+
+        $this->assertNull($this->schedule()->due());
+    }
+
+    #[Test]
+    public function a_snapshot_from_outside_production_is_said_to_be_stored_without_checks()
+    {
+        $this->client->willAnswer(new Response(200, [], json_encode(['skipped' => 'not_production'])));
+
+        $this->artisan('larabug:security-posture')
+            ->expectsOutput('[LaraBug] Sent the security posture, its checks only run against production');
     }
 
     #[Test]
@@ -344,7 +385,8 @@ class SecurityPostureCommandTest extends TestCase
         $kept = glob($this->retryBufferPath.'/*.json');
 
         $this->assertCount(1, $kept);
-        $this->assertStringEndsWith('-telemetry.json', $kept[0]);
+        // Metered with the issues it opens, so it is kept as long as an exception.
+        $this->assertStringEndsWith('-issues.json', $kept[0]);
         $this->assertSame('security_posture', json_decode(file_get_contents($kept[0]), true)['type']);
 
         $this->assertNull($this->schedule()->due());

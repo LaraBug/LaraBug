@@ -53,8 +53,9 @@ class SecurityPostureCommand extends Command
             return;
         }
 
-        if (! LimitBackoff::allows(LimitBackoff::TELEMETRY)) {
-            $this->warn('[LaraBug] Telemetry is on hold for now, nothing sent');
+        // Metered with the issues it opens, the way a CVE scan is.
+        if (! LimitBackoff::allows(LimitBackoff::ISSUES)) {
+            $this->warn('[LaraBug] Issues are on hold for now, nothing sent');
 
             return;
         }
@@ -80,18 +81,18 @@ class SecurityPostureCommand extends Command
             return;
         }
 
-        if (LimitBackoff::record($response, LimitBackoff::TELEMETRY)) {
+        if (LimitBackoff::record($response, LimitBackoff::ISSUES)) {
             // As long as the backoff asks, the server may name either stream,
             // and never less than a minute: the scheduler asks every minute.
             $schedule->holdFor(max(
                 60,
-                (LimitBackoff::resumesAt(LimitBackoff::TELEMETRY) ?? 0) - time(),
                 (LimitBackoff::resumesAt(LimitBackoff::ISSUES) ?? 0) - time(),
+                (LimitBackoff::resumesAt(LimitBackoff::TELEMETRY) ?? 0) - time(),
             ));
 
             $this->warn(LimitBackoff::isRateLimitResponse($response)
                 ? '[LaraBug] This project is sending faster than its plan\'s rate limit, so the snapshot was refused'
-                : '[LaraBug] The telemetry limit is reached, so the snapshot was refused');
+                : '[LaraBug] The issue limit is reached, so the snapshot was refused');
 
             return;
         }
@@ -103,7 +104,7 @@ class SecurityPostureCommand extends Command
         $status = $response->getStatusCode();
 
         if ($status === 422) {
-            $this->comment('[LaraBug] The server does not accept security posture snapshots yet');
+            $this->comment('[LaraBug] The server did not accept the snapshot (422), it is sent again tomorrow');
 
             return;
         }
@@ -114,6 +115,12 @@ class SecurityPostureCommand extends Command
             return;
         }
 
-        $this->info('[LaraBug] Sent the security posture');
+        $skipped = json_decode((string) $response->getBody(), true)['skipped'] ?? null;
+
+        match ($skipped) {
+            'plan' => $this->comment('[LaraBug] Sent the security posture, but this project\'s plan does not include security insights'),
+            'not_production' => $this->info('[LaraBug] Sent the security posture, its checks only run against production'),
+            default => $this->info('[LaraBug] Sent the security posture'),
+        };
     }
 }
