@@ -6,6 +6,13 @@ All notable changes to `larabug` will be documented in this file
 
 - A security posture snapshot is sent once a day, and on the first scheduler run after a deploy or a change to the configuration it reads, as a new `security_posture` payload. It says whether debug mode is on, whether Telescope, Horizon, Pulse or Debugbar let a guest in (judged from their routes, middleware and gates, without requesting them), which flags the session cookie has, whether every proxy is trusted, whether CORS allows any origin and credentials, and which development tools are loaded. Only booleans, names and versions are sent, never a configured value. `php artisan larabug:security-posture --show` prints it. It goes through the usual transport and is metered like a CVE scan, against the issue limit: it respects that backoff, and the retry buffer keeps it as long as an exception. It is off in the `local` and `testing` environments unless `LB_SECURITY_POSTURE` (`larabug.security.posture.enabled`) is set, and never throws into the application.
 - No command in the `larabug:` namespace is reported as a scheduled task any more. `larabug:flush` already was left out; `larabug:queue-depth`, `larabug:scan` and anything the package schedules later now are too, so the package's own housekeeping no longer shows up in the application's schedule, counts against its quota or raises a stopped schedule. Each still counts as in flight while it runs, so it is not reported as a command either. Run by hand, outside the scheduler, they are still recorded as commands.
+
+## 4.0.3 - 2026-11-21
+
+- The package no longer reports its own `larabug:flush` as a scheduled task. It runs every minute behind a check that is false while the retry buffer is empty, so every skip used to send a record: about 1,440 a day per application, counted against the quota and shown as an all-grey row in Scheduled tasks. It is still not reported as a command either.
+
+## 4.0.2 - 2026-11-13
+
 - Every request to the LaraBug server now carries an `X-LaraBug-Sdk` header with the SDK, PHP and Laravel versions as product tokens, such as `larabug-php/4.0.2 php/8.4.27 laravel/13.42.0`. That covers exceptions, every telemetry stream, queue depth samples, CVE scans and the retry buffer's flush. The SDK version comes from Composer and is `unknown` when Composer does not list the package. It is worked out once per process.
 - A flushed event carries the version that sent it. The retry buffer still keeps the body alone, so an event kept by an older SDK goes out with the current header.
 - The `User-Agent` is now `LaraBug-Package/<sdk version>` instead of `LaraBug-Package`.
