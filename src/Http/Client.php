@@ -112,6 +112,24 @@ class Client
     }
 
     /**
+     * Report the application's security posture: how it is configured, as
+     * booleans, names and versions, never a configured value.
+     *
+     * @param  array<string, mixed>  $snapshot
+     */
+    public function reportSecurityPosture(array $snapshot): ?ResponseInterface
+    {
+        return $this->send([
+            'type' => 'security_posture',
+            'project' => $this->project,
+            'posture' => $snapshot,
+        ], [
+            // Sent from the scheduler, which should not wait long on us.
+            'timeout' => 5,
+        ]);
+    }
+
+    /**
      * Send a payload the retry buffer kept, byte for byte as it was kept.
      * Never kept again: the buffer decides what a failure means for it.
      *

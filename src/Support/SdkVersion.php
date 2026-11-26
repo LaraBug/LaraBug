@@ -24,9 +24,14 @@ class SdkVersion
     {
         return static::$header ??= implode(' ', [
             'larabug-php/'.static::version(),
-            'php/'.PHP_VERSION,
-            'laravel/'.static::laravelVersion(),
+            'php/'.static::php(),
+            'laravel/'.static::laravel(),
         ]);
+    }
+
+    public static function php(): string
+    {
+        return PHP_VERSION;
     }
 
     /** The installed version of this package, as Composer has it. */
@@ -52,7 +57,7 @@ class SdkVersion
         }
     }
 
-    protected static function laravelVersion(): string
+    public static function laravel(): string
     {
         if (! class_exists(Application::class)) {
             return 'unknown';

@@ -66,6 +66,20 @@ LB_RETRY_BUFFER_MAX_AGE=86400
 
 The path defaults to `storage/larabug/retry-buffer` and the age is in seconds. Past the age bound an event is dropped. Past the count or size bound the oldest telemetry goes first, and exceptions only once no telemetry is left. Every server keeps its own buffer, so the path has to be writable by both the web server and the user the scheduler runs as.
 
+## Security posture
+
+Once a day, and on the first scheduler run after a deploy or a change to the configuration it reads, the SDK sends LaraBug a snapshot of how your application is set up, so it can flag what is risky in production: debug mode on, Telescope, Horizon, Pulse or Debugbar reachable without signing in, a session cookie without `secure`, `http_only` or `same_site`, every proxy trusted, CORS allowing any origin together with credentials, and development tools such as Ignition or Dusk loaded. The dashboards are judged from their routes, middleware and gates, never by requesting them.
+
+Only booleans, names from fixed sets and versions leave your application. No configured value is ever sent: no keys, paths, origins or IP addresses. Run `php artisan larabug:security-posture --show` to see exactly what would be sent.
+
+It runs from the scheduler, so it needs `schedule:run`, and only in the environments listed in `larabug.environments`. It is off in the `local` and `testing` environments unless you switch it on:
+
+```
+LB_SECURITY_POSTURE=false
+```
+
+Set it to `true` to send it from every environment you report from, or `false` to stop it altogether.
+
 ## SDK version
 
 Every request the SDK sends carries an `X-LaraBug-Sdk` header naming the SDK, PHP and Laravel versions, for example `larabug-php/4.0.2 php/8.4.27 laravel/13.42.0`. The SDK version is read from Composer and is `unknown` when Composer does not list the package. An event flushed from the retry buffer carries the version that sent it, not the one that kept it.

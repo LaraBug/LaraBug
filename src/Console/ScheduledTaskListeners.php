@@ -150,20 +150,24 @@ class ScheduledTaskListeners
 
     /**
      * Whether this is a task the package schedules for itself rather than one
-     * the application wrote. `larabug:flush` runs every minute behind a check
-     * that is false whenever the retry buffer is empty, which is nearly
-     * always, so reporting it sent a skip a minute: about 1,440 a day, counted
-     * against the application's quota and listed as part of its schedule.
+     * the application wrote: anything in the `larabug:` namespace.
      *
-     * It still counts as in flight while it runs, so the command listener
+     * None of them is part of the application's schedule. `larabug:flush` runs
+     * every minute behind a check that is false whenever the retry buffer is
+     * empty, so reporting it sent a skip a minute, about 1,440 a day counted
+     * against the application's quota. `larabug:queue-depth` showed up as a
+     * schedule that stopped, which is the package's business, not the
+     * application's. `larabug:security-posture` is skipped every minute
+     * nothing changed. The namespace rather than a
+     * list, so a command the package schedules later is left out too.
+     *
+     * Each still counts as in flight while it runs, so the command listener
      * keeps leaving it to the schedule and it is not reported as a command
      * either.
      */
     protected function isOwnTask(mixed $task): bool
     {
-        $name = $this->taskName($task);
-
-        return $name === 'larabug:flush' || str_starts_with($name, 'larabug:flush ');
+        return str_starts_with($this->taskName($task), 'larabug:');
     }
 
     /**

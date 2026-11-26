@@ -98,6 +98,11 @@ class MeteredClient extends \LaraBug\Http\Client
         return $this->answer(['type' => 'queue_depth_batch', 'samples' => $samples]);
     }
 
+    public function reportSecurityPosture(array $snapshot): Response
+    {
+        return $this->answer(['type' => 'security_posture', 'posture' => $snapshot]);
+    }
+
     /**
      * @return array<int, array<string, mixed>>
      */
