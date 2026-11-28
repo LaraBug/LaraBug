@@ -35,10 +35,13 @@ class Dsn
         $this->loginKey = $parsed['user'];
         $this->projectKey = $parsed['pass'];
 
+        // The port is part of where the server is: without it a self-hosted
+        // instance, or a local one, on anything but 80 or 443 is unreachable.
         $this->server = sprintf(
-            '%s://%s%s',
+            '%s://%s%s%s',
             $parsed['scheme'],
             $parsed['host'],
+            isset($parsed['port']) ? ":{$parsed['port']}" : '',
             $parsed['path'] ?? ''
         );
     }
