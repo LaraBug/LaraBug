@@ -60,15 +60,29 @@ class ComposerLockScanner
      */
     public function hash(?string $lockPath = null): ?string
     {
-        $path = $lockPath ?: base_path('composer.lock');
+        $path = $this->path($lockPath);
 
-        if (! is_file($path) || ! is_readable($path)) {
+        if ($path === null) {
             return null;
         }
 
         $hash = hash_file('sha256', $path);
 
         return $hash === false ? null : $hash;
+    }
+
+    /**
+     * The lockfile scan() and hash() read, null when there is none to read.
+     */
+    public function path(?string $lockPath = null): ?string
+    {
+        $path = $lockPath ?: base_path('composer.lock');
+
+        if (! is_file($path) || ! is_readable($path)) {
+            return null;
+        }
+
+        return $path;
     }
 
     /**

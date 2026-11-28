@@ -8,6 +8,7 @@ All notable changes to `larabug` will be documented in this file
 - Every request to the LaraBug server now carries an `X-LaraBug-Sdk` header with the SDK, PHP and Laravel versions as product tokens, such as `larabug-php/4.0.2 php/8.4.27 laravel/13.42.0`. That covers exceptions, every telemetry stream, queue depth samples, CVE scans and the retry buffer's flush. The SDK version comes from Composer and is `unknown` when Composer does not list the package. It is worked out once per process.
 - A flushed event carries the version that sent it. The retry buffer still keeps the body alone, so an event kept by an older SDK goes out with the current header.
 - The `User-Agent` is now `LaraBug-Package/<sdk version>` instead of `LaraBug-Package`.
+- The CVE check no longer reads the lockfiles after every request. Its once per process flag does not survive a request under PHP-FPM, so `composer.lock` and the JavaScript lockfile were hashed after every response, with the worker still held. What `stat` says about the lockfiles is now remembered in `storage/larabug/cve-settled` for as long as nothing can be due for them, which leaves a `stat` per lockfile and the read of that one small file per request, and no cache call at all. A lockfile that changes is still noticed on the next request, and one written within the last second is still hashed, since modification times count in whole seconds.
 
 ## 4.0.1 - 2026-11-13
 
