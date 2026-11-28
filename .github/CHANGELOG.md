@@ -2,7 +2,7 @@
 
 All notable changes to `larabug` will be documented in this file
 
-## 4.1.0 - 2026-11-28
+## 4.0.4 - 2026-11-28
 
 - A LaraBug server in trouble is given one worker at a time instead of all of them. A send holds its PHP-FPM worker until the server has answered, so a server that took seconds to answer took the whole pool with it, and the 30 second pause after an unreachable server ended with every process finding out for itself at once. A server that takes 2 seconds or longer to answer (`retry_buffer.slow_answer`, `LB_RETRY_BUFFER_SLOW_ANSWER`, 0 to switch it off) now pauses sending for 30 seconds like one that cannot be reached, with new events going straight to the retry buffer. When a pause runs out, one process sends while the others keep buffering until it has an answer in good time. A flush stops at a slow answer too, the CVE scan waits for the pause to end, and connecting to the server is capped at 3 seconds.
 - The CVE check no longer reads the lockfiles after every request. Its once per process flag does not survive a request under PHP-FPM, so `composer.lock` and the JavaScript lockfile were hashed after every response, with the worker still held. What `stat` says about the lockfiles is now remembered in `storage/larabug/cve-settled` for as long as nothing can be due for them, which leaves a `stat` per lockfile and the read of that one small file per request, and no cache call at all. A lockfile that changes is still noticed on the next request, and one written within the last second is still hashed, since modification times count in whole seconds.
