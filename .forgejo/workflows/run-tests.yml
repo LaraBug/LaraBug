@@ -56,7 +56,39 @@ jobs:
       # not GitHub's, so extensions that need system libraries (imagick, gd,
       # intl, soap) would have to be built here for nothing. No coverage
       # driver either: the suite runs without coverage.
+      #
+      # Every job installs PHP at the same moment on the one runner, and now and
+      # then that install fails before any test runs. Retried twice, after a
+      # pause, rather than failing the job on something the code did not do.
       - name: Setup PHP
+        id: setup-php
+        continue-on-error: true
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: dom, curl, libxml, mbstring, zip, pdo, sqlite, pdo_sqlite
+          coverage: none
+
+      - name: Wait before setting up PHP again
+        if: steps.setup-php.outcome == 'failure'
+        run: sleep 30
+
+      - name: Setup PHP (second attempt)
+        id: setup-php-again
+        if: steps.setup-php.outcome == 'failure'
+        continue-on-error: true
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: dom, curl, libxml, mbstring, zip, pdo, sqlite, pdo_sqlite
+          coverage: none
+
+      - name: Wait before setting up PHP a last time
+        if: steps.setup-php-again.outcome == 'failure'
+        run: sleep 60
+
+      - name: Setup PHP (last attempt)
+        if: steps.setup-php-again.outcome == 'failure'
         uses: shivammathur/setup-php@v2
         with:
           php-version: ${{ matrix.php }}
