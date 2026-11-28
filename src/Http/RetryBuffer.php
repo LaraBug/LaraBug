@@ -30,6 +30,14 @@ use GuzzleHttp\Exception\TransferException;
  * push out the exceptions that happened during it. The stream is in the file
  * name, so trimming never has to read an event.
  *
+ * It is also what keeps a server in trouble from holding the application's
+ * workers. A send holds its worker until the server has answered, after the
+ * response under PHP-FPM but with the worker still taken, so a server that
+ * takes seconds to answer takes the pool with it. After a send that got no
+ * answer, or a slow one, every process keeps its events here without sending
+ * for a while, and once that has passed a single process finds out whether
+ * the server is back while the others carry on keeping theirs.
+ *
  * Nothing in here may reach the application. Every public method swallows
  * whatever goes wrong: a buffer that cannot be written loses the event, which
  * is what happened before it existed.
@@ -61,6 +69,7 @@ class RetryBuffer
         protected readonly int $maxAge = 86400,
         protected readonly int $maxPause = 600,
         protected readonly int $unreachablePause = 30,
+        protected readonly float $slowAnswer = 2.0,
     ) {
     }
 
@@ -88,6 +97,7 @@ class RetryBuffer
                 max(1, (int) ($config['max_events'] ?? 500)),
                 max(1, (int) ($config['max_bytes'] ?? 5 * 1024 * 1024)),
                 max(1, (int) ($config['max_age'] ?? 86400)),
+                slowAnswer: max(0.0, (float) ($config['slow_answer'] ?? 2)),
             );
         } catch (Throwable) {
             return null;
@@ -105,12 +115,43 @@ class RetryBuffer
     }
 
     /**
+     * Called before a send. When a pause has run out, nothing says yet that
+     * the server is better, and every process that sends now would hold its
+     * worker until it had found out for itself. So the one that gets here
+     * first puts the pause back for the others and is the only one to send.
+     * handle() lifts it again as soon as the server answers in good time.
+     *
+     * Two processes arriving in the same instant both send. That is two
+     * workers rather than all of them.
+     *
+     * Returns whether this send is that probe.
+     */
+    public function holdOthersBackWhileProbing(): bool
+    {
+        try {
+            $pausedUntil = $this->pausedUntil();
+
+            if ($pausedUntil === 0 || $pausedUntil > time()) {
+                return false;
+            }
+
+            $this->pause($this->unreachablePause);
+
+            return true;
+        } catch (Throwable) {
+            return false;
+        }
+    }
+
+    /**
      * Decide what a send's outcome means for the buffer: keep the payload when
      * the server failed, flush what is waiting when it answered.
      *
      * @param  array<string, mixed>  $payload
+     * @param  float  $seconds  How long the server took to answer.
+     * @param  bool  $probing  Whether this send held the others back, see holdOthersBackWhileProbing().
      */
-    public function handle(array $payload, ?ResponseInterface $response, Client $client): void
+    public function handle(array $payload, ?ResponseInterface $response, Client $client, float $seconds = 0.0, bool $probing = false): void
     {
         try {
             $status = $response?->getStatusCode();
@@ -132,6 +173,19 @@ class RetryBuffer
 
                 $this->pauseFor($response);
 
+                if ($this->isSlow($seconds)) {
+                    $this->pause($this->unreachablePause);
+                }
+
+                return;
+            }
+
+            // It answered, and this event has landed, but every send is
+            // holding a worker for this long. Treated as a server that cannot
+            // be reached: nothing is sent until the pause has passed.
+            if ($this->isSlow($seconds)) {
+                $this->pause($this->unreachablePause);
+
                 return;
             }
 
@@ -139,6 +193,14 @@ class RetryBuffer
                 $this->resume();
 
                 $this->flushSoon($client);
+
+                return;
+            }
+
+            // A refusal in good time is still a server that answers. The pause
+            // this send put back for the others has nothing left to wait for.
+            if ($probing) {
+                $this->resume();
             }
         } catch (Throwable) {
             //
@@ -357,6 +419,8 @@ class RetryBuffer
 
             $attempts++;
 
+            $startedAt = hrtime(true);
+
             try {
                 $response = $client->resend($json);
             } catch (TransferException) {
@@ -392,11 +456,18 @@ class RetryBuffer
 
             if ($status >= 200 && $status < 300) {
                 $sent++;
-
-                continue;
+            } else {
+                $discarded++;
             }
 
-            $discarded++;
+            // This one landed, but fifty more at this pace would hold the
+            // worker for minutes. The rest waits for the server to recover.
+            if ($this->isSlow((hrtime(true) - $startedAt) / 1_000_000_000)) {
+                $this->pause($this->unreachablePause);
+                $stoppedBy = FlushStop::Slow;
+
+                break;
+            }
         }
 
         return new FlushResult($sent, $discarded, $this->count(), $stoppedBy);
@@ -482,6 +553,11 @@ class RetryBuffer
         }
 
         @file_put_contents("{$this->path}/.retry-after", (string) $until, LOCK_EX);
+    }
+
+    protected function isSlow(float $seconds): bool
+    {
+        return $this->slowAnswer > 0 && $seconds >= $this->slowAnswer;
     }
 
     protected function resume(): void

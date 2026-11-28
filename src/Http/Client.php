@@ -156,6 +156,10 @@ class Client
             return null;
         }
 
+        $probing = $retryBuffer?->holdOthersBackWhileProbing() ?? false;
+
+        $startedAt = hrtime(true);
+
         try {
             $response = $this->post(['json' => $payload, ...$options]);
         } catch (TransferException) {
@@ -166,7 +170,9 @@ class Client
             return null;
         }
 
-        $retryBuffer?->handle($payload, $response, $this);
+        $seconds = (hrtime(true) - $startedAt) / 1_000_000_000;
+
+        $retryBuffer?->handle($payload, $response, $this, $seconds, $probing);
 
         return $response;
     }
@@ -230,6 +236,9 @@ class Client
     {
         return $this->client ??= new \GuzzleHttp\Client([
             'timeout' => 15,
+            // Without one, a server that drops packets rather than refusing
+            // them costs the whole timeout before a byte has been sent.
+            'connect_timeout' => 3,
         ]);
     }
 
