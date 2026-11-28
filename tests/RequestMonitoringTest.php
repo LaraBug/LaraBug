@@ -629,7 +629,7 @@ class RequestMonitoringTest extends TestCase
     public function it_records_cache_operations_with_the_key_templated()
     {
         $monitor = new RequestMonitor();
-        $listeners = new RequestListeners($monitor, new Sampler());
+        $listeners = new RequestListeners($monitor, $this->samplerThatRecords());
 
         $listeners->onCacheHit($this->cacheEvent('user:42:profile', 'redis'));
         $listeners->onCacheMissed($this->cacheEvent('config:mail', 'redis'));
@@ -657,7 +657,7 @@ class RequestMonitoringTest extends TestCase
     public function two_keys_that_differ_only_by_id_become_one_cache_group()
     {
         $monitor = new RequestMonitor();
-        $listeners = new RequestListeners($monitor, new Sampler());
+        $listeners = new RequestListeners($monitor, $this->samplerThatRecords());
 
         $listeners->onCacheHit($this->cacheEvent('user:8213:profile', 'redis'));
         $listeners->onCacheHit($this->cacheEvent('user:44:profile', 'redis'));
@@ -684,6 +684,57 @@ class RequestMonitoringTest extends TestCase
         $record = $monitor->toArray(Request::create('/x', 'GET'), new Response('', 200), 1.0);
 
         $this->assertCount(2, $record['cache']);
+    }
+
+    #[Test]
+    public function a_request_that_is_not_recorded_counts_its_cache_calls_without_keeping_them()
+    {
+        config(['larabug.requests.sample_rate' => 0.0]);
+
+        $sampler = new Sampler();
+        $sampler->decide(Request::create('/x', 'GET'));
+
+        $monitor = new RequestMonitor();
+        $listeners = new RequestListeners($monitor, $sampler);
+
+        $listeners->onCacheHit($this->cacheEvent('user:42:profile', 'redis'));
+        $listeners->onCacheMissed($this->cacheEvent('config:mail', 'redis'));
+        $listeners->onCacheWritten($this->cacheEvent('user:42:profile', 'redis', 3600));
+
+        $record = $monitor->toArray(Request::create('/x', 'GET'), new Response('', 200), 1.0);
+
+        $this->assertSame(1, $record['cache_hits']);
+        $this->assertSame(1, $record['cache_misses']);
+        $this->assertSame([], $record['cache']);
+    }
+
+    #[Test]
+    public function cache_calls_past_the_cap_are_counted_without_being_kept()
+    {
+        config(['larabug.requests.max_cache_events' => 2]);
+
+        $monitor = new RequestMonitor();
+        $listeners = new RequestListeners($monitor, $this->samplerThatRecords());
+
+        foreach (range(1, 5) as $id) {
+            $listeners->onCacheHit($this->cacheEvent("user:{$id}:profile", 'redis'));
+        }
+
+        $record = $monitor->toArray(Request::create('/x', 'GET'), new Response('', 200), 1.0);
+
+        $this->assertSame(5, $record['cache_hits']);
+        $this->assertCount(2, $record['cache']);
+        $this->assertFalse($monitor->hasRoomForCacheEvents());
+    }
+
+    private function samplerThatRecords(): Sampler
+    {
+        config(['larabug.requests.sample_rate' => 1.0]);
+
+        $sampler = new Sampler();
+        $sampler->decide(Request::create('/x', 'GET'));
+
+        return $sampler;
     }
 
     private function cacheEvent(string $key, string $store, ?int $seconds = null): object
