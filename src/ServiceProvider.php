@@ -29,7 +29,6 @@ use LaraBug\Requests\PropagateTrace;
 use LaraBug\Requests\QueryExplainer;
 use LaraBug\Requests\RequestMonitor;
 use Illuminate\Contracts\Http\Kernel;
-use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\Facades\Route;
 use LaraBug\Console\CommandListeners;
 use LaraBug\Livewire\LivewireContext;
@@ -46,9 +45,11 @@ use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Queue\Events\WorkerStopping;
 use LaraBug\Console\ScheduledTaskListeners;
 use LaraBug\Http\Middleware\CaptureRequest;
+use Illuminate\View\Compilers\BladeCompiler;
 use LaraBug\Logger\LaraBugDeprecationHandler;
 use Illuminate\Foundation\Bus\PendingDispatch;
 use Illuminate\Contracts\Debug\ExceptionHandler;
+use Illuminate\Contracts\Foundation\CachesRoutes;
 use Illuminate\Http\Client\Factory as HttpFactory;
 use Illuminate\Support\ServiceProvider as BaseServiceProvider;
 
@@ -65,7 +66,11 @@ class ServiceProvider extends BaseServiceProvider
             ]);
         }
 
-        $this->app['view']->addNamespace('larabug', __DIR__ . '/../resources/views');
+        // Everything in here runs on every request, before the application has
+        // done anything, so nothing is resolved for a request that may never
+        // use it: the views and the Blade directive wait for a view to be
+        // rendered, the scheduled commands for the schedule to be asked for.
+        $this->loadViewsFrom(__DIR__ . '/../resources/views', 'larabug');
 
         if (class_exists(AliasLoader::class)) {
             AliasLoader::getInstance()->alias('LaraBug', Facade::class);
@@ -80,7 +85,9 @@ class ServiceProvider extends BaseServiceProvider
 
         $this->mapLaraBugApiRoutes();
 
-        Blade::include('larabug::larabug-js-client', 'larabugJavaScriptClient');
+        $this->callAfterResolving('blade.compiler', function (BladeCompiler $blade) {
+            $blade->include('larabug::larabug-js-client', 'larabugJavaScriptClient');
+        });
 
         // Report exceptions without every application having to wire LaraBug
         // into its own exception handler, which is silently forgotten often
@@ -167,8 +174,8 @@ class ServiceProvider extends BaseServiceProvider
         // Released after five minutes rather than a day, so a sampler that died
         // holding the lock does not stop sampling until tomorrow.
         if (config('larabug.jobs.depth.enabled', true)) {
-            $this->app->booted(function () {
-                $this->app->make(Schedule::class)
+            $this->callAfterResolving(Schedule::class, function (Schedule $schedule) {
+                $schedule
                     ->command('larabug:queue-depth')
                     ->everyMinute()
                     ->withoutOverlapping(5)
@@ -184,8 +191,8 @@ class ServiceProvider extends BaseServiceProvider
         // since that mutex is shared between servers through the cache. The
         // buffer's own lock keeps two flushes on one server apart.
         if (config('larabug.retry_buffer.enabled', true) && config('larabug.retry_buffer.schedule', true)) {
-            $this->app->booted(function () {
-                $this->app->make(Schedule::class)
+            $this->callAfterResolving(Schedule::class, function (Schedule $schedule) {
+                $schedule
                     ->command('larabug:flush')
                     ->everyMinute()
                     ->when(fn () => RetryBuffer::fromConfig()?->hasEntries() ?? false);
@@ -216,8 +223,7 @@ class ServiceProvider extends BaseServiceProvider
 
             // Scheduler trigger: safety net for apps without inbound traffic.
             if (in_array($trigger, ['schedule', 'both'], true)) {
-                $this->app->booted(function () {
-                    $schedule = $this->app->make(Schedule::class);
+                $this->callAfterResolving(Schedule::class, function (Schedule $schedule) {
                     $cadence = config('larabug.cve.schedule', 'daily');
 
                     $event = $schedule->command('larabug:scan')
@@ -717,6 +723,12 @@ class ServiceProvider extends BaseServiceProvider
 
     protected function mapLaraBugApiRoutes(): void
     {
+        // The route cache already holds these, and replaces whatever is
+        // registered here once the application has booted.
+        if ($this->app instanceof CachesRoutes && $this->app->routesAreCached()) {
+            return;
+        }
+
         Route::group(
             [
                 'namespace' => '\LaraBug\Http\Controllers',
