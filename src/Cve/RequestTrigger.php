@@ -3,6 +3,7 @@
 namespace LaraBug\Cve;
 
 use LaraBug\Http\Client;
+use LaraBug\Http\RetryBuffer;
 use LaraBug\Support\LimitBackoff;
 use LaraBug\Scanners\NpmLockScanner;
 use LaraBug\Scanners\ComposerLockScanner;
@@ -53,6 +54,13 @@ class RequestTrigger
         $trigger = strtolower((string) config('larabug.cve.trigger', 'both'));
 
         if (! in_array($trigger, ['request', 'both'], true)) {
+            return;
+        }
+
+        // The server could not be reached, or was slow, moments ago. A scan
+        // is never kept in the retry buffer, so it would be sent regardless
+        // and hold this worker for as long as the server takes.
+        if (RetryBuffer::fromConfig()?->isPaused()) {
             return;
         }
 

@@ -112,6 +112,18 @@ class CveRequestTriggerTest extends TestCase
     }
 
     #[Test]
+    public function it_does_nothing_while_the_server_is_being_left_alone()
+    {
+        mkdir($this->retryBufferPath, 0775, true);
+        file_put_contents("{$this->retryBufferPath}/.retry-after", (string) (time() + 30));
+
+        $client = new CveClient();
+        $this->trigger($client)->maybeTrigger();
+
+        $client->assertRequestsSent(0);
+    }
+
+    #[Test]
     public function it_sends_the_lockfile_payload_tagged_as_a_cve_scan()
     {
         $client = new CveClient();

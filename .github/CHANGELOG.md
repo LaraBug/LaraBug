@@ -5,6 +5,7 @@ All notable changes to `larabug` will be documented in this file
 ## Unreleased
 
 - Every request to the LaraBug server now carries an `X-LaraBug-Sdk` header with the SDK, PHP and Laravel versions as product tokens, such as `larabug-php/4.0.2 php/8.4.27 laravel/13.42.0`. That covers exceptions, every telemetry stream, queue depth samples, CVE scans and the retry buffer's flush. The SDK version comes from Composer and is `unknown` when Composer does not list the package. It is worked out once per process.
+- A LaraBug server in trouble is given one worker at a time instead of all of them. A send holds its PHP-FPM worker until the server has answered, so a server that took seconds to answer took the whole pool with it, and the 30 second pause after an unreachable server ended with every process finding out for itself at once. A server that takes 2 seconds or longer to answer (`retry_buffer.slow_answer`, `LB_RETRY_BUFFER_SLOW_ANSWER`, 0 to switch it off) now pauses sending for 30 seconds like one that cannot be reached, with new events going straight to the retry buffer. When a pause runs out, one process sends while the others keep buffering until it has an answer in good time. A flush stops at a slow answer too, the CVE scan waits for the pause to end, and connecting to the server is capped at 3 seconds.
 - A flushed event carries the version that sent it. The retry buffer still keeps the body alone, so an event kept by an older SDK goes out with the current header.
 - The `User-Agent` is now `LaraBug-Package/<sdk version>` instead of `LaraBug-Package`.
 

@@ -547,6 +547,181 @@ class RetryBufferTest extends TestCase
     }
 
     #[Test]
+    public function a_slow_answer_holds_every_send_for_thirty_seconds()
+    {
+        config(['larabug.retry_buffer.slow_answer' => 0.02]);
+
+        $client = $this->client([$this->slowAnswer(new Response(200, [], '{"id":"landed"}'))]);
+
+        $laraBug = new LaraBug($client);
+        $laraBug->handle(new Exception('Held its worker until the answer came'));
+        $laraBug->handle(new Exception('Went straight to the buffer'));
+
+        $this->assertCount(1, $this->sent);
+        $this->assertSame(['Went straight to the buffer'], array_map(
+            fn (array $payload) => $payload['exception']['exception'],
+            $this->kept()
+        ));
+        $this->assertEqualsWithDelta(time() + 30, RetryBuffer::fromConfig()->pausedUntil(), 1);
+    }
+
+    #[Test]
+    public function a_slow_answer_does_not_flush_what_was_kept()
+    {
+        config(['larabug.retry_buffer.slow_answer' => 0.02]);
+
+        $this->writeEntry(time() - 10, ['type' => 'logs_batch', 'number' => 1]);
+
+        $client = $this->client([$this->slowAnswer(new Response(200))]);
+
+        $client->reportCommands([['command' => 'inspire']]);
+
+        $this->assertCount(1, $this->sent);
+        $this->assertCount(1, $this->kept());
+    }
+
+    #[Test]
+    public function a_slow_5xx_holds_every_send_even_without_a_retry_after()
+    {
+        config(['larabug.retry_buffer.slow_answer' => 0.02]);
+
+        $client = $this->client([$this->slowAnswer(new Response(503))]);
+
+        $client->reportCommands([['command' => 'inspire']]);
+
+        $this->assertCount(1, $this->kept());
+        $this->assertEqualsWithDelta(time() + 30, RetryBuffer::fromConfig()->pausedUntil(), 1);
+    }
+
+    #[Test]
+    public function an_answer_in_good_time_holds_nothing()
+    {
+        $client = $this->client([new Response(200), new Response(200)]);
+
+        $client->reportCommands([['command' => 'inspire']]);
+        $client->reportCommands([['command' => 'inspire']]);
+
+        $this->assertCount(2, $this->sent);
+        $this->assertSame(0, RetryBuffer::fromConfig()->pausedUntil());
+    }
+
+    #[Test]
+    public function slow_answers_are_not_counted_when_the_threshold_is_zero()
+    {
+        config(['larabug.retry_buffer.slow_answer' => 0]);
+
+        $client = $this->client([$this->slowAnswer(new Response(200)), new Response(200)]);
+
+        $client->reportCommands([['command' => 'inspire']]);
+        $client->reportCommands([['command' => 'inspire']]);
+
+        $this->assertCount(2, $this->sent);
+        $this->assertSame(0, RetryBuffer::fromConfig()->pausedUntil());
+    }
+
+    #[Test]
+    public function once_a_pause_has_run_out_one_send_finds_out_while_the_others_are_held_back()
+    {
+        $this->pauseUntil(time() - 1);
+
+        $heldBackDuringTheProbe = null;
+
+        $client = $this->client([
+            function () use (&$heldBackDuringTheProbe) {
+                $heldBackDuringTheProbe = RetryBuffer::fromConfig()->isPaused();
+
+                return new Response(200);
+            },
+        ]);
+
+        $client->reportCommands([['command' => 'inspire']]);
+
+        $this->assertTrue($heldBackDuringTheProbe);
+        $this->assertCount(1, $this->sent);
+        $this->assertSame(0, RetryBuffer::fromConfig()->pausedUntil());
+    }
+
+    #[Test]
+    public function a_probe_that_cannot_reach_the_server_holds_every_send_again()
+    {
+        $this->pauseUntil(time() - 1);
+
+        $client = $this->client([$this->connectionFailure()]);
+
+        $client->reportCommands([['command' => 'inspire']]);
+        $client->reportCommands([['command' => 'schedule:run']]);
+
+        $this->assertCount(1, $this->sent);
+        $this->assertCount(2, $this->kept());
+        $this->assertEqualsWithDelta(time() + 30, RetryBuffer::fromConfig()->pausedUntil(), 1);
+    }
+
+    #[Test]
+    public function a_probe_that_is_answered_slowly_holds_every_send_again()
+    {
+        config(['larabug.retry_buffer.slow_answer' => 0.02]);
+
+        $this->pauseUntil(time() - 1);
+
+        $client = $this->client([$this->slowAnswer(new Response(200))]);
+
+        $client->reportCommands([['command' => 'inspire']]);
+        $client->reportCommands([['command' => 'schedule:run']]);
+
+        $this->assertCount(1, $this->sent);
+        $this->assertCount(1, $this->kept());
+        $this->assertEqualsWithDelta(time() + 30, RetryBuffer::fromConfig()->pausedUntil(), 1);
+    }
+
+    #[Test]
+    public function a_probe_refused_in_good_time_holds_nobody_back()
+    {
+        $this->pauseUntil(time() - 1);
+
+        $client = $this->client([new Response(422), new Response(200)]);
+
+        $client->reportCommands([['command' => 'inspire']]);
+        $client->reportCommands([['command' => 'schedule:run']]);
+
+        $this->assertCount(2, $this->sent);
+        $this->assertSame([], $this->kept());
+    }
+
+    #[Test]
+    public function a_refusal_in_good_time_does_not_cut_short_a_wait_the_server_asked_for()
+    {
+        $client = $this->client([
+            new Response(503, ['Retry-After' => '300']),
+            new Response(403),
+        ]);
+
+        $client->reportCommands([['command' => 'inspire']]);
+        $client->report(['type' => 'cve_scan', 'composer_lock' => []]);
+
+        $this->assertCount(2, $this->sent);
+        $this->assertEqualsWithDelta(time() + 300, RetryBuffer::fromConfig()->pausedUntil(), 1);
+    }
+
+    #[Test]
+    public function a_flush_stops_at_a_slow_answer_and_keeps_the_rest()
+    {
+        config(['larabug.retry_buffer.slow_answer' => 0.02]);
+
+        $this->writeEntry(time() - 20, ['type' => 'logs_batch', 'number' => 1]);
+        $this->writeEntry(time() - 10, ['type' => 'logs_batch', 'number' => 2]);
+
+        $client = $this->client([$this->slowAnswer(new Response(200))]);
+
+        $result = RetryBuffer::fromConfig()->flush($client);
+
+        $this->assertSame(1, $result->sent);
+        $this->assertSame(1, $result->remaining);
+        $this->assertSame(FlushStop::Slow, $result->stoppedBy);
+        $this->assertSame([2], array_column($this->kept(), 'number'));
+        $this->assertEqualsWithDelta(time() + 30, RetryBuffer::fromConfig()->pausedUntil(), 1);
+    }
+
+    #[Test]
     public function a_long_retry_after_is_capped_at_ten_minutes()
     {
         $client = $this->client([new Response(503, ['Retry-After' => '86400'])]);
@@ -760,6 +935,27 @@ class RetryBufferTest extends TestCase
         $stack->push(Middleware::history($this->sent));
 
         return new Client($login, 'project-key', new GuzzleClient(['handler' => $stack]));
+    }
+
+    /**
+     * An answer that takes longer than the 20 ms the tests above set as slow.
+     */
+    protected function slowAnswer(Response $response): callable
+    {
+        return function () use ($response) {
+            usleep(30_000);
+
+            return $response;
+        };
+    }
+
+    protected function pauseUntil(int $until): void
+    {
+        if (! is_dir($this->retryBufferPath)) {
+            mkdir($this->retryBufferPath, 0775, true);
+        }
+
+        file_put_contents("{$this->retryBufferPath}/.retry-after", (string) $until);
     }
 
     protected function connectionFailure(): ConnectException
