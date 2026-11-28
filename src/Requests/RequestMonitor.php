@@ -312,7 +312,7 @@ class RequestMonitor implements RecordsMail
      */
     public function recordCacheEvent(array $event): void
     {
-        if (count($this->cache) >= $this->maxCacheEvents) {
+        if (! $this->hasRoomForCacheEvents()) {
             return;
         }
 
@@ -322,6 +322,11 @@ class RequestMonitor implements RecordsMail
         $event['start_ms'] = $this->startedAtMs((float) ($event['duration_ms'] ?? 0));
 
         $this->cache[] = $event;
+    }
+
+    public function hasRoomForCacheEvents(): bool
+    {
+        return count($this->cache) < $this->maxCacheEvents;
     }
 
     /**

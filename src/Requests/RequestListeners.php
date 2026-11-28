@@ -139,6 +139,18 @@ class RequestListeners
      */
     private function recordCacheEvent(string $op, object $event): void
     {
+        // Templating a key is the expensive part of a cache event, and it
+        // happens inside the request. Not paid for a request nobody will
+        // see, nor for an event past the cap: the counters above say enough
+        // about both.
+        if (! $this->sampler->decided()) {
+            return;
+        }
+
+        if (! $this->monitor->hasRoomForCacheEvents()) {
+            return;
+        }
+
         $this->monitor->recordCacheEvent([
             'op' => $op,
             'key_prefix' => $this->cacheKey((string) ($event->key ?? '')),
