@@ -15,6 +15,8 @@ class CveRequestTriggerTest extends TestCase
 
     protected string $npmDirectory;
 
+    protected string $settledPath;
+
     public function setUp(): void
     {
         parent::setUp();
@@ -24,6 +26,8 @@ class CveRequestTriggerTest extends TestCase
 
         $this->npmDirectory = sys_get_temp_dir() . '/larabug-trigger-npm-' . uniqid();
         mkdir($this->npmDirectory);
+
+        $this->settledPath = sys_get_temp_dir() . '/larabug-trigger-settled-' . uniqid();
 
         $this->app['config']['larabug.cve.enabled'] = true;
         $this->app['config']['larabug.cve.trigger'] = 'both';
@@ -46,6 +50,10 @@ class CveRequestTriggerTest extends TestCase
         }
 
         rmdir($this->npmDirectory);
+
+        if (is_file($this->settledPath)) {
+            unlink($this->settledPath);
+        }
 
         $this->resetStaticState();
 
@@ -79,6 +87,49 @@ class CveRequestTriggerTest extends TestCase
         ]));
     }
 
+    /**
+     * Old enough that what stat says about the lockfiles can be trusted: one
+     * written within the last second is always hashed.
+     */
+    protected function ageLockfiles(int $seconds = 60): void
+    {
+        touch($this->lockPath, time() - $seconds);
+
+        foreach (glob("{$this->npmDirectory}/*") as $file) {
+            touch($file, time() - $seconds);
+        }
+    }
+
+    /**
+     * @return array{0: ComposerLockScanner, 1: NpmLockScanner}
+     */
+    protected function scannersCountingHashes(): array
+    {
+        $composerScanner = new class () extends ComposerLockScanner {
+            public int $hashes = 0;
+
+            public function hash(?string $lockPath = null): ?string
+            {
+                $this->hashes++;
+
+                return parent::hash($lockPath);
+            }
+        };
+
+        $npmScanner = new class ($this->npmDirectory) extends NpmLockScanner {
+            public int $hashes = 0;
+
+            public function hash(): ?string
+            {
+                $this->hashes++;
+
+                return parent::hash();
+            }
+        };
+
+        return [$composerScanner, $npmScanner];
+    }
+
     protected function trigger(CveClient $client): RequestTrigger
     {
         return new RequestTrigger(
@@ -86,6 +137,7 @@ class CveRequestTriggerTest extends TestCase
             new ComposerLockScanner(),
             new NpmLockScanner($this->npmDirectory),
             $client,
+            $this->settledPath,
         );
     }
 
@@ -104,6 +156,18 @@ class CveRequestTriggerTest extends TestCase
     public function it_does_nothing_when_the_trigger_is_scheduled_only()
     {
         $this->app['config']['larabug.cve.trigger'] = 'schedule';
+
+        $client = new CveClient();
+        $this->trigger($client)->maybeTrigger();
+
+        $client->assertRequestsSent(0);
+    }
+
+    #[Test]
+    public function it_does_nothing_while_the_server_is_being_left_alone()
+    {
+        mkdir($this->retryBufferPath, 0775, true);
+        file_put_contents("{$this->retryBufferPath}/.retry-after", (string) (time() + 30));
 
         $client = new CveClient();
         $this->trigger($client)->maybeTrigger();
@@ -443,10 +507,212 @@ class CveRequestTriggerTest extends TestCase
         };
 
         $second = new CveClient();
-        (new RequestTrigger($this->app['cache']->store('array'), $composerScanner, $npmScanner, $second))->maybeTrigger();
+        (new RequestTrigger($this->app['cache']->store('array'), $composerScanner, $npmScanner, $second, $this->settledPath))->maybeTrigger();
 
         $second->assertRequestsSent(0);
         $this->assertSame(0, $composerScanner->scans);
         $this->assertSame(0, $npmScanner->scans);
+    }
+
+    #[Test]
+    public function it_does_not_hash_lockfiles_that_look_the_same_as_when_their_scan_landed()
+    {
+        $this->writeNpmLock('4.17.21');
+        $this->ageLockfiles();
+
+        $first = new CveClient();
+        $this->trigger($first)->maybeTrigger();
+        $first->assertRequestsSent(1);
+
+        [$composerScanner, $npmScanner] = $this->scannersCountingHashes();
+
+        foreach (range(1, 3) as $ignored) {
+            $this->resetStaticState();
+
+            $next = new CveClient();
+            (new RequestTrigger($this->app['cache']->store('array'), $composerScanner, $npmScanner, $next, $this->settledPath))->maybeTrigger();
+
+            $next->assertRequestsSent(0);
+        }
+
+        $this->assertSame(0, $composerScanner->hashes);
+        $this->assertSame(0, $npmScanner->hashes);
+    }
+
+    #[Test]
+    public function it_hashes_a_lockfile_written_within_the_last_second()
+    {
+        $first = new CveClient();
+        $this->trigger($first)->maybeTrigger();
+        $first->assertRequestsSent(1);
+
+        $this->resetStaticState();
+
+        [$composerScanner, $npmScanner] = $this->scannersCountingHashes();
+
+        $second = new CveClient();
+        (new RequestTrigger($this->app['cache']->store('array'), $composerScanner, $npmScanner, $second, $this->settledPath))->maybeTrigger();
+
+        $second->assertRequestsSent(0);
+        $this->assertSame(1, $composerScanner->hashes);
+    }
+
+    #[Test]
+    public function it_fires_again_when_a_lockfile_that_looked_settled_changes()
+    {
+        $this->ageLockfiles();
+
+        $first = new CveClient();
+        $this->trigger($first)->maybeTrigger();
+        $first->assertRequestsSent(1);
+
+        $this->resetStaticState();
+        $this->writeLock('v12.0.2');
+        $this->ageLockfiles(30);
+
+        $second = new CveClient();
+        $this->trigger($second)->maybeTrigger();
+
+        $second->assertRequestsSent(1);
+        $this->assertSame(['laravel/framework' => 'v12.0.2'], $second->lastRequest()['composer_lock']['packages']);
+    }
+
+    #[Test]
+    public function it_fires_again_once_the_throttle_has_expired_for_lockfiles_that_look_the_same()
+    {
+        $this->ageLockfiles();
+
+        $first = new CveClient();
+        $this->trigger($first)->maybeTrigger();
+        $first->assertRequestsSent(1);
+
+        $this->resetStaticState();
+        $this->travel(25)->hours();
+
+        $second = new CveClient();
+        $this->trigger($second)->maybeTrigger();
+
+        $second->assertRequestsSent(1);
+    }
+
+    #[Test]
+    public function it_does_not_hash_the_lockfiles_while_a_403_backoff_holds()
+    {
+        $this->ageLockfiles();
+
+        $rejected = new CveClient(403, '{"error":"feature_disabled","feature":"cve"}');
+        $this->trigger($rejected)->maybeTrigger();
+        $rejected->assertRequestsSent(1);
+
+        $this->resetStaticState();
+
+        [$composerScanner, $npmScanner] = $this->scannersCountingHashes();
+
+        $next = new CveClient();
+        (new RequestTrigger($this->app['cache']->store('array'), $composerScanner, $npmScanner, $next, $this->settledPath))->maybeTrigger();
+
+        $next->assertRequestsSent(0);
+        $this->assertSame(0, $composerScanner->hashes);
+    }
+
+    #[Test]
+    public function it_tries_again_once_the_backoff_has_lapsed_for_lockfiles_that_look_the_same()
+    {
+        $this->ageLockfiles();
+
+        $rejected = new CveClient(403, '{"error":"feature_disabled","feature":"cve"}');
+        $this->trigger($rejected)->maybeTrigger();
+
+        $this->resetStaticState();
+        $this->travel(61)->minutes();
+
+        $retry = new CveClient();
+        $this->trigger($retry)->maybeTrigger();
+
+        $retry->assertRequestsSent(1);
+    }
+
+    #[Test]
+    public function it_keeps_retrying_after_a_server_error_for_lockfiles_that_look_the_same()
+    {
+        $this->ageLockfiles();
+
+        $down = new CveClient(500, 'upstream is having a moment');
+        $this->trigger($down)->maybeTrigger();
+        $down->assertRequestsSent(1);
+
+        $this->resetStaticState();
+
+        $retry = new CveClient();
+        $this->trigger($retry)->maybeTrigger();
+
+        $retry->assertRequestsSent(1);
+    }
+
+    #[Test]
+    public function it_settles_lockfiles_whose_scan_landed_from_another_server()
+    {
+        $this->ageLockfiles();
+
+        $first = new CveClient();
+        $this->trigger($first)->maybeTrigger();
+        $first->assertRequestsSent(1);
+
+        // What another server leaves behind: the sent hashes in the cache, without a settled mark on this disk.
+        unlink($this->settledPath);
+
+        [$composerScanner, $npmScanner] = $this->scannersCountingHashes();
+
+        foreach (range(1, 2) as $ignored) {
+            $this->resetStaticState();
+
+            $next = new CveClient();
+            (new RequestTrigger($this->app['cache']->store('array'), $composerScanner, $npmScanner, $next, $this->settledPath))->maybeTrigger();
+
+            $next->assertRequestsSent(0);
+        }
+
+        $this->assertSame(1, $composerScanner->hashes);
+    }
+
+    #[Test]
+    public function a_disk_that_cannot_be_written_leaves_the_lockfiles_hashed_as_before()
+    {
+        $this->settledPath = '/dev/null/larabug/cve-settled';
+        $this->ageLockfiles();
+
+        $first = new CveClient();
+        $this->trigger($first)->maybeTrigger();
+        $first->assertRequestsSent(1);
+
+        $this->resetStaticState();
+
+        [$composerScanner, $npmScanner] = $this->scannersCountingHashes();
+
+        $second = new CveClient();
+        (new RequestTrigger($this->app['cache']->store('array'), $composerScanner, $npmScanner, $second, $this->settledPath))->maybeTrigger();
+
+        $second->assertRequestsSent(0);
+        $this->assertSame(1, $composerScanner->hashes);
+    }
+
+    #[Test]
+    public function the_settled_mark_goes_into_the_applications_storage_by_default()
+    {
+        $this->ageLockfiles();
+
+        $path = storage_path('larabug/cve-settled');
+        @unlink($path);
+
+        (new RequestTrigger(
+            $this->app['cache']->store('array'),
+            new ComposerLockScanner(),
+            new NpmLockScanner($this->npmDirectory),
+            new CveClient(),
+        ))->maybeTrigger();
+
+        $this->assertFileExists($path);
+
+        unlink($path);
     }
 }

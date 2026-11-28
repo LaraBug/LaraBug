@@ -79,17 +79,27 @@ class NpmLockScanner
      */
     public function hash(): ?string
     {
+        $path = $this->path();
+
+        if ($path === null) {
+            return null;
+        }
+
+        $hash = hash_file('sha256', $path);
+
+        return $hash === false ? null : $hash;
+    }
+
+    /**
+     * The lockfile scan() and hash() read, null when there is none to read.
+     */
+    public function path(): ?string
+    {
         $directory = $this->directory();
 
         $lockfile = $this->locate($directory);
 
-        if ($lockfile === null) {
-            return null;
-        }
-
-        $hash = hash_file('sha256', "{$directory}/{$lockfile}");
-
-        return $hash === false ? null : $hash;
+        return $lockfile === null ? null : "{$directory}/{$lockfile}";
     }
 
     protected function directory(): string

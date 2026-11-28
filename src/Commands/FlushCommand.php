@@ -52,6 +52,7 @@ class FlushCommand extends Command
             FlushStop::Locked => $this->comment('[LaraBug] Another process is sending them right now'),
             FlushStop::Paused => $this->warn('[LaraBug] The server was down or asked to wait, nothing is sent until '.date('H:i:s', $retryBuffer->pausedUntil())),
             FlushStop::Unreachable => $this->warn('[LaraBug] Could not reach the server, the rest is kept for the next run'),
+            FlushStop::Slow => $this->warn('[LaraBug] The server is answering slowly, the rest is kept for the next run'),
             FlushStop::ServerError => $this->warn('[LaraBug] The server answered with an error again, the rest is kept for the next run'),
             FlushStop::RateLimited => $this->warn('[LaraBug] This project is sending faster than its plan\'s rate limit, the rest is kept for the next run'),
             FlushStop::Limit, null => null,

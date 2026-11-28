@@ -221,6 +221,13 @@ return [
     | keeps its own buffer, so the path must be on local disk, writable by
     | both the web server and the scheduler's user.
     |
+    | A send holds its worker until the server has answered, so a server in
+    | trouble is given one worker at a time: after a send that got no answer,
+    | or one that took slow_answer seconds or longer, every process keeps its
+    | events here for thirty seconds without sending, and then one of them
+    | finds out whether the server is back. Set slow_answer to 0 to only count
+    | a server that does not answer at all.
+    |
     */
     'retry_buffer' => [
         'enabled' => env('LB_RETRY_BUFFER_ENABLED', true),
@@ -228,6 +235,7 @@ return [
         'max_events' => env('LB_RETRY_BUFFER_MAX_EVENTS', 500),
         'max_bytes' => env('LB_RETRY_BUFFER_MAX_BYTES', 5 * 1024 * 1024),
         'max_age' => env('LB_RETRY_BUFFER_MAX_AGE', 86400),
+        'slow_answer' => env('LB_RETRY_BUFFER_SLOW_ANSWER', 2),
         'schedule' => env('LB_RETRY_BUFFER_SCHEDULE', true),
     ],
 

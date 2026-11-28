@@ -16,6 +16,9 @@ enum FlushStop: string
     /** The server could not be reached. */
     case Unreachable = 'unreachable';
 
+    /** The server answered, but took so long that the rest waits for it to recover. */
+    case Slow = 'slow';
+
     /** The server answered with a 5xx again. */
     case ServerError = 'server_error';
 
